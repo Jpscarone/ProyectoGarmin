@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Sincronizar Garmin | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Garmin</p>
+            <h1>Sincronizacion manual de actividades</h1>
+            <p class="text-muted">La sincronizacion usa credenciales configuradas en `.env` y guarda tokens en `GARMIN_TOKEN_DIR`.</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="/activities">Ver actividades</a>
+            <a class="button button-secondary" href="/sync/garmin/health">Sincronizar salud</a>
+        </div>
+    </div>
+
+    <div class="actions-inline">
+        <form method="post" action="/sync/garmin/activities">
+            <div class="form-actions">
+                <button class="button" type="submit">Sincronizar actividades recientes</button>
+            </div>
+        </form>
+        <form method="post" action="/sync/garmin/all">
+            <div class="form-actions">
+                <button class="button button-secondary" type="submit">Sincronizar todo</button>
+            </div>
+        </form>
+    </div>
+
+    {% if needs_mfa %}
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Garmin MFA</p>
+                <h2>Ingresar codigo de verificacion</h2>
+                <p class="text-muted">Si Garmin pidio MFA, ingresalo aqui para continuar la sincronizacion actual.</p>
+            </div>
+        </div>
+        <form method="post" action="/sync/garmin/activities/mfa" class="form-grid">
+            <label class="field">
+                <span>Codigo MFA</span>
+                <input name="mfa_code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+            </label>
+            <div class="form-actions">
+                <button class="button" type="submit">Continuar sync con MFA</button>
+            </div>
+        </form>
+    </section>
+    {% endif %}
+
+    {% if not garmin_enabled %}
+    <p class="empty-state">Garmin esta deshabilitado. Completa `GARMIN_ENABLED=true` en `.env` antes de sincronizar.</p>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+    <div class="detail-grid sync-summary">
+        <div class="detail-item"><strong>Atleta:</strong> {{ result.athlete_name }}</div>
+        <div class="detail-item"><strong>Encontradas:</strong> {{ result.found }}</div>
+        <div class="detail-item"><strong>Insertadas:</strong> {{ result.inserted }}</div>
+        <div class="detail-item"><strong>Actualizadas:</strong> {{ result.existing }}</div>
+    </div>
+
+    {% if result.errors %}
+    <div class="alert alert-error">
+        <strong>Errores:</strong>
+        <ul class="flat-list">
+            {% for item in result.errors %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    {% if sync_all_result %}
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Sincronizacion completa</p>
+                <h2>Resumen</h2>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Actividades nuevas:</strong> {{ sync_all_result.activities.inserted }}</div>
+            <div class="detail-item"><strong>Actividades actualizadas:</strong> {{ sync_all_result.activities.existing }}</div>
+            <div class="detail-item"><strong>Salud creada:</strong> {{ sync_all_result.health.created }}</div>
+            <div class="detail-item"><strong>Salud actualizada:</strong> {{ sync_all_result.health.updated }}</div>
+            <div class="detail-item"><strong>Clima creado:</strong> {{ sync_all_result.weather.created }}</div>
+            <div class="detail-item"><strong>Clima actualizado:</strong> {{ sync_all_result.weather.updated }}</div>
+            <div class="detail-item detail-item-full"><strong>Vinculacion:</strong> {{ sync_all_result.match_summary }}</div>
+        </div>
+    </section>
+    {% endif %}
+</section>
+{% endblock %}

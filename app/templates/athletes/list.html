@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Atletas | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Atletas</p>
+            <h1>Listado de atletas</h1>
+        </div>
+        <a class="button" href="/athletes/create">Nuevo atleta</a>
+    </div>
+
+    {% if athletes %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Altura</th>
+                    <th>Peso</th>
+                    <th>FTP</th>
+                    <th>VO2max</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for athlete in athletes %}
+                <tr>
+                    <td>{{ athlete.name }}</td>
+                    <td>{{ athlete.height_cm or "-" }}</td>
+                    <td>{{ athlete.weight_kg or "-" }}</td>
+                    <td>{{ athlete.cycling_ftp or "-" }}</td>
+                    <td>{{ athlete.vo2max or "-" }}</td>
+                    <td class="actions-inline">
+                        <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar</a>
+                        <button class="button button-danger" type="button" onclick='deleteAthlete({{ athlete.id }}, {{ athlete.name | tojson }})'>Eliminar</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay atletas cargados.</p>
+    {% endif %}
+</section>
+
+<script>
+async function deleteAthlete(athleteId, athleteName) {
+    const confirmed = window.confirm(`Eliminar a ${athleteName}?`);
+    if (!confirmed) return;
+
+    const response = await fetch(`/athletes/${athleteId}`, {
+        method: "DELETE",
+        headers: {
+            "Accept": "application/json"
+        }
+    });
+
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el atleta.");
+        return;
+    }
+
+    window.location.reload();
+}
+</script>
+{% endblock %}

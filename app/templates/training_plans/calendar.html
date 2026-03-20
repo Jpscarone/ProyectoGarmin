@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+
+{% block title %}Calendario | {{ training_plan.name }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Planes</p>
+            <h1>{{ training_plan.name }}</h1>
+            <p class="text-muted">Atleta: {{ training_plan.athlete.name }}{% if training_plan.goal %} | Objetivo: {{ training_plan.goal.name }}{% endif %}</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}">Ver lista</a>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <div class="training-plan-overview">
+        <div class="detail-item"><strong>Inicio:</strong> {{ training_plan.start_date or "-" }}</div>
+        <div class="detail-item"><strong>Fin:</strong> {{ training_plan.end_date or "-" }}</div>
+        <div class="detail-item"><strong>Estado:</strong> {{ training_plan.status or "-" }}</div>
+        <div class="detail-item training-plan-overview-full"><strong>Descripcion:</strong> {{ training_plan.description or "-" }}</div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Calendario</p>
+            <h2>{{ calendar_month_label }}</h2>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/calendar?month={{ previous_month }}">Mes anterior</a>
+            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/calendar?month={{ next_month }}">Mes siguiente</a>
+        </div>
+    </div>
+
+    <div class="calendar-grid">
+        <div class="calendar-weekday">Lun</div>
+        <div class="calendar-weekday">Mar</div>
+        <div class="calendar-weekday">Mie</div>
+        <div class="calendar-weekday">Jue</div>
+        <div class="calendar-weekday">Vie</div>
+        <div class="calendar-weekday">Sab</div>
+        <div class="calendar-weekday">Dom</div>
+
+        {% for week in calendar_weeks %}
+            {% for cell in week %}
+            <article
+                class="calendar-cell{% if not cell.is_current_month %} calendar-cell-muted{% endif %}{% if cell.is_today %} calendar-cell-today{% endif %}{% if cell.is_selected %} calendar-cell-selected{% endif %}{% if cell.training_day %} calendar-cell-filled{% endif %} calendar-cell-interactive"
+                data-date="{{ cell.date.isoformat() }}"
+                onclick="selectCalendarDay('{{ cell.date.isoformat() }}')"
+                ondblclick="openCalendarDetail(event, '{{ cell.session_summaries[0].id if cell.session_summaries|length == 1 else '' }}', '{{ cell.training_day.id if cell.training_day else '' }}')"
+            >
+                <div class="calendar-cell-header">
+                    <span class="calendar-day-link">{{ cell.date.day }}</span>
+                    {% if cell.is_today %}
+                    <span class="calendar-pill calendar-pill-today">Hoy</span>
+                    {% endif %}
+                    {% if cell.training_day %}
+                    <span class="calendar-pill">Dia</span>
+                    {% else %}
+                    <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day" class="calendar-inline-form" onclick="event.stopPropagation()">
+                        <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
+                        <input type="hidden" name="next_action" value="quick">
+                        <button class="calendar-add-button" type="submit" title="Crear dia y abrir sesion rapida">+</button>
+                    </form>
+                    {% endif %}
+                </div>
+
+                {% if cell.training_day %}
+                <div class="calendar-cell-body">
+                    {% for summary in cell.session_summaries %}
+                    <div class="calendar-session-chip">
+                        <strong>{{ summary.summary_title or summary.name }}</strong>
+                    </div>
+                    {% endfor %}
+                    {% if cell.overflow_count %}
+                    <p class="calendar-more">+{{ cell.overflow_count }} sesiones mas</p>
+                    {% endif %}
+                    <div class="calendar-state-row">
+                        {% if cell.group_count %}
+                        <span class="calendar-state-badge">Grupos: {{ cell.group_count }}</span>
+                        {% endif %}
+                        {% if cell.matched_count %}
+                        <span class="calendar-state-badge calendar-state-badge-success">Vinculadas: {{ cell.matched_count }}</span>
+                        {% endif %}
+                        {% if cell.analyzed_count %}
+                        <span class="calendar-state-badge calendar-state-badge-info">Analisis: {{ cell.analyzed_count }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+                {% else %}
+                <div class="calendar-cell-body"></div>
+                {% endif %}
+            </article>
+            {% endfor %}
+        {% endfor %}
+    </div>
+</section>
+
+<section class="panel">
+    <div id="calendar-day-panels">
+        {% for week in calendar_weeks %}
+            {% for cell in week %}
+            <div class="calendar-day-panel{% if cell.is_selected %} is-active{% endif %}" data-date="{{ cell.date.isoformat() }}">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">Dia seleccionado</p>
+                        <h2>{{ cell.date }}</h2>
+                        {% if cell.training_day %}
+                        <p class="text-muted">{{ day_type_label(cell.training_day.day_type) }}{% if cell.training_day.day_notes %} | {{ cell.training_day.day_notes }}{% endif %}</p>
+                        {% else %}
+                        <p class="text-muted">Todavia no hay un dia creado para esta fecha.</p>
+                        {% endif %}
+                    </div>
+                    <div class="actions-inline">
+                        {% if cell.training_day %}
+                        <a class="button button-secondary" href="/training_days/{{ cell.training_day.id }}?return_to=calendar">Ver dia</a>
+                        <a class="button button-secondary" href="/training_days/{{ cell.training_day.id }}/edit?return_to=calendar">Editar dia</a>
+                        <button class="button button-danger" type="button" onclick="deleteTrainingDayFromCalendar(event, {{ cell.training_day.id }}, '{{ cell.date.isoformat() }}')">Eliminar dia</button>
+                        {% else %}
+                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day" class="actions-inline">
+                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
+                            <input type="hidden" name="next_action" value="quick">
+                            <button class="button" type="submit">Crear dia y sesion rapida</button>
+                        </form>
+                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day" class="actions-inline">
+                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
+                            <input type="hidden" name="next_action" value="structured">
+                            <button class="button button-secondary" type="submit">Crear dia y sesion por bloques</button>
+                        </form>
+                        <a class="button button-secondary" href="/training_days/create?training_plan_id={{ training_plan.id }}&day_date={{ cell.date.isoformat() }}&return_to=/training_plans/{{ training_plan.id }}/calendar?month={{ visible_month }}%26selected_date={{ cell.date.isoformat() }}">Editar datos del dia</a>
+                        {% endif %}
+                    </div>
+                </div>
+
+                {% if cell.training_day %}
+                <div class="calendar-day-summary-grid">
+                    <div class="detail-item"><strong>Tipo:</strong> {{ day_type_label(cell.training_day.day_type) }}</div>
+                    <div class="detail-item"><strong>Notas:</strong> {{ cell.training_day.day_notes or "-" }}</div>
+                </div>
+
+                {% if cell.training_day.session_groups %}
+                <div class="calendar-day-block">
+                    <h3>Grupos del dia</h3>
+                    <div class="session-stack">
+                        {% for group in cell.training_day.session_groups %}
+                        <article class="session-card">
+                            <div>
+                                <strong>#{{ group.group_order }} {{ group.name }}</strong>
+                                <p class="text-muted">{{ group_type_label(group.group_type) }}{% if group.notes %} | {{ group.notes }}{% endif %}</p>
+                                {% if group.planned_sessions %}
+                                <div class="calendar-mini-list">
+                                    {% for planned_session in group.planned_sessions %}
+                                    <p>
+                                        <strong>#{{ planned_session.session_order }} {{ planned_session.name }}</strong>
+                                        | {{ sport_label(planned_session.sport_type) }}
+                                        {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
+                                        {% if planned_session.session_type %}| {{ session_type_label(planned_session.session_type) }}{% endif %}
+                                        {% if planned_session.planned_session_steps %}| Con pasos{% endif %}
+                                        {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}| Actividad vinculada{% endif %}
+                                        {% if planned_session.analysis_reports %}| Con analisis{% endif %}
+                                    </p>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <p class="text-muted">Sin sesiones en este grupo.</p>
+                                {% endif %}
+                            </div>
+                            <div class="actions-inline">
+                                <a class="button button-secondary" href="/session_groups/{{ group.id }}/edit">Editar grupo</a>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="calendar-day-block">
+                    <h3>Sesiones del dia</h3>
+                    {% if cell.training_day.planned_sessions %}
+                    <div class="session-stack">
+                        {% for planned_session in cell.training_day.planned_sessions %}
+                        <article class="session-card">
+                            <div>
+                                <strong>#{{ planned_session.session_order }} {{ planned_session.name }}</strong>
+                                <p class="text-muted">
+                                    {{ sport_label(planned_session.sport_type) }}
+                                    {% if planned_session.session_type %}| {{ session_type_label(planned_session.session_type) }}{% endif %}
+                                    {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
+                                    {% if planned_session.session_group %}| Grupo: {{ planned_session.session_group.name }}{% endif %}
+                                </p>
+                                <div class="calendar-meta-row">
+                                    <span class="calendar-state-badge">{% if planned_session.planned_session_steps %}Con pasos{% else %}Simple{% endif %}</span>
+                                    <span class="calendar-state-badge">{% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}Actividad vinculada{% else %}Sin actividad{% endif %}</span>
+                                    <span class="calendar-state-badge">{% if planned_session.analysis_reports %}Con analisis{% else %}Sin analisis{% endif %}</span>
+                                </div>
+                                <p>{{ planned_session.description_text or planned_session.target_notes or "Sin descripcion." }}</p>
+                            </div>
+                            <div class="actions-inline">
+                                <a class="button" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                                <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
+                                <button class="button button-danger" type="button" onclick="deletePlannedSessionFromCalendar(event, {{ planned_session.id }}, '{{ cell.date.isoformat() }}')">Eliminar</button>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p class="empty-state">Todavia no hay sesiones cargadas para este dia.</p>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="calendar-empty-actions">
+                    <p>Podes crear el dia directamente desde esta vista y seguir con la carga enseguida.</p>
+                    <div class="actions-inline">
+                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day">
+                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
+                            <input type="hidden" name="next_action" value="detail">
+                            <button class="button button-secondary" type="submit">Crear dia y ver detalle</button>
+                        </form>
+                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day">
+                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
+                            <input type="hidden" name="next_action" value="group">
+                            <button class="button button-secondary" type="submit">Crear dia y grupo</button>
+                        </form>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        {% endfor %}
+    </div>
+</section>
+
+<script>
+const calendarMonth = "{{ visible_month }}";
+const trainingPlanId = "{{ training_plan.id }}";
+const calendarScrollKey = `training-plan-calendar-scroll-${trainingPlanId}`;
+const todayDateKey = "{{ today_iso }}";
+
+function selectCalendarDay(dateKey) {
+    document.querySelectorAll(".calendar-cell").forEach((cell) => {
+        cell.classList.toggle("calendar-cell-selected", cell.dataset.date === dateKey);
+    });
+
+    document.querySelectorAll(".calendar-day-panel").forEach((panel) => {
+        panel.classList.toggle("is-active", panel.dataset.date === dateKey);
+    });
+
+    const nextUrl = `/training_plans/${trainingPlanId}/calendar?month=${calendarMonth}&selected_date=${dateKey}`;
+    window.history.replaceState({}, "", nextUrl);
+}
+
+function openCalendarDetail(event, plannedSessionId, trainingDayId) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (plannedSessionId) {
+        window.location.href = `/planned_sessions/${plannedSessionId}`;
+        return;
+    }
+
+    if (trainingDayId) {
+        window.location.href = `/training_days/${trainingDayId}?return_to=calendar`;
+    }
+}
+
+async function deletePlannedSessionFromCalendar(event, plannedSessionId, dateKey) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const confirmed = window.confirm("Eliminar esta sesion del dia?");
+    if (!confirmed) return;
+
+    const response = await fetch(`/planned_sessions/${plannedSessionId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar la sesion.");
+        return;
+    }
+
+    sessionStorage.setItem(calendarScrollKey, String(window.scrollY));
+    window.location.href = `/training_plans/${trainingPlanId}/calendar?month=${calendarMonth}&selected_date=${dateKey}`;
+}
+
+async function deleteTrainingDayFromCalendar(event, trainingDayId, dateKey) {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const confirmed = window.confirm("Eliminar este dia del plan?");
+    if (!confirmed) return;
+
+    const response = await fetch(`/training_days/${trainingDayId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el dia.");
+        return;
+    }
+
+    sessionStorage.setItem(calendarScrollKey, String(window.scrollY));
+    window.location.href = `/training_plans/${trainingPlanId}/calendar?month=${calendarMonth}&selected_date=${dateKey}`;
+}
+
+window.addEventListener("load", () => {
+    const savedScrollY = sessionStorage.getItem(calendarScrollKey);
+    if (savedScrollY) {
+        sessionStorage.removeItem(calendarScrollKey);
+        window.scrollTo({ top: Number(savedScrollY), behavior: "auto" });
+        return;
+    }
+
+    const todayCell = document.querySelector(`.calendar-cell[data-date="${todayDateKey}"]`);
+    if (!todayCell) return;
+
+    todayCell.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+});
+</script>
+{% endblock %}

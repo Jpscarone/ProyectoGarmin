@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}{{ activity.activity_name or 'Actividad' }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Actividad</p>
+            <h1>{{ activity.activity_name or 'Actividad Garmin' }}</h1>
+            <p class="text-muted">{{ sport_label(activity.sport_type) }} | {{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</p>
+        </div>
+        <div class="actions-inline">
+            <form method="post" action="/match/activity/{{ activity.id }}">
+                <button class="button" type="submit">Recalcular vinculacion</button>
+            </form>
+            <form method="post" action="/analysis/activity/{{ activity.id }}">
+                <button class="button button-secondary" type="submit">Analizar actividad</button>
+            </form>
+            <a class="button button-secondary" href="/analysis/bundle/activity/{{ activity.id }}">Generar bundle</a>
+            <a class="button button-secondary" href="/analysis/bundle/activity/{{ activity.id }}#chatgpt">Ver resumen para ChatGPT</a>
+            <a class="button button-secondary" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
+            <a class="button button-secondary" href="/activities">Volver a actividades</a>
+        </div>
+    </div>
+
+    {% if weather_status %}
+    <div class="alert alert-info">{{ weather_status }}</div>
+    {% endif %}
+    {% if match_status %}
+    <div class="alert alert-info">{{ match_status }}</div>
+    {% endif %}
+    {% if analysis_status %}
+    <div class="alert alert-info">{{ analysis_status }}</div>
+    {% endif %}
+
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Garmin ID:</strong> {{ activity.garmin_activity_id }}</div>
+        <div class="detail-item"><strong>Atleta:</strong> {{ activity.athlete.name if activity.athlete else activity.athlete_id }}</div>
+        <div class="detail-item"><strong>Inicio:</strong> {{ activity.start_time.strftime('%Y-%m-%d %H:%M:%S') if activity.start_time else '-' }}</div>
+        <div class="detail-item"><strong>Fin:</strong> {{ activity.end_time.strftime('%Y-%m-%d %H:%M:%S') if activity.end_time else '-' }}</div>
+        <div class="detail-item"><strong>Duracion:</strong> {{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</div>
+        <div class="detail-item"><strong>Tiempo en movimiento:</strong> {{ duration_seconds_hhmm(activity.moving_duration_sec) or '-' }}</div>
+        <div class="detail-item"><strong>Distancia:</strong> {{ distance_label_meters(activity.distance_m) }}</div>
+        <div class="detail-item"><strong>Desnivel +:</strong> {{ activity.elevation_gain_m or '-' }}</div>
+        <div class="detail-item"><strong>Desnivel -:</strong> {{ activity.elevation_loss_m or '-' }}</div>
+        <div class="detail-item"><strong>FC media/max:</strong> {{ activity.avg_hr or '-' }} / {{ activity.max_hr or '-' }}</div>
+        <div class="detail-item"><strong>Potencia media/max:</strong> {{ activity.avg_power or '-' }} / {{ activity.max_power or '-' }}</div>
+        <div class="detail-item"><strong>NP:</strong> {{ activity.normalized_power or '-' }}</div>
+        <div class="detail-item"><strong>Velocidad media/max:</strong> {{ activity.avg_speed_mps or '-' }} / {{ activity.max_speed_mps or '-' }}</div>
+        <div class="detail-item"><strong>Ritmo medio:</strong> {{ pace_mmss(activity.avg_pace_sec_km) or '-' }}</div>
+        <div class="detail-item"><strong>Cadencia media/max:</strong> {{ activity.avg_cadence or '-' }} / {{ activity.max_cadence or '-' }}</div>
+        <div class="detail-item"><strong>Carga de entrenamiento:</strong> {{ activity.training_load or '-' }}</div>
+        <div class="detail-item"><strong>TE aerobico/anaerobico:</strong> {{ activity.training_effect_aerobic or '-' }} / {{ activity.training_effect_anaerobic or '-' }}</div>
+        <div class="detail-item"><strong>Calorias:</strong> {{ activity.calories or '-' }}</div>
+        <div class="detail-item"><strong>Temperatura media:</strong> {{ activity.avg_temperature_c or '-' }}</div>
+        <div class="detail-item"><strong>Inicio lat/lon:</strong> {{ activity.start_lat or '-' }} / {{ activity.start_lon or '-' }}</div>
+        <div class="detail-item"><strong>Dispositivo:</strong> {{ activity.device_name or '-' }}</div>
+        <div class="detail-item"><strong>Clima:</strong> {{ 'Disponible' if activity.weather else 'No sincronizado' }}</div>
+        <div class="detail-item"><strong>Vinculacion:</strong> {{ match_method_label(activity.activity_match.match_method) if activity.activity_match else 'Sin vinculacion' }}</div>
+        <div class="detail-item"><strong>Confianza:</strong> {{ activity.activity_match.match_confidence if activity.activity_match else '-' }}</div>
+        <div class="detail-item detail-item-full"><strong>Sesion planificada:</strong>
+            {% if activity.activity_match and activity.activity_match.planned_session %}
+            <a href="/planned_sessions/{{ activity.activity_match.planned_session.id }}">{{ activity.activity_match.planned_session.name }}</a>
+            {% else %}
+            Sin sesion vinculada
+            {% endif %}
+        </div>
+        <details class="detail-item detail-item-full">
+            <summary><strong>JSON crudo de Garmin</strong></summary>
+            <pre class="raw-json">{{ activity.raw_summary_json or '-' }}</pre>
+        </details>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Analisis</p>
+            <h2>Ultimo reporte</h2>
+        </div>
+    </div>
+
+    {% if latest_report %}
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Estado:</strong> {{ analysis_status_label(latest_report.overall_status) }}</div>
+        <div class="detail-item"><strong>Score:</strong> {{ latest_report.overall_score if latest_report.overall_score is not none else '-' }}</div>
+        <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
+    </div>
+    <div class="actions-inline">
+        <a class="button" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay reporte de analisis para esta actividad.</p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Clima</p>
+            <h2>Clima historico</h2>
+        </div>
+    </div>
+
+    {% if activity.weather %}
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Proveedor:</strong> {{ activity.weather.provider_name }}</div>
+        <div class="detail-item"><strong>Temp inicio:</strong> {{ activity.weather.temperature_start_c or '-' }} C</div>
+        <div class="detail-item"><strong>Sensacion termica:</strong> {{ activity.weather.apparent_temperature_start_c or '-' }} C</div>
+        <div class="detail-item"><strong>Humedad:</strong> {{ activity.weather.humidity_start_pct or '-' }} %</div>
+        <div class="detail-item"><strong>Punto de rocio:</strong> {{ activity.weather.dew_point_start_c or '-' }} C</div>
+        <div class="detail-item"><strong>Viento inicio:</strong> {{ activity.weather.wind_speed_start_kmh or '-' }} km/h</div>
+        <div class="detail-item"><strong>Direccion del viento:</strong> {{ activity.weather.wind_direction_start_deg or '-' }} deg</div>
+        <div class="detail-item"><strong>Presion:</strong> {{ activity.weather.pressure_start_hpa or '-' }} hPa</div>
+        <div class="detail-item"><strong>Precipitacion inicio:</strong> {{ activity.weather.precipitation_start_mm or '-' }} mm</div>
+        <div class="detail-item"><strong>Temp min/max:</strong> {{ activity.weather.temperature_min_c or '-' }} / {{ activity.weather.temperature_max_c or '-' }}</div>
+        <div class="detail-item"><strong>Viento medio:</strong> {{ activity.weather.wind_speed_avg_kmh or '-' }} km/h</div>
+        <div class="detail-item"><strong>Precipitacion total:</strong> {{ activity.weather.precipitation_total_mm or '-' }} mm</div>
+        <details class="detail-item detail-item-full">
+            <summary><strong>JSON crudo del clima</strong></summary>
+            <pre class="raw-json">{{ activity.weather.raw_weather_json or '-' }}</pre>
+        </details>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay clima historico sincronizado para esta actividad.</p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Vueltas</p>
+            <h2>Vueltas sincronizadas</h2>
+        </div>
+    </div>
+
+    {% if activity.laps %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Tipo</th>
+                    <th>Inicio</th>
+                    <th>Duracion</th>
+                    <th>Distancia</th>
+                    <th>FC</th>
+                    <th>Potencia</th>
+                    <th>Cadencia</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for lap in activity.laps %}
+                <tr>
+                    <td>{{ lap.lap_number }}</td>
+                    <td>{{ lap.lap_type or '-' }}</td>
+                    <td>{{ lap.start_time.strftime('%H:%M:%S') if lap.start_time else '-' }}</td>
+                    <td>{{ duration_seconds_hhmm(lap.duration_sec) or '-' }}</td>
+                    <td>{{ distance_label_meters(lap.distance_m) }}</td>
+                    <td>{{ lap.avg_hr or '-' }}/{{ lap.max_hr or '-' }}</td>
+                    <td>{{ lap.avg_power or '-' }}/{{ lap.max_power or '-' }}</td>
+                    <td>{{ lap.avg_cadence or '-' }}/{{ lap.max_cadence or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No hay laps sincronizados para esta actividad.</p>
+    {% endif %}
+</section>
+{% endblock %}

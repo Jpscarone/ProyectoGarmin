@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}{{ training_plan.name }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Planes</p>
+            <h1>{{ training_plan.name }}</h1>
+            <p class="text-muted">Atleta: {{ training_plan.athlete.name }}{% if training_plan.goal %} | Objetivo: {{ training_plan.goal.name }}{% endif %}</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button" href="/training_plans/{{ training_plan.id }}/calendar">Ver calendario</a>
+            <a class="button" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}">Agregar dia</a>
+        </div>
+    </div>
+
+    <div class="training-plan-overview">
+        <div class="detail-item"><strong>Inicio:</strong> {{ training_plan.start_date or "-" }}</div>
+        <div class="detail-item"><strong>Fin:</strong> {{ training_plan.end_date or "-" }}</div>
+        <div class="detail-item"><strong>Estado:</strong> {{ training_plan.status or "-" }}</div>
+        <div class="detail-item training-plan-overview-full"><strong>Descripcion:</strong> {{ training_plan.description or "-" }}</div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Dias</p>
+            <h2>Dias del plan</h2>
+        </div>
+    </div>
+
+    {% if training_plan.training_days %}
+        {% for training_day in training_plan.training_days | sort(attribute='day_date', reverse=True) %}
+        <article class="day-card" id="training-day-{{ training_day.id }}">
+            <div class="day-card-header">
+                <div>
+                    <h3>{{ training_day.day_date }}</h3>
+                    <p class="text-muted">{{ day_type_label(training_day.day_type) }}</p>
+                </div>
+                <div class="actions-inline">
+                    <a class="button" href="/training_days/{{ training_day.id }}?return_to=plan">Ver dia</a>
+                    <a class="button button-secondary" href="/training_days/{{ training_day.id }}/edit?return_to=plan">Editar dia</a>
+                    <button class="button button-danger" type="button" onclick="deleteTrainingDay({{ training_day.id }}, {{ training_plan.id }})">Eliminar dia</button>
+                </div>
+            </div>
+
+            <p class="day-notes">{{ training_day.day_notes or "Sin notas para este dia." }}</p>
+
+            {% if training_day.planned_sessions %}
+            <div class="session-stack">
+                {% for planned_session in training_day.planned_sessions %}
+                <div class="session-card">
+                    <div>
+                        <strong>#{{ planned_session.session_order }} {{ planned_session.name }}</strong>
+                        <p class="text-muted">
+                            {{ sport_label(planned_session.sport_type) }}
+                            {% if planned_session.session_group %}| Grupo: {{ planned_session.session_group.name }}{% endif %}
+                            {% if planned_session.session_type %}| {{ session_type_label(planned_session.session_type) }}{% endif %}
+                            {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
+                            {% if planned_session.expected_distance_km %}| {{ distance_label_km(planned_session.expected_distance_km) }}{% endif %}
+                        </p>
+                        <p>{{ planned_session.description_text or planned_session.target_notes or "Sin descripcion." }}</p>
+                        {% if planned_session.planned_session_steps %}
+                        <div class="step-preview-list">
+                            {% for step in planned_session.planned_session_steps %}
+                            <p class="step-preview">Paso {{ step.step_order }}: {{ step_type_label(step.step_type) }}{% if step.duration_sec %} | {{ duration_seconds_hhmm(step.duration_sec) }}{% endif %}{% if step.distance_m %} | {{ distance_label_meters(step.distance_m) }}{% endif %}</p>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <p class="text-muted">Sin pasos estructurados.</p>
+                        {% endif %}
+                    </div>
+                    <div class="actions-inline">
+                        <a class="button" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                        <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
+                        <button class="button button-danger" type="button" onclick="deletePlannedSession({{ planned_session.id }}, {{ training_plan.id }})">Eliminar</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="empty-state">Todavia no hay sesiones para este dia.</p>
+            {% endif %}
+        </article>
+        {% endfor %}
+    {% else %}
+    <p class="empty-state">Todavia no hay dias cargados para este plan.</p>
+    {% endif %}
+</section>
+
+<script>
+async function deleteTrainingDay(trainingDayId, trainingPlanId) {
+    const confirmed = window.confirm("Eliminar este dia del plan?");
+    if (!confirmed) return;
+
+    const response = await fetch(`/training_days/${trainingDayId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el dia.");
+        return;
+    }
+
+    window.location.href = `/training_plans/${trainingPlanId}`;
+}
+
+async function deletePlannedSession(plannedSessionId, trainingPlanId) {
+    const confirmed = window.confirm("Eliminar esta sesion planificada?");
+    if (!confirmed) return;
+
+    const response = await fetch(`/planned_sessions/${plannedSessionId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar la sesion.");
+        return;
+    }
+
+    window.location.href = `/training_plans/${trainingPlanId}`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block title %}Objetivos | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Objetivos</p>
+            <h1>Objetivos deportivos</h1>
+        </div>
+        <a class="button" href="/goals/create">Nuevo objetivo</a>
+    </div>
+
+    {% if goals %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Atleta</th>
+                    <th>Deporte</th>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for goal in goals %}
+                <tr>
+                    <td>{{ goal.name }}</td>
+                    <td>{{ goal.athlete.name }}</td>
+                    <td>{{ sport_label(goal.sport_type) }}</td>
+                    <td>{{ goal.event_date or "-" }}</td>
+                    <td>{{ goal.status or "-" }}</td>
+                    <td class="actions-inline">
+                        <a class="button button-secondary" href="/goals/{{ goal.id }}/edit">Editar</a>
+                        <button class="button button-danger" type="button" onclick='deleteGoal({{ goal.id }}, {{ goal.name | tojson }})'>Eliminar</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay objetivos cargados.</p>
+    {% endif %}
+</section>
+
+<script>
+async function deleteGoal(goalId, goalName) {
+    const confirmed = window.confirm(`Eliminar objetivo ${goalName}?`);
+    if (!confirmed) return;
+
+    const response = await fetch(`/goals/${goalId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el objetivo.");
+        return;
+    }
+
+    window.location.reload();
+}
+</script>
+{% endblock %}

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Nuevo dia | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Dias</p>
+            <h1>Agregar dia al plan</h1>
+            <p class="text-muted">Plan: {{ training_plan.name }}</p>
+        </div>
+        <a class="button button-secondary" href="{{ return_to or ('/training_plans/' ~ training_plan.id) }}">Volver</a>
+    </div>
+
+    <form id="training-day-form" class="form-grid">
+        <input type="hidden" id="return-to" value="{{ return_to or '' }}">
+        {% include "training_days/partials/form_fields.html" %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar dia</button>
+        </div>
+    </form>
+</section>
+
+<script>
+document.getElementById("training-day-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = serializeForm(event.currentTarget);
+
+    const response = await fetch("/training_days", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const error = await safeError(response);
+        window.alert(error);
+        return;
+    }
+
+    const trainingDay = await response.json();
+    const returnTo = document.getElementById("return-to").value;
+    if (returnTo) {
+        window.location.href = returnTo;
+        return;
+    }
+    window.location.href = `/training_plans/${trainingDay.training_plan_id}`;
+});
+
+function serializeForm(form) {
+    const formData = new FormData(form);
+    const payload = {};
+    for (const [key, value] of formData.entries()) {
+        payload[key] = value === "" ? null : value;
+    }
+    return payload;
+}
+
+async function safeError(response) {
+    try {
+        const data = await response.json();
+        return data.detail || "No se pudo guardar el dia.";
+    } catch {
+        return "No se pudo guardar el dia.";
+    }
+}
+</script>
+{% endblock %}

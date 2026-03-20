@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+
+{% block title %}{{ app_name }}{% endblock %}
+
+{% block content %}
+<section class="panel panel-center">
+    <p class="eyebrow">Uso diario</p>
+    <h1>{{ app_name }}</h1>
+    <p>La app ya permite planificar, sincronizar Garmin, consultar salud y clima, vincular actividades y analizar sesiones sin salir del flujo diario.</p>
+    <div class="actions">
+        <a class="button" href="/training_plans">Abrir planes</a>
+        <a class="button button-secondary" href="/athletes">Atletas</a>
+        <a class="button button-secondary" href="/goals">Objetivos</a>
+        <a class="button button-secondary" href="/activities">Actividades</a>
+        <a class="button button-secondary" href="/health">Salud</a>
+        <a class="button button-secondary" href="/sync/garmin/activities">Sincronizar Garmin</a>
+    </div>
+</section>
+{% endblock %}

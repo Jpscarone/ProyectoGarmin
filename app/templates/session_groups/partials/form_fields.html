@@ -1,0 +1,27 @@
+<input name="training_day_id" type="hidden" value="{{ training_day.id }}">
+
+<label class="field">
+    <span>Nombre</span>
+    <input name="name" type="text" value="{{ session_group.name if session_group else '' }}" placeholder="Ej: Brick bici + trote" required>
+</label>
+
+<label class="field">
+    <span>Tipo de grupo</span>
+    <select name="group_type">
+        <option value="">Sin tipo</option>
+        {% set current_group_type = session_group.group_type if session_group else '' %}
+        {% for option in group_type_options %}
+        <option value="{{ option.value }}" {% if current_group_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Orden</span>
+    <input name="group_order" type="number" min="1" value="{{ session_group.group_order if session_group else '1' }}" required>
+</label>
+
+<label class="field field-full">
+    <span>Notas</span>
+    <textarea name="notes" rows="4" placeholder="Para aclarar el sentido del bloque o como se relacionan las sesiones.">{{ session_group.notes if session_group and session_group.notes else '' }}</textarea>
+</label>

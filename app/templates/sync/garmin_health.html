@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Sincronizar salud Garmin | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Salud Garmin</p>
+            <h1>Sincronizacion manual de salud diaria</h1>
+            <p class="text-muted">Trae hoy y los 6 dias anteriores usando las credenciales configuradas en `.env`.</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="/sync/garmin/activities">Sincronizar actividades</a>
+            <a class="button button-secondary" href="/health">Ver salud</a>
+        </div>
+    </div>
+
+    <form method="post" action="/sync/garmin/health">
+        <div class="form-actions">
+            <button class="button" type="submit">Sincronizar salud diaria</button>
+        </div>
+    </form>
+
+    {% if needs_mfa %}
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Garmin MFA</p>
+                <h2>Ingresar codigo de verificacion</h2>
+                <p class="text-muted">Si Garmin pidio MFA, ingresalo aqui para continuar esta sincronizacion.</p>
+            </div>
+        </div>
+        <form method="post" action="/sync/garmin/health/mfa" class="form-grid">
+            <label class="field">
+                <span>Codigo MFA</span>
+                <input name="mfa_code" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+            </label>
+            <div class="form-actions">
+                <button class="button" type="submit">Continuar sincronizacion con MFA</button>
+            </div>
+        </form>
+    </section>
+    {% endif %}
+
+    {% if not garmin_enabled %}
+    <p class="empty-state">Garmin esta deshabilitado. Completa `GARMIN_ENABLED=true` en `.env` antes de sincronizar.</p>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {% if result %}
+    <div class="detail-grid sync-summary">
+        <div class="detail-item"><strong>Atleta:</strong> {{ result.athlete_name }}</div>
+        <div class="detail-item"><strong>Dias revisados:</strong> {{ result.days_reviewed }}</div>
+        <div class="detail-item"><strong>Creados:</strong> {{ result.created }}</div>
+        <div class="detail-item"><strong>Actualizados:</strong> {{ result.updated }}</div>
+    </div>
+
+    {% if result.errors %}
+    <div class="alert alert-error">
+        <strong>Errores:</strong>
+        <ul class="flat-list">
+            {% for item in result.errors %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+    {% endif %}
+</section>
+{% endblock %}

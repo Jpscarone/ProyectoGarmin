@@ -1,0 +1,29 @@
+<label class="field">
+    <span>Plan</span>
+    <select name="training_plan_id" required>
+        {% for plan in training_plans %}
+        <option value="{{ plan.id }}" {% if training_day and training_day.training_plan_id == plan.id %}selected{% elif not training_day and training_plan.id == plan.id %}selected{% endif %}>{{ plan.name }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Fecha</span>
+    <input name="day_date" type="date" value="{{ training_day.day_date.isoformat() if training_day and training_day.day_date else '' }}" required>
+</label>
+
+<label class="field">
+    <span>Tipo de dia</span>
+    <select name="day_type">
+        <option value="">Sin tipo</option>
+        {% set current_day_type = training_day.day_type if training_day and training_day.day_type else '' %}
+        {% for option in day_type_options %}
+        <option value="{{ option.value }}" {% if current_day_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field field-full">
+    <span>Notas del dia</span>
+    <textarea name="day_notes" rows="5" placeholder="Ej: dia de carga, despues de viaje, sensaciones generales o foco del dia">{{ training_day.day_notes if training_day and training_day.day_notes else '' }}</textarea>
+</label>

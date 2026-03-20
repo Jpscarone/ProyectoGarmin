@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}{{ planned_session.name }} | training_app{% endblock %}
+
+{% block content %}
+{% set session_metrics = derive_session_metrics(planned_session) %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Sesion</p>
+            <h1>{{ session_metrics.title or planned_session.name }}</h1>
+            <p class="text-muted">Dia: {{ training_day.day_date }} | Plan: {{ training_day.training_plan.name }}{% if planned_session.session_group %} | Grupo: {{ planned_session.session_group.name }}{% endif %}</p>
+        </div>
+        <div class="actions-inline">
+            <form method="post" action="/analysis/session/{{ planned_session.id }}">
+                <button class="button" type="submit">Analizar sesion</button>
+            </form>
+            <a class="button button-secondary" href="/analysis/bundle/session/{{ planned_session.id }}">Generar bundle</a>
+            <a class="button button-secondary" href="/analysis/bundle/session/{{ planned_session.id }}#chatgpt">Ver resumen para ChatGPT</a>
+            <form method="post" action="/match/day/{{ training_day.id }}">
+                <button class="button button-secondary" type="submit">Vincular actividad</button>
+            </form>
+            <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar sesion</a>
+            <a class="button" href="/planned_session_steps/create?planned_session_id={{ planned_session.id }}">Agregar paso</a>
+            <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
+        </div>
+    </div>
+
+    {% if ui_status %}
+    <div class="alert alert-info">{{ ui_status }}</div>
+    {% endif %}
+    {% if match_status %}
+    <div class="alert alert-info">{{ match_status }}</div>
+    {% endif %}
+    {% if analysis_status %}
+    <div class="alert alert-info">{{ analysis_status }}</div>
+    {% endif %}
+
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Orden:</strong> {{ planned_session.session_order }}</div>
+        <div class="detail-item"><strong>Tipo:</strong> {{ session_type_label(planned_session.session_type) }}</div>
+        <div class="detail-item"><strong>Deporte:</strong> {{ sport_label(planned_session.sport_type) }}</div>
+        <div class="detail-item"><strong>Hora:</strong> {{ planned_session.planned_start_time.strftime('%H:%M') if planned_session.planned_start_time else "-" }}</div>
+        <div class="detail-item"><strong>Duracion:</strong> {{ duration_seconds_human(session_metrics.duration_sec) or "-" }}{% if session_metrics.duration_is_estimated %} (estimada){% endif %}</div>
+        <div class="detail-item"><strong>Distancia:</strong> {{ distance_label_meters(session_metrics.distance_m) if session_metrics.distance_m is not none else "-" }}{% if session_metrics.distance_is_estimated %} (estimada){% endif %}</div>
+        <div class="detail-item"><strong>Zona HR:</strong> {{ planned_session.target_hr_zone or "-" }}</div>
+        <div class="detail-item"><strong>Zona potencia:</strong> {{ planned_session.target_power_zone or "-" }}</div>
+        <div class="detail-item"><strong>Actividad vinculada:</strong>
+            {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
+            <a href="/activities/{{ planned_session.activity_match.garmin_activity.id }}">{{ planned_session.activity_match.garmin_activity.activity_name or ('Actividad ' ~ planned_session.activity_match.garmin_activity.id) }}</a>
+            {% else %}
+            Sin actividad vinculada
+            {% endif %}
+        </div>
+        <div class="detail-item"><strong>Confianza:</strong> {{ planned_session.activity_match.match_confidence if planned_session.activity_match else "-" }}</div>
+        <div class="detail-item detail-item-full"><strong>Descripcion:</strong> {{ planned_session.description_text or "-" }}</div>
+        <div class="detail-item detail-item-full"><strong>Notas objetivo:</strong> {{ planned_session.target_notes or "-" }}</div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Analisis</p>
+            <h2>Ultimo reporte</h2>
+        </div>
+    </div>
+
+    {% if latest_report %}
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Estado:</strong> {{ analysis_status_label(latest_report.overall_status) }}</div>
+        <div class="detail-item"><strong>Score:</strong> {{ latest_report.overall_score if latest_report.overall_score is not none else '-' }}</div>
+        <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
+    </div>
+    <div class="actions-inline">
+        <a class="button" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay reporte de analisis para esta sesion.</p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Pasos</p>
+            <h2>Pasos estructurados</h2>
+        </div>
+    </div>
+
+    {% set display_blocks = session_display_blocks_for_session(planned_session) %}
+    {% if display_blocks %}
+    <div class="session-stack">
+        {% for block in display_blocks %}
+            {% if block.kind == "repeat" %}
+            <article class="session-card repeat-card">
+                <div>
+                    <strong>#{{ block.step_order }} Repetir {{ block.repeat_count }} veces</strong>
+                    <div class="repeat-step-list">
+                        {% for step in block.steps %}
+                        <div class="repeat-step-row">
+                            <div class="repeat-step-item">
+                                <p class="text-muted">
+                                    {% if step.duration_sec %}{{ duration_seconds_human(step.duration_sec) }}{% endif %}
+                                    {% if step.duration_sec and step.distance_m %} | {% endif %}
+                                    {% if step.distance_m %}{{ distance_label_meters(step.distance_m) }}{% endif %}
+                                </p>
+                                <p><strong>{{ step.target_notes or step_type_label(step.step_type) }}</strong></p>
+                                <p>
+                                    {% if step.target_hr_min or step.target_hr_max %}HR {{ step.target_hr_min or "-" }}-{{ step.target_hr_max or "-" }} {% endif %}
+                                    {% if step.target_power_min or step.target_power_max %}| Potencia {{ step.target_power_min or "-" }}-{{ step.target_power_max or "-" }} {% endif %}
+                                    {% if step.target_pace_min_sec_km or step.target_pace_max_sec_km %}| Ritmo {{ pace_mmss(step.target_pace_min_sec_km) or "-" }}-{{ pace_mmss(step.target_pace_max_sec_km) or "-" }} min/km {% endif %}
+                                    {% if step.target_cadence_min or step.target_cadence_max %}| Cadencia {{ step.target_cadence_min or "-" }}-{{ step.target_cadence_max or "-" }}{% endif %}
+                                </p>
+                            </div>
+                            {% if step.source_step_id %}
+                            <div class="actions-inline repeat-step-actions">
+                                <a class="button button-secondary" href="/planned_session_steps/{{ step.source_step_id }}/edit">Editar subpaso {{ loop.index }}</a>
+                                <button class="button button-danger" type="button" onclick="deleteStep({{ step.source_step_id }}, {{ planned_session.id }})">Eliminar subpaso {{ loop.index }}</button>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </article>
+            {% else %}
+            <article class="session-card">
+                <div>
+                    <strong>#{{ block.step_order }} Bloque</strong>
+                    <p class="text-muted">
+                        {% if block.duration_sec %}{{ duration_seconds_human(block.duration_sec) }}{% endif %}
+                        {% if block.duration_sec and block.distance_m %} | {% endif %}
+                        {% if block.distance_m %}{{ distance_label_meters(block.distance_m) }}{% endif %}
+                    </p>
+                    <p>
+                        {% if block.target_hr_min or block.target_hr_max %}HR {{ block.target_hr_min or "-" }}-{{ block.target_hr_max or "-" }} {% endif %}
+                        {% if block.target_power_min or block.target_power_max %}| Potencia {{ block.target_power_min or "-" }}-{{ block.target_power_max or "-" }} {% endif %}
+                        {% if block.target_pace_min_sec_km or block.target_pace_max_sec_km %}| Ritmo {{ pace_mmss(block.target_pace_min_sec_km) or "-" }}-{{ pace_mmss(block.target_pace_max_sec_km) or "-" }} min/km {% endif %}
+                        {% if block.target_cadence_min or block.target_cadence_max %}| Cadencia {{ block.target_cadence_min or "-" }}-{{ block.target_cadence_max or "-" }}{% endif %}
+                    </p>
+                    <p>{{ block.target_notes or step_type_label(block.step_type) }}</p>
+                </div>
+                <div class="actions-inline">
+                    {% if block.source_step_id %}
+                    <a class="button button-secondary" href="/planned_session_steps/{{ block.source_step_id }}/edit">Editar</a>
+                    <button class="button button-danger" type="button" onclick="deleteStep({{ block.source_step_id }}, {{ planned_session.id }})">Eliminar</button>
+                    {% endif %}
+                </div>
+            </article>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay pasos cargados para esta sesion.</p>
+    {% endif %}
+</section>
+
+<script>
+async function deleteStep(stepId, plannedSessionId) {
+    const confirmed = window.confirm("Eliminar este paso?");
+    if (!confirmed) return;
+
+    const response = await fetch(`/planned_session_steps/${stepId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el paso.");
+        return;
+    }
+
+    window.location.href = `/planned_sessions/${plannedSessionId}`;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,83 @@
+<input name="planned_session_id" type="hidden" value="{{ planned_session.id }}">
+
+<label class="field">
+    <span>Orden</span>
+    <input name="step_order" type="number" min="1" value="{{ step.step_order if step else '1' }}" required>
+</label>
+
+<label class="field">
+    <span>Tipo de paso</span>
+    <select name="step_type" required>
+        {% set current_step_type = step.step_type if step else '' %}
+        {% for option in step_type_options %}
+        <option value="{{ option.value }}" {% if current_step_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Repeticiones</span>
+    <input name="repeat_count" type="number" min="1" value="{{ step.repeat_count if step and step.repeat_count is not none else '' }}" placeholder="Ej: 4">
+</label>
+
+<label class="field">
+    <span>Duracion</span>
+    <input name="duration_hhmm" type="text" value="{{ duration_seconds_hhmm(step.duration_sec) if step else '' }}" placeholder="Ej: 0:45">
+</label>
+
+<div class="field distance-field">
+    <span>Distancia</span>
+    <div class="inline-fields">
+        <input name="distance_value" type="number" min="0" step="0.1" value="{{ distance_form_value(step.distance_m) if step else '' }}" placeholder="Ej: 1000">
+        <select name="distance_unit">
+            {% set current_distance_unit = distance_form_unit(step.distance_m) if step else 'km' %}
+            <option value="m" {% if current_distance_unit == 'm' %}selected{% endif %}>m</option>
+            <option value="km" {% if current_distance_unit == 'km' %}selected{% endif %}>km</option>
+        </select>
+    </div>
+</div>
+
+<label class="field">
+    <span>FC minima</span>
+    <input name="target_hr_min" type="number" min="1" value="{{ step.target_hr_min if step and step.target_hr_min is not none else '' }}" placeholder="Ej: 140">
+</label>
+
+<label class="field">
+    <span>FC maxima</span>
+    <input name="target_hr_max" type="number" min="1" value="{{ step.target_hr_max if step and step.target_hr_max is not none else '' }}" placeholder="Ej: 155">
+</label>
+
+<label class="field">
+    <span>Potencia minima</span>
+    <input name="target_power_min" type="number" min="1" value="{{ step.target_power_min if step and step.target_power_min is not none else '' }}" placeholder="Ej: 220">
+</label>
+
+<label class="field">
+    <span>Potencia maxima</span>
+    <input name="target_power_max" type="number" min="1" value="{{ step.target_power_max if step and step.target_power_max is not none else '' }}" placeholder="Ej: 250">
+</label>
+
+<label class="field">
+    <span>Ritmo minimo</span>
+    <input name="target_pace_min_formatted" type="text" value="{{ pace_mmss(step.target_pace_min_sec_km) if step else '' }}" placeholder="Ej: 4:30">
+</label>
+
+<label class="field">
+    <span>Ritmo maximo</span>
+    <input name="target_pace_max_formatted" type="text" value="{{ pace_mmss(step.target_pace_max_sec_km) if step else '' }}" placeholder="Ej: 5:10">
+</label>
+
+<label class="field">
+    <span>Cadencia min</span>
+    <input name="target_cadence_min" type="number" min="1" value="{{ step.target_cadence_min if step and step.target_cadence_min is not none else '' }}" placeholder="Ej: 85">
+</label>
+
+<label class="field">
+    <span>Cadencia max</span>
+    <input name="target_cadence_max" type="number" min="1" value="{{ step.target_cadence_max if step and step.target_cadence_max is not none else '' }}" placeholder="Ej: 95">
+</label>
+
+<label class="field field-full">
+    <span>Notas</span>
+    <textarea name="target_notes" rows="4" placeholder="Ej: suave, fuerte, tecnica o referencia del bloque">{{ step.target_notes if step and step.target_notes else '' }}</textarea>
+</label>

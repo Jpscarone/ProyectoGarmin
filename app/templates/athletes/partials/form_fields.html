@@ -1,0 +1,49 @@
+<label class="field">
+    <span>Nombre</span>
+    <input name="name" type="text" value="{{ athlete.name if athlete else '' }}" required>
+</label>
+
+<label class="field">
+    <span>Altura (cm)</span>
+    <input name="height_cm" type="number" step="0.1" value="{{ athlete.height_cm if athlete and athlete.height_cm is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>Peso (kg)</span>
+    <input name="weight_kg" type="number" step="0.1" value="{{ athlete.weight_kg if athlete and athlete.weight_kg is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>FC maxima</span>
+    <input name="max_hr" type="number" value="{{ athlete.max_hr if athlete and athlete.max_hr is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>FC reposo</span>
+    <input name="resting_hr" type="number" value="{{ athlete.resting_hr if athlete and athlete.resting_hr is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>FC umbral lactato</span>
+    <input name="lactate_threshold_hr" type="number" value="{{ athlete.lactate_threshold_hr if athlete and athlete.lactate_threshold_hr is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>Ritmo umbral running (seg/km)</span>
+    <input name="running_threshold_pace_sec_km" type="number" value="{{ athlete.running_threshold_pace_sec_km if athlete and athlete.running_threshold_pace_sec_km is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>FTP ciclismo</span>
+    <input name="cycling_ftp" type="number" value="{{ athlete.cycling_ftp if athlete and athlete.cycling_ftp is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>VO2max</span>
+    <input name="vo2max" type="number" step="0.1" value="{{ athlete.vo2max if athlete and athlete.vo2max is not none else '' }}">
+</label>
+
+<label class="field field-full">
+    <span>Notas</span>
+    <textarea name="notes" rows="5">{{ athlete.notes if athlete and athlete.notes else '' }}</textarea>
+</label>

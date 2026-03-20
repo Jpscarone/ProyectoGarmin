@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}{{ report.title }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Analisis</p>
+            <h1>{{ report.title }}</h1>
+            <p class="text-muted">Tipo: {{ report.report_type }} | Estado: {{ analysis_status_label(report.overall_status) }} | Generado: {{ report.generated_at.strftime('%Y-%m-%d %H:%M') if report.generated_at else '-' }}</p>
+        </div>
+        <div class="actions-inline">
+            {% if report.planned_session %}
+            <a class="button button-secondary" href="/planned_sessions/{{ report.planned_session.id }}">Ver sesion</a>
+            {% endif %}
+            {% if report.garmin_activity %}
+            <a class="button button-secondary" href="/activities/{{ report.garmin_activity.id }}">Ver actividad</a>
+            {% endif %}
+            {% if report.training_day %}
+            <a class="button button-secondary" href="/training_days/{{ report.training_day.id }}">Ver dia</a>
+            {% endif %}
+            <a class="button" href="/analysis/bundle/report/{{ report.id }}">Generar bundle</a>
+            <a class="button button-secondary" href="/analysis/bundle/report/{{ report.id }}#chatgpt">Ver resumen para ChatGPT</a>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Score general:</strong> {{ report.overall_score if report.overall_score is not none else '-' }}</div>
+        <div class="detail-item"><strong>Estado general:</strong> {{ analysis_status_label(report.overall_status) }}</div>
+        <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ report.summary_text or '-' }}</div>
+        <div class="detail-item detail-item-full"><strong>Recomendacion:</strong> {{ report.recommendation_text or '-' }}</div>
+        <div class="detail-item detail-item-full"><strong>Contexto:</strong> <pre class="raw-json">{{ report.analysis_context_json or '-' }}</pre></div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Conclusion final</p>
+            <h2>Cierre humano</h2>
+            <p class="text-muted">Podes pegar aca la interpretacion final que salga de un analisis externo o escribirla manualmente.</p>
+        </div>
+    </div>
+
+    <form method="post" action="/analysis/{{ report.id }}/conclusion" class="form-grid">
+        <label class="field field-full">
+            <span>Conclusion final</span>
+            <textarea name="final_conclusion_text" rows="6" placeholder="Ej: Sesion bien cumplida, aunque con intensidad algo alta por calor.">{{ report.final_conclusion_text or '' }}</textarea>
+        </label>
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar conclusion</button>
+        </div>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Items</p>
+            <h2>Detalle del analisis</h2>
+        </div>
+    </div>
+
+    {% if report.items %}
+    <div class="session-stack">
+        {% for item in report.items %}
+        <article class="session-card">
+            <div>
+                <strong>#{{ item.item_order }} {{ item.reference_label or item.item_type }}</strong>
+                <p class="text-muted">{{ item.item_type }} | {{ analysis_status_label(item.item_status) }}{% if item.item_score is not none %} | score {{ item.item_score }}{% endif %}</p>
+                <p><strong>Planificado:</strong> {{ item.planned_value_text or '-' }}</p>
+                <p><strong>Real:</strong> {{ item.actual_value_text or '-' }}</p>
+                <p>{{ item.comment_text or '-' }}</p>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Este reporte no tiene items cargados.</p>
+    {% endif %}
+</section>
+{% endblock %}

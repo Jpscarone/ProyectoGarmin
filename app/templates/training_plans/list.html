@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+
+{% block title %}Planes | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Planes</p>
+            <h1>Planes de entrenamiento</h1>
+        </div>
+        <a class="button" href="/training_plans/create">Nuevo plan</a>
+    </div>
+
+    {% if training_plans %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Nombre</th>
+                    <th>Atleta</th>
+                    <th>Objetivo</th>
+                    <th>Inicio</th>
+                    <th>Fin</th>
+                    <th>Estado</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for training_plan in training_plans %}
+                <tr id="training-plan-{{ training_plan.id }}">
+                    <td>{{ training_plan.name }}</td>
+                    <td>{{ training_plan.athlete.name }}</td>
+                    <td>{{ training_plan.goal.name if training_plan.goal else "-" }}</td>
+                    <td>{{ training_plan.start_date or "-" }}</td>
+                    <td>{{ training_plan.end_date or "-" }}</td>
+                    <td>{{ training_plan.status or "-" }}</td>
+                    <td class="actions-inline">
+                        <a class="button" href="/training_plans/{{ training_plan.id }}">Dias del plan</a>
+                        <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/calendar">Calendario</a>
+                        <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/edit">Editar</a>
+                        <button class="button button-danger" type="button" onclick='deleteTrainingPlan({{ training_plan.id }}, {{ training_plan.name | tojson }})'>Eliminar</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay planes cargados.</p>
+    {% endif %}
+</section>
+
+<script>
+async function deleteTrainingPlan(trainingPlanId, trainingPlanName) {
+    const confirmed = window.confirm(`Eliminar plan ${trainingPlanName}?`);
+    if (!confirmed) return;
+
+    const response = await fetch(`/training_plans/${trainingPlanId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el plan.");
+        return;
+    }
+
+    window.location.reload();
+}
+</script>
+{% endblock %}

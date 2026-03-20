@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Salud | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Salud</p>
+            <h1>Metricas diarias Garmin</h1>
+        </div>
+        <a class="button" href="/sync/garmin/health">Sincronizar salud</a>
+    </div>
+
+    {% if metrics %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Sueno</th>
+                    <th>Sleep score</th>
+                    <th>Stress avg</th>
+                    <th>Body battery</th>
+                    <th>FC reposo</th>
+                    <th>HRV</th>
+                    <th>VO2max</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for metric in metrics %}
+                <tr>
+                    <td>{{ metric.metric_date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ metric.sleep_hours or '-' }}{% if metric.sleep_hours %} h{% endif %}</td>
+                    <td>{{ metric.sleep_score or '-' }}</td>
+                    <td>{{ metric.stress_avg or '-' }}</td>
+                    <td>{{ metric.body_battery_start or '-' }} / {{ metric.body_battery_end or '-' }}</td>
+                    <td>{{ metric.resting_hr or '-' }}</td>
+                    <td>{{ metric.hrv_status or '-' }}</td>
+                    <td>{{ metric.vo2max or '-' }}</td>
+                    <td class="actions-inline">
+                        <a class="button" href="/health/{{ metric.id }}">Ver detalle</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay metricas diarias sincronizadas.</p>
+    {% endif %}
+</section>
+{% endblock %}

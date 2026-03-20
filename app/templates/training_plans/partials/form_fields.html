@@ -1,0 +1,51 @@
+<label class="field">
+    <span>Atleta</span>
+    <select name="athlete_id" required>
+        <option value="">Seleccionar atleta</option>
+        {% for athlete in athletes %}
+        <option value="{{ athlete.id }}" {% if training_plan and training_plan.athlete_id == athlete.id %}selected{% endif %}>{{ athlete.name }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Objetivo</span>
+    <select name="goal_id">
+        <option value="">Sin objetivo</option>
+        {% for goal in goals %}
+        <option value="{{ goal.id }}" {% if training_plan and training_plan.goal_id == goal.id %}selected{% endif %}>{{ goal.name }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Nombre</span>
+    <input name="name" type="text" value="{{ training_plan.name if training_plan else '' }}" required>
+</label>
+
+<label class="field">
+    <span>Estado</span>
+    {% set current_status = training_plan.status if training_plan and training_plan.status else '' %}
+    <select name="status">
+        <option value="">Sin estado</option>
+        <option value="draft" {% if current_status == 'draft' %}selected{% endif %}>Borrador</option>
+        <option value="active" {% if current_status == 'active' %}selected{% endif %}>Activo</option>
+        <option value="completed" {% if current_status == 'completed' %}selected{% endif %}>Completado</option>
+        <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archivado</option>
+    </select>
+</label>
+
+<label class="field">
+    <span>Fecha inicio</span>
+    <input name="start_date" type="date" value="{{ training_plan.start_date.isoformat() if training_plan and training_plan.start_date else '' }}">
+</label>
+
+<label class="field">
+    <span>Fecha fin</span>
+    <input name="end_date" type="date" value="{{ training_plan.end_date.isoformat() if training_plan and training_plan.end_date else '' }}">
+</label>
+
+<label class="field field-full">
+    <span>Descripcion</span>
+    <textarea name="description" rows="5" placeholder="Objetivo general del bloque, foco del plan o notas importantes.">{{ training_plan.description if training_plan and training_plan.description else '' }}</textarea>
+</label>

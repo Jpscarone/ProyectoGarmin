@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Actividades | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Actividades</p>
+            <h1>Actividades sincronizadas</h1>
+        </div>
+        <div class="actions-inline">
+            <form method="post" action="/match/recent">
+                <button class="button button-secondary" type="submit">Vincular recientes</button>
+            </form>
+            <a class="button" href="/sync/garmin/activities">Sincronizar Garmin</a>
+        </div>
+    </div>
+
+    {% if weather_status %}
+    <div class="alert alert-info">{{ weather_status }}</div>
+    {% endif %}
+    {% if match_status %}
+    <div class="alert alert-info">{{ match_status }}</div>
+    {% endif %}
+
+    {% if activities %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Deporte</th>
+                    <th>Nombre</th>
+                    <th>Duracion</th>
+                    <th>Distancia</th>
+                    <th>Clima</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for activity in activities %}
+                <tr>
+                    <td>{{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</td>
+                    <td>{{ sport_label(activity.sport_type) }}</td>
+                    <td>{{ activity.activity_name or '-' }}</td>
+                    <td>{{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</td>
+                    <td>{{ distance_label_meters(activity.distance_m) }}</td>
+                    <td>{{ 'Disponible' if activity.weather else 'Pendiente' }}</td>
+                    <td class="actions-inline">
+                        <a class="button" href="/activities/{{ activity.id }}">Ver detalle</a>
+                        <a class="button button-secondary" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
+                        <form method="post" action="/match/activity/{{ activity.id }}">
+                            <button class="button button-secondary" type="submit">Recalcular vinculacion</button>
+                        </form>
+                        <form method="post" action="/analysis/activity/{{ activity.id }}">
+                            <button class="button button-secondary" type="submit">Analizar</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay actividades sincronizadas.</p>
+    {% endif %}
+</section>
+{% endblock %}

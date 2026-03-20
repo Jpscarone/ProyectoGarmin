@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Editar atleta | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Atletas</p>
+            <h1>Editar atleta</h1>
+        </div>
+        <a class="button button-secondary" href="/athletes">Volver</a>
+    </div>
+
+    <form id="athlete-form" class="form-grid">
+        {% include "athletes/partials/form_fields.html" %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar cambios</button>
+        </div>
+    </form>
+</section>
+
+<script>
+document.getElementById("athlete-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const payload = buildPayload(event.currentTarget);
+    const response = await fetch("/athletes/{{ athlete.id }}", {
+        method: "PUT",
+        headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json"
+        },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        window.alert("No se pudieron guardar los cambios.");
+        return;
+    }
+
+    window.location.href = "/athletes";
+});
+
+function buildPayload(form) {
+    const formData = new FormData(form);
+    const payload = {};
+
+    for (const [key, value] of formData.entries()) {
+        payload[key] = value === "" ? null : value;
+    }
+
+    return payload;
+}
+</script>
+{% endblock %}

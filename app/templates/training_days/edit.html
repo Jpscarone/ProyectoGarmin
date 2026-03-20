@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Editar dia | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Dias</p>
+            <h1>Editar dia del plan</h1>
+            <p class="text-muted">Plan actual: {{ training_plan.name }}</p>
+        </div>
+        <a class="button button-secondary" href="{{ back_href }}">{{ back_label }}</a>
+    </div>
+
+    <form id="training-day-form" class="form-grid">
+        {% include "training_days/partials/form_fields.html" %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar cambios</button>
+        </div>
+    </form>
+</section>
+
+<script>
+document.getElementById("training-day-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = serializeForm(event.currentTarget);
+
+    const response = await fetch("/training_days/{{ training_day.id }}", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const error = await safeError(response);
+        window.alert(error);
+        return;
+    }
+
+    window.location.href = {{ back_href | tojson }};
+});
+
+function serializeForm(form) {
+    const formData = new FormData(form);
+    const payload = {};
+    for (const [key, value] of formData.entries()) {
+        payload[key] = value === "" ? null : value;
+    }
+    return payload;
+}
+
+async function safeError(response) {
+    try {
+        const data = await response.json();
+        return data.detail || "No se pudo guardar el dia.";
+    } catch {
+        return "No se pudo guardar el dia.";
+    }
+}
+</script>
+{% endblock %}

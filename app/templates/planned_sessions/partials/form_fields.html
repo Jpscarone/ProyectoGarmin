@@ -1,0 +1,168 @@
+<input name="training_day_id" type="hidden" value="{{ training_day.id }}">
+
+<section class="form-section field-full">
+    <div class="form-section-header">
+        <h2>Datos principales</h2>
+        <p class="text-muted">Lo minimo para que la sesion quede clara y consistente.</p>
+    </div>
+    <div class="form-grid form-grid-compact">
+        <label class="field field-full">
+            <span>Nombre</span>
+            <input name="name" type="text" value="{{ planned_session.name if planned_session else '' }}" placeholder="Ej: Rodaje suave 50 min" required>
+        </label>
+
+        <label class="field">
+            <span>Orden</span>
+            <input name="session_order" type="number" min="1" value="{{ planned_session.session_order if planned_session else '1' }}" placeholder="Ej: 1" required>
+        </label>
+
+        <label class="field">
+            <span>Hora prevista</span>
+            <input name="planned_start_time" type="time" value="{{ planned_session.planned_start_time.strftime('%H:%M') if planned_session and planned_session.planned_start_time else '' }}">
+        </label>
+
+        <label class="field">
+            <span>Deporte</span>
+            <select name="sport_type">
+                <option value="">Seleccionar deporte</option>
+                {% set current_sport = planned_session.sport_type if planned_session and planned_session.sport_type else '' %}
+                {% for option in sport_options %}
+                <option value="{{ option.value }}" {% if current_sport == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Variante</span>
+            <select name="discipline_variant">
+                <option value="">Sin variante</option>
+                {% set current_variant = planned_session.discipline_variant if planned_session and planned_session.discipline_variant else '' %}
+                {% for option in variant_options %}
+                <option value="{{ option.value }}" {% if current_variant == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Tipo de sesion</span>
+            <select name="session_type">
+                <option value="">Sin tipo</option>
+                {% set current_type = planned_session.session_type if planned_session and planned_session.session_type else '' %}
+                {% for option in session_type_options %}
+                <option value="{{ option.value }}" {% if current_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Grupo</span>
+            <select name="session_group_id" id="session-group-select" onchange="toggleInlineGroupFields(this.value)">
+                <option value="">Sin grupo</option>
+                {% for session_group in session_groups %}
+                <option value="{{ session_group.id }}" {% if planned_session and planned_session.session_group_id == session_group.id %}selected{% endif %}>#{{ session_group.group_order }} {{ session_group.name }}</option>
+                {% endfor %}
+                <option value="__new__">Crear grupo nuevo</option>
+            </select>
+        </label>
+
+        <div class="form-section field-full inline-group-fields" id="inline-group-fields" hidden>
+            <div class="form-section-header">
+                <h2>Nuevo grupo</h2>
+                <p class="text-muted">Crea un contenedor opcional para organizar varias sesiones del mismo dia.</p>
+            </div>
+            <div class="form-grid form-grid-compact">
+                <label class="field">
+                    <span>Nombre del grupo</span>
+                    <input name="new_group_name" type="text" placeholder="Ej: Brick pre carrera">
+                </label>
+
+                <label class="field">
+                    <span>Tipo de grupo</span>
+                    <select name="new_group_type">
+                        <option value="">Sin tipo</option>
+                        {% for option in group_type_options %}
+                        <option value="{{ option.value }}">{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+
+                <label class="field field-full">
+                    <span>Notas del grupo</span>
+                    <textarea name="new_group_notes" rows="3" placeholder="Opcional. Para aclarar la logica del conjunto."></textarea>
+                </label>
+            </div>
+        </div>
+
+        <label class="field checkbox-field">
+            <span>Sesion clave</span>
+            <input name="is_key_session" type="checkbox" {% if planned_session and planned_session.is_key_session %}checked{% endif %}>
+        </label>
+    </div>
+</section>
+
+<section class="form-section field-full">
+    <div class="form-section-header">
+        <h2>Objetivo</h2>
+        <p class="text-muted">Duracion, distancia y zonas objetivo para analizar despues.</p>
+    </div>
+    <div class="form-grid form-grid-compact">
+        <label class="field">
+            <span>Duracion esperada</span>
+            <input name="expected_duration_hhmm" type="text" value="{{ duration_minutes_hhmm(planned_session.expected_duration_min) if planned_session else '' }}" placeholder="Ej: 1:15">
+        </label>
+
+        <div class="field distance-field">
+            <span>Distancia esperada</span>
+            <div class="inline-fields">
+                <input name="expected_distance_value" type="number" min="0" step="0.1" value="{{ distance_form_value_km(planned_session.expected_distance_km) if planned_session else '' }}" placeholder="Ej: 10">
+                <select name="expected_distance_unit">
+                    {% set current_session_distance_unit = distance_form_unit_km(planned_session.expected_distance_km) if planned_session else 'km' %}
+                    <option value="m" {% if current_session_distance_unit == 'm' %}selected{% endif %}>m</option>
+                    <option value="km" {% if current_session_distance_unit == 'km' %}selected{% endif %}>km</option>
+                </select>
+            </div>
+        </div>
+
+        <label class="field">
+            <span>Desnivel esperado (m)</span>
+            <input name="expected_elevation_gain_m" type="number" min="0" step="0.1" value="{{ planned_session.expected_elevation_gain_m if planned_session and planned_session.expected_elevation_gain_m is not none else '' }}" placeholder="Ej: 300">
+        </label>
+
+        <label class="field">
+            <span>Zona FC objetivo</span>
+            <select name="target_hr_zone">
+                <option value="">Sin zona</option>
+                {% set current_hr_zone = planned_session.target_hr_zone if planned_session and planned_session.target_hr_zone else '' %}
+                {% for option in zone_options %}
+                <option value="{{ option.value }}" {% if current_hr_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Zona potencia objetivo</span>
+            <select name="target_power_zone">
+                <option value="">Sin zona</option>
+                {% set current_power_zone = planned_session.target_power_zone if planned_session and planned_session.target_power_zone else '' %}
+                {% for option in zone_options %}
+                <option value="{{ option.value }}" {% if current_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field field-full">
+            <span>Notas objetivo</span>
+            <input name="target_notes" type="text" value="{{ planned_session.target_notes if planned_session and planned_session.target_notes else '' }}" placeholder="Ej: base, suave, control de Z2">
+        </label>
+    </div>
+</section>
+
+<details class="advanced-panel field-full">
+    <summary>Campos avanzados</summary>
+    <div class="form-grid">
+        <label class="field field-full">
+            <span>Descripcion</span>
+            <textarea name="description_text" rows="4" placeholder="Detalles libres de la sesion.">{{ planned_session.description_text if planned_session and planned_session.description_text else '' }}</textarea>
+        </label>
+    </div>
+</details>

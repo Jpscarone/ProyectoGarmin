@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}{{ bundle.title }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Bundle</p>
+            <h1>{{ bundle.title }}</h1>
+            <p class="text-muted">Incluye sesion, actividad, salud, clima y analisis automatico si existen.</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="{{ back_url }}">Volver</a>
+            <a class="button button-secondary" href="#chatgpt">Ver resumen para ChatGPT</a>
+        </div>
+    </div>
+
+    <div class="form-section">
+        <div class="form-section-header">
+            <h2>JSON estructurado</h2>
+            <p class="text-muted">Listo para copiar completo.</p>
+        </div>
+        <label class="field">
+            <textarea rows="22" readonly>{{ bundle.json_text }}</textarea>
+        </label>
+    </div>
+</section>
+
+<section class="panel" id="chatgpt">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">ChatGPT</p>
+            <h2>Resumen amigable</h2>
+            <p class="text-muted">Texto compacto para pegar en un analisis externo.</p>
+        </div>
+    </div>
+
+    <label class="field">
+        <textarea rows="22" readonly>{{ bundle.chatgpt_text }}</textarea>
+    </label>
+</section>
+{% endblock %}

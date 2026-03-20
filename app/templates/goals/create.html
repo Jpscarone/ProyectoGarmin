@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Nuevo objetivo | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Objetivos</p>
+            <h1>Crear objetivo</h1>
+        </div>
+        <a class="button button-secondary" href="/goals">Volver</a>
+    </div>
+
+    <form id="goal-form" class="form-grid">
+        {% include "goals/partials/form_fields.html" %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar objetivo</button>
+        </div>
+    </form>
+</section>
+
+<script>
+document.getElementById("goal-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = serializeForm(event.currentTarget);
+
+    const response = await fetch("/goals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        window.alert("No se pudo crear el objetivo.");
+        return;
+    }
+
+    window.location.href = "/goals";
+});
+
+function serializeForm(form) {
+    const formData = new FormData(form);
+    const payload = {};
+    for (const [key, value] of formData.entries()) {
+        payload[key] = value === "" ? null : value;
+    }
+    return payload;
+}
+</script>
+{% endblock %}

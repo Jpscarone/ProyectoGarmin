@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Salud {{ metric.metric_date.strftime('%Y-%m-%d') }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Salud</p>
+            <h1>{{ metric.metric_date.strftime('%Y-%m-%d') }}</h1>
+            <p class="text-muted">{{ metric.athlete.name if metric.athlete else metric.athlete_id }}</p>
+        </div>
+        <a class="button button-secondary" href="/health">Volver a salud</a>
+    </div>
+
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Horas de sueno:</strong> {{ metric.sleep_hours or '-' }}</div>
+        <div class="detail-item"><strong>Sleep score:</strong> {{ metric.sleep_score or '-' }}</div>
+        <div class="detail-item"><strong>Sueno profundo:</strong> {{ metric.deep_sleep_min or '-' }} min</div>
+        <div class="detail-item"><strong>Sueno REM:</strong> {{ metric.rem_sleep_min or '-' }} min</div>
+        <div class="detail-item"><strong>Despertares:</strong> {{ metric.awake_count or '-' }}</div>
+        <div class="detail-item"><strong>Stress avg/max:</strong> {{ metric.stress_avg or '-' }} / {{ metric.stress_max or '-' }}</div>
+        <div class="detail-item"><strong>Stress alto:</strong> {{ metric.high_stress_duration_min or '-' }} min</div>
+        <div class="detail-item"><strong>Body battery:</strong> {{ metric.body_battery_start or '-' }} / {{ metric.body_battery_min or '-' }} / {{ metric.body_battery_end or '-' }}</div>
+        <div class="detail-item"><strong>HRV status:</strong> {{ metric.hrv_status or '-' }}</div>
+        <div class="detail-item"><strong>HRV avg:</strong> {{ metric.hrv_avg_ms or '-' }} ms</div>
+        <div class="detail-item"><strong>FC reposo:</strong> {{ metric.resting_hr or '-' }}</div>
+        <div class="detail-item"><strong>FC media diaria:</strong> {{ metric.avg_daily_hr or '-' }}</div>
+        <div class="detail-item"><strong>Tiempo de recuperacion:</strong> {{ metric.recovery_time_hours or '-' }} h</div>
+        <div class="detail-item"><strong>VO2max:</strong> {{ metric.vo2max or '-' }}</div>
+        <div class="detail-item"><strong>SpO2 avg:</strong> {{ metric.spo2_avg or '-' }}</div>
+        <div class="detail-item"><strong>Respiracion media:</strong> {{ metric.respiration_avg or '-' }}</div>
+        <details class="detail-item detail-item-full">
+            <summary><strong>JSON crudo de salud</strong></summary>
+            <pre class="raw-json">{{ metric.raw_health_json or '-' }}</pre>
+        </details>
+    </div>
+</section>
+{% endblock %}

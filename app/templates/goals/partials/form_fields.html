@@ -1,0 +1,78 @@
+<label class="field">
+    <span>Atleta</span>
+    <select name="athlete_id" required>
+        <option value="">Seleccionar atleta</option>
+        {% for athlete in athletes %}
+        <option value="{{ athlete.id }}" {% if goal and goal.athlete_id == athlete.id %}selected{% endif %}>{{ athlete.name }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Nombre</span>
+    <input name="name" type="text" value="{{ goal.name if goal else '' }}" required>
+</label>
+
+<label class="field">
+    <span>Deporte</span>
+    <select name="sport_type">
+        <option value="">Seleccionar deporte</option>
+        {% set current_sport = goal.sport_type if goal and goal.sport_type else '' %}
+        {% for option in sport_options %}
+        <option value="{{ option.value }}" {% if current_sport == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
+</label>
+
+<label class="field">
+    <span>Tipo de evento</span>
+    <input name="event_type" type="text" value="{{ goal.event_type if goal and goal.event_type else '' }}" placeholder="Ej: 10K, medio ironman, trail 21K">
+</label>
+
+<label class="field">
+    <span>Fecha del evento</span>
+    <input name="event_date" type="date" value="{{ goal.event_date.isoformat() if goal and goal.event_date else '' }}">
+</label>
+
+<label class="field">
+    <span>Distancia (km)</span>
+    <input name="distance_km" type="number" step="0.1" value="{{ goal.distance_km if goal and goal.distance_km is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>Desnivel (m)</span>
+    <input name="elevation_gain_m" type="number" step="0.1" value="{{ goal.elevation_gain_m if goal and goal.elevation_gain_m is not none else '' }}">
+</label>
+
+<label class="field">
+    <span>Prioridad</span>
+    <select name="priority">
+        {% set current_priority = goal.priority if goal and goal.priority else '' %}
+        <option value="">Sin prioridad</option>
+        <option value="A" {% if current_priority == 'A' %}selected{% endif %}>A</option>
+        <option value="B" {% if current_priority == 'B' %}selected{% endif %}>B</option>
+        <option value="C" {% if current_priority == 'C' %}selected{% endif %}>C</option>
+    </select>
+</label>
+
+<label class="field">
+    <span>Ubicacion</span>
+    <input name="location_name" type="text" value="{{ goal.location_name if goal and goal.location_name else '' }}">
+</label>
+
+<label class="field">
+    <span>Estado</span>
+    <select name="status">
+        {% set current_status = goal.status if goal and goal.status else '' %}
+        <option value="">Sin estado</option>
+        <option value="draft" {% if current_status == 'draft' %}selected{% endif %}>Borrador</option>
+        <option value="active" {% if current_status == 'active' %}selected{% endif %}>Activo</option>
+        <option value="completed" {% if current_status == 'completed' %}selected{% endif %}>Completado</option>
+        <option value="cancelled" {% if current_status == 'cancelled' %}selected{% endif %}>Cancelado</option>
+    </select>
+</label>
+
+<label class="field field-full">
+    <span>Notas</span>
+    <textarea name="notes" rows="5">{{ goal.notes if goal and goal.notes else '' }}</textarea>
+</label>

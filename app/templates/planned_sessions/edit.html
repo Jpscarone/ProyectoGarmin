@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Editar sesion | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Sesiones</p>
+            <h1>Editar sesion</h1>
+            <p class="text-muted">Dia: {{ training_day.day_date }} | Plan: {{ training_day.training_plan.name }}</p>
+        </div>
+        <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
+    </div>
+
+    <form id="planned-session-form" class="form-grid">
+        {% include "planned_sessions/partials/form_fields.html" %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar cambios</button>
+        </div>
+    </form>
+</section>
+
+<script>
+document.getElementById("planned-session-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = serializePlannedSession(event.currentTarget);
+    const sessionGroupSelect = event.currentTarget.querySelector('[name="session_group_id"]');
+
+    if (sessionGroupSelect && sessionGroupSelect.value === "__new__") {
+        const groupId = await createInlineGroup(event.currentTarget);
+        if (!groupId) return;
+        payload.session_group_id = groupId;
+    }
+
+    const response = await fetch("/planned_sessions/{{ planned_session.id }}", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const error = await safeError(response);
+        window.alert(error);
+        return;
+    }
+
+    window.location.href = "/training_days/{{ training_day.id }}";
+});
+
+function serializePlannedSession(form) {
+    const formData = new FormData(form);
+    const payload = {
+        training_day_id: formData.get("training_day_id"),
+        name: formData.get("name"),
+        session_order: emptyToNull(formData.get("session_order")),
+        planned_start_time: emptyToNull(formData.get("planned_start_time")),
+        sport_type: emptyToNull(formData.get("sport_type")),
+        discipline_variant: emptyToNull(formData.get("discipline_variant")),
+        session_type: emptyToNull(formData.get("session_type")),
+        session_group_id: emptyToNull(formData.get("session_group_id")),
+        expected_duration_min: hhmmToMinutes(formData.get("expected_duration_hhmm")),
+        expected_distance_km: distanceToKm(formData.get("expected_distance_value"), formData.get("expected_distance_unit")),
+        expected_elevation_gain_m: emptyToNull(formData.get("expected_elevation_gain_m")),
+        target_hr_zone: emptyToNull(formData.get("target_hr_zone")),
+        target_power_zone: emptyToNull(formData.get("target_power_zone")),
+        target_notes: emptyToNull(formData.get("target_notes")),
+        description_text: emptyToNull(formData.get("description_text")),
+        is_key_session: formData.get("is_key_session") === "on",
+    };
+    return payload;
+}
+
+function toggleInlineGroupFields(value) {
+    const inlineFields = document.getElementById("inline-group-fields");
+    if (!inlineFields) return;
+    inlineFields.hidden = value !== "__new__";
+}
+
+function emptyToNull(value) {
+    return value === "" || value === null ? null : value;
+}
+
+function normalizeDurationInputValue(rawValue) {
+    const value = String(rawValue || "").trim().toLowerCase().replace(/\s+/g, "");
+    if (!value) return "";
+
+    let totalMinutes = null;
+    const hhmm = value.match(/^(\d+):(\d{1,2})$/);
+    if (hhmm) {
+        const hours = Number(hhmm[1]);
+        const minutes = Number(hhmm[2]);
+        if (!Number.isNaN(hours) && !Number.isNaN(minutes) && minutes <= 59) {
+            totalMinutes = hours * 60 + minutes;
+        }
+    }
+    if (totalMinutes === null) {
+        const compactHours = value.match(/^(\d+)h(\d{1,2})$/);
+        if (compactHours) {
+            const hours = Number(compactHours[1]);
+            const minutes = Number(compactHours[2]);
+            if (!Number.isNaN(hours) && !Number.isNaN(minutes) && minutes <= 59) {
+                totalMinutes = hours * 60 + minutes;
+            }
+        }
+    }
+    if (totalMinutes === null) {
+        const onlyHours = value.match(/^(\d+)h(?:s)?$/);
+        if (onlyHours) totalMinutes = Number(onlyHours[1]) * 60;
+    }
+    if (totalMinutes === null) {
+        const onlyMinutes = value.match(/^(\d+)(?:min|m)?$/);
+        if (onlyMinutes) totalMinutes = Number(onlyMinutes[1]);
+    }
+    if (totalMinutes === null || Number.isNaN(totalMinutes) || totalMinutes < 0) return "";
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function hhmmToMinutes(value) {
+    const normalized = normalizeDurationInputValue(value);
+    if (!normalized) return null;
+    const match = normalized.match(/^(\d+):([0-5]\d)$/);
+    if (!match) return null;
+    return Number(match[1]) * 60 + Number(match[2]);
+}
+
+function distanceToKm(value, unit) {
+    if (!value) return null;
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) return null;
+    return unit === "m" ? numeric / 1000 : numeric;
+}
+
+async function createInlineGroup(form) {
+    const groupName = form.querySelector('[name="new_group_name"]').value.trim();
+    if (!groupName) {
+        window.alert("Completa el nombre del grupo nuevo o elegi un grupo existente.");
+        return null;
+    }
+
+    const payload = {
+        training_day_id: Number(form.querySelector('[name="training_day_id"]').value),
+        name: groupName,
+        group_type: emptyToNull(form.querySelector('[name="new_group_type"]').value),
+        notes: emptyToNull(form.querySelector('[name="new_group_notes"]').value),
+        group_order: {{ (session_groups | length) + 1 }},
+    };
+
+    const response = await fetch("/session_groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+        const error = await safeError(response);
+        window.alert(error);
+        return null;
+    }
+
+    const group = await response.json();
+    return group.id;
+}
+
+async function safeError(response) {
+    try {
+        const data = await response.json();
+        return data.detail || "No se pudo guardar la sesion.";
+    } catch {
+        return "No se pudo guardar la sesion.";
+    }
+}
+
+toggleInlineGroupFields(document.getElementById("session-group-select")?.value || "");
+
+const durationField = document.querySelector('[name="expected_duration_hhmm"]');
+if (durationField) {
+    durationField.addEventListener("blur", () => {
+        if (!durationField.value.trim()) return;
+        const normalized = normalizeDurationInputValue(durationField.value);
+        if (!normalized) {
+            durationField.value = "";
+            durationField.focus();
+            return;
+        }
+        durationField.value = normalized;
+    });
+}
+
+const distanceField = document.querySelector('[name="expected_distance_value"]');
+if (distanceField) {
+    distanceField.addEventListener("blur", () => {
+        const raw = String(distanceField.value || "").trim();
+        if (!raw) return;
+        const normalized = raw.replace(",", ".");
+        const numeric = Number(normalized);
+        if (Number.isNaN(numeric) || numeric < 0) {
+            distanceField.value = "";
+            distanceField.focus();
+            return;
+        }
+        distanceField.value = normalized;
+    });
+}
+</script>
+{% endblock %}
