@@ -13,34 +13,40 @@
     </div>
 
     {% if athletes %}
-    <div class="table-wrap">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Nombre</th>
-                    <th>Altura</th>
-                    <th>Peso</th>
-                    <th>FTP</th>
-                    <th>VO2max</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for athlete in athletes %}
-                <tr>
-                    <td>{{ athlete.name }}</td>
-                    <td>{{ athlete.height_cm or "-" }}</td>
-                    <td>{{ athlete.weight_kg or "-" }}</td>
-                    <td>{{ athlete.cycling_ftp or "-" }}</td>
-                    <td>{{ athlete.vo2max or "-" }}</td>
-                    <td class="actions-inline">
-                        <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar</a>
-                        <button class="button button-danger" type="button" onclick='deleteAthlete({{ athlete.id }}, {{ athlete.name | tojson }})'>Eliminar</button>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div class="athlete-list">
+        {% for athlete in athletes %}
+        <article class="day-card athlete-row-card">
+            <div class="athlete-row-main">
+                <div>
+                    <h2 class="athlete-row-title">{{ athlete.name }}</h2>
+                    <p class="athlete-row-meta">
+                        {% if athlete.height_cm is not none %}{{ athlete.height_cm }} cm{% else %}Altura s/d{% endif %}
+                        |
+                        {% if athlete.weight_kg is not none %}{{ athlete.weight_kg }} kg{% else %}Peso s/d{% endif %}
+                        |
+                        FC max: {{ athlete.max_hr or "-" }}
+                    </p>
+                    <p class="athlete-row-meta">
+                        FTP: {{ athlete.cycling_ftp or "-" }}
+                        |
+                        VO2max: {{ athlete.vo2max or "-" }}
+                    </p>
+                    <p class="athlete-row-meta">
+                        Ultima comparacion Garmin:
+                        {{ athlete.garmin_profile_last_synced_at.strftime("%d/%m/%Y %H:%M") if athlete.garmin_profile_last_synced_at else "sin comparar" }}
+                    </p>
+                </div>
+                <div class="actions-inline">
+                    <a class="button" href="/athletes/{{ athlete.id }}">Ver detalle</a>
+                    <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar</a>
+                    <form method="post" action="/athletes/{{ athlete.id }}/compare-garmin">
+                        <button class="button button-secondary" type="submit">Comparar con Garmin</button>
+                    </form>
+                    <button class="button button-danger" type="button" onclick='deleteAthlete({{ athlete.id }}, {{ athlete.name | tojson }})'>Eliminar</button>
+                </div>
+            </div>
+        </article>
+        {% endfor %}
     </div>
     {% else %}
     <p class="empty-state">Todavia no hay atletas cargados.</p>

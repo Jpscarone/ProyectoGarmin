@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.db.session import get_db
 from app.schemas.athlete import AthleteCreate, AthleteRead, AthleteUpdate
 from app.services.athlete_service import (
@@ -15,6 +17,15 @@ from app.services.athlete_service import (
     get_athletes,
     update_athlete,
 )
+from app.services.athlete_zone_service import (
+    build_zone_form_rows,
+    recalculate_athlete_zones,
+    update_athlete_zones_manual,
+    use_garmin_zones,
+    zone_source_label,
+)
+from app.services.garmin.auth import GarminServiceError
+from app.services.garmin.profile_sync import apply_garmin_changes, build_athlete_garmin_comparison, load_zone_payload, compare_athlete_with_garmin
 from app.web.templates import build_templates
 
 
@@ -49,10 +60,25 @@ def create_athlete_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/{athlete_id}", response_model=AthleteRead)
-def read_athlete(athlete_id: int, db: Session = Depends(get_db)) -> AthleteRead:
+def read_athlete(request: Request, athlete_id: int, db: Session = Depends(get_db)):
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    if _wants_html(request):
+        return templates.TemplateResponse(
+            request=request,
+            name="athletes/detail.html",
+            context={
+                "athlete": athlete,
+                "comparison": build_athlete_garmin_comparison(athlete),
+                "hr_zones": load_zone_payload(athlete.hr_zones_json),
+                "power_zones": load_zone_payload(athlete.power_zones_json),
+                "source_hr_zones_label": zone_source_label(athlete.source_hr_zones),
+                "source_power_zones_label": zone_source_label(athlete.source_power_zones),
+                "status_message": request.query_params.get("status_message"),
+                "error_message": request.query_params.get("error"),
+            },
+        )
     return athlete
 
 
@@ -67,6 +93,43 @@ def edit_athlete_page(athlete_id: int, request: Request, db: Session = Depends(g
         name="athletes/edit.html",
         context={"athlete": athlete},
     )
+
+
+@router.get("/{athlete_id}/zones/edit", response_class=HTMLResponse)
+def edit_athlete_zones_page(athlete_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+
+    zone_rows = build_zone_form_rows(athlete)
+    return templates.TemplateResponse(
+        request=request,
+        name="athletes/zones_edit.html",
+        context={
+            "athlete": athlete,
+            "hr_rows": zone_rows["hr_rows"],
+            "power_rows": zone_rows["power_rows"],
+            "status_message": request.query_params.get("status_message"),
+            "error_message": request.query_params.get("error"),
+        },
+    )
+
+
+@router.post("/{athlete_id}/zones/edit")
+async def edit_athlete_zones_endpoint(athlete_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+
+    form = await request.form()
+    hr_rows = _zone_rows_from_form(form, "hr")
+    power_rows = _zone_rows_from_form(form, "power")
+    try:
+        updated = update_athlete_zones_manual(db, athlete, hr_rows, power_rows)
+        message = "Se actualizaron " + ", ".join(updated) + "."
+        return RedirectResponse(url=f"/athletes/{athlete_id}?status_message={quote(message)}", status_code=303)
+    except ValueError as exc:
+        return RedirectResponse(url=f"/athletes/{athlete_id}/zones/edit?error={quote(str(exc))}", status_code=303)
 
 
 @router.post("", response_model=AthleteRead, status_code=status.HTTP_201_CREATED)
@@ -93,3 +156,87 @@ def delete_athlete_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> R
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
     delete_athlete(db, athlete)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{athlete_id}/compare-garmin")
+def compare_athlete_garmin_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+
+    try:
+        compare_athlete_with_garmin(db, athlete, get_settings())
+    except GarminServiceError as exc:
+        return RedirectResponse(url=f"/athletes/{athlete_id}?error={quote(str(exc))}", status_code=303)
+
+    return RedirectResponse(
+        url=f"/athletes/{athlete_id}?status_message={quote('Comparacion con Garmin actualizada.')}",
+        status_code=303,
+    )
+
+
+@router.post("/{athlete_id}/apply-garmin")
+def apply_athlete_garmin_endpoint(
+    athlete_id: int,
+    scope: str = Form(default="all"),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+
+    try:
+        applied_blocks = apply_garmin_changes(db, athlete, scope)
+        message = "Se aplicaron cambios de Garmin en " + ", ".join(applied_blocks) + "."
+        return RedirectResponse(url=f"/athletes/{athlete_id}?status_message={quote(message)}", status_code=303)
+    except ValueError as exc:
+        return RedirectResponse(url=f"/athletes/{athlete_id}?error={quote(str(exc))}", status_code=303)
+
+
+@router.post("/{athlete_id}/zones/use-garmin")
+def use_athlete_garmin_zones_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+
+    try:
+        updated = use_garmin_zones(db, athlete)
+        message = "Se aplicaron " + ", ".join(updated) + " desde Garmin."
+        return RedirectResponse(url=f"/athletes/{athlete_id}?status_message={quote(message)}", status_code=303)
+    except ValueError as exc:
+        return RedirectResponse(url=f"/athletes/{athlete_id}?error={quote(str(exc))}", status_code=303)
+
+
+@router.post("/{athlete_id}/zones/recalculate")
+def recalculate_athlete_zones_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+
+    try:
+        updated = recalculate_athlete_zones(db, athlete)
+        message = "Se recalcularon " + ", ".join(updated) + "."
+        return RedirectResponse(url=f"/athletes/{athlete_id}?status_message={quote(message)}", status_code=303)
+    except ValueError as exc:
+        return RedirectResponse(url=f"/athletes/{athlete_id}?error={quote(str(exc))}", status_code=303)
+
+
+def _zone_rows_from_form(form, prefix: str) -> list[dict[str, int | None]]:
+    rows: list[dict[str, int | None]] = []
+    for index in range(1, 6):
+        minimum = _optional_int(form.get(f"{prefix}_z{index}_min"))
+        maximum = _optional_int(form.get(f"{prefix}_z{index}_max"))
+        rows.append({"min": minimum, "max": maximum})
+    return rows
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(float(text))
+    except ValueError:
+        return None

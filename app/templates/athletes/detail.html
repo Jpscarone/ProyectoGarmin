@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block title %}{{ athlete.name }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Atletas</p>
+            <h1>{{ athlete.name }}</h1>
+            <p>Ficha completa del atleta con datos activos, perfil Garmin y diferencias detectadas.</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="/athletes">Volver</a>
+            <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar atleta</a>
+            <form method="post" action="/athletes/{{ athlete.id }}/compare-garmin">
+                <button class="button" type="submit">Comparar con Garmin</button>
+            </form>
+            <button class="button button-danger" type="button" onclick='deleteAthlete({{ athlete.id }}, {{ athlete.name | tojson }})'>Eliminar</button>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <p class="status-note">{{ status_message }}</p>
+    {% endif %}
+    {% if error_message %}
+    <p class="status-note status-note-error">{{ error_message }}</p>
+    {% endif %}
+
+    <div class="athlete-detail-layout">
+        <section class="panel panel-subtle">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Resumen del atleta</p>
+                    <h2 class="subsection-title">Datos activos</h2>
+                </div>
+                <span class="status-badge status-badge-manual">Manual</span>
+            </div>
+            <div class="detail-grid">
+                <div class="detail-pill"><strong>Nombre:</strong> {{ athlete.name }}</div>
+                <div class="detail-pill"><strong>Altura:</strong> {{ athlete.height_cm ~ " cm" if athlete.height_cm is not none else "-" }}</div>
+                <div class="detail-pill"><strong>Peso:</strong> {{ athlete.weight_kg ~ " kg" if athlete.weight_kg is not none else "-" }}</div>
+                <div class="detail-pill"><strong>FC maxima:</strong> {{ athlete.max_hr or "-" }}</div>
+                <div class="detail-pill"><strong>FC reposo:</strong> {{ athlete.resting_hr or "-" }}</div>
+                <div class="detail-pill"><strong>FC umbral lactato:</strong> {{ athlete.lactate_threshold_hr or "-" }}</div>
+                <div class="detail-pill"><strong>Ritmo umbral running:</strong> {{ pace_mmss(athlete.running_threshold_pace_sec_km) ~ " /km" if athlete.running_threshold_pace_sec_km is not none else "-" }}</div>
+                <div class="detail-pill"><strong>FTP ciclismo:</strong> {{ athlete.cycling_ftp or "-" }}</div>
+                <div class="detail-pill"><strong>VO2max:</strong> {{ athlete.vo2max or "-" }}</div>
+                <div class="detail-pill detail-pill-full"><strong>Notas:</strong> {{ athlete.notes or "-" }}</div>
+            </div>
+        </section>
+
+        <section class="panel panel-subtle">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Zonas activas</p>
+                    <h2 class="subsection-title">Zonas de frecuencia cardiaca y potencia</h2>
+                </div>
+                <div class="actions-inline">
+                    <a class="button button-secondary" href="/athletes/{{ athlete.id }}/zones/edit">Editar zonas</a>
+                    <form method="post" action="/athletes/{{ athlete.id }}/zones/use-garmin">
+                        <button class="button button-secondary" type="submit" {% if not comparison.garmin_summary.has_hr_zones and not comparison.garmin_summary.has_power_zones %}disabled{% endif %}>Usar zonas de Garmin</button>
+                    </form>
+                    <form method="post" action="/athletes/{{ athlete.id }}/zones/recalculate">
+                        <button class="button button-secondary" type="submit">Recalcular zonas</button>
+                    </form>
+                </div>
+            </div>
+            <div class="athlete-zone-grid">
+                <div>
+                    <h3 class="subsection-title">Zonas de frecuencia cardiaca</h3>
+                    <p class="zone-source-line">Fuente: <span class="status-badge {{ 'status-badge-manual' if athlete.source_hr_zones == 'manual' else 'status-badge-garmin' if athlete.source_hr_zones == 'garmin' else 'status-badge-active' if athlete.source_hr_zones == 'calculated' else 'status-badge-empty' }}">{{ source_hr_zones_label }}</span></p>
+                    {% if hr_zones %}
+                    {% for sport_key, zone_rows in hr_zones.items() %}
+                    <div class="zone-card">
+                        <strong>{{ sport_label(sport_key) if sport_key != "general" else "General" }}</strong>
+                        <ul class="zone-list">
+                            {% for zone in zone_rows %}
+                            <li>{{ zone.name }}: {{ zone.min if zone.min is not none else "-" }}{% if zone.max is not none %} - {{ zone.max }}{% endif %}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="empty-state">No hay zonas de frecuencia cardiaca activas.</p>
+                    {% endif %}
+                </div>
+                <div>
+                    <h3 class="subsection-title">Zonas de potencia</h3>
+                    <p class="zone-source-line">Fuente: <span class="status-badge {{ 'status-badge-manual' if athlete.source_power_zones == 'manual' else 'status-badge-garmin' if athlete.source_power_zones == 'garmin' else 'status-badge-active' if athlete.source_power_zones == 'calculated' else 'status-badge-empty' }}">{{ source_power_zones_label }}</span></p>
+                    {% if power_zones %}
+                    {% for sport_key, zone_rows in power_zones.items() %}
+                    <div class="zone-card">
+                        <strong>{{ sport_label(sport_key) if sport_key != "general" else "General" }}</strong>
+                        <ul class="zone-list">
+                            {% for zone in zone_rows %}
+                            <li>{{ zone.name }}: {{ zone.min if zone.min is not none else "-" }}{% if zone.max is not none %} - {{ zone.max }}{% endif %}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endfor %}
+                    {% else %}
+                    <p class="empty-state">No hay zonas de potencia activas.</p>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="panel panel-subtle">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Perfil Garmin</p>
+                    <h2 class="subsection-title">Estado y datos disponibles</h2>
+                </div>
+                {% if comparison.has_snapshot %}
+                <span class="status-badge status-badge-garmin">Garmin</span>
+                {% else %}
+                <span class="status-badge status-badge-empty">Sin datos</span>
+                {% endif %}
+            </div>
+            <div class="detail-grid">
+                <div class="detail-pill">
+                    <strong>Ultima comparacion:</strong>
+                    {{ athlete.garmin_profile_last_synced_at.strftime("%d/%m/%Y %H:%M") if athlete.garmin_profile_last_synced_at else "-" }}
+                </div>
+                <div class="detail-pill">
+                    <strong>Estado general:</strong>
+                    {% if comparison.has_snapshot %}
+                        {% if comparison.has_differences %}Diferencias detectadas{% else %}Sin diferencias relevantes{% endif %}
+                    {% else %}
+                        Todavia no se comparo con Garmin
+                    {% endif %}
+                </div>
+                <div class="detail-pill detail-pill-full">
+                    <strong>Datos Garmin disponibles:</strong>
+                    {% if comparison.has_snapshot %}
+                        {{ comparison.garmin_summary.available_fields | join(", ") if comparison.garmin_summary.available_fields else "sin datos generales nuevos" }}
+                        | Zonas FC: {{ "si" if comparison.garmin_summary.has_hr_zones else "no" }}
+                        | Zonas potencia: {{ "si" if comparison.garmin_summary.has_power_zones else "no" }}
+                    {% else %}
+                        Sin snapshot Garmin guardado todavia.
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="panel panel-subtle">
+            <p class="eyebrow">Diferencias detectadas</p>
+            {% if comparison.has_snapshot %}
+                {% if comparison.general_rows %}
+                <h3 class="subsection-title">Datos generales</h3>
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Dato</th>
+                                <th>Valor actual</th>
+                                <th>Valor Garmin</th>
+                                <th>Accion sugerida</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in comparison.general_rows %}
+                            <tr class="{{ 'comparison-different' if row.is_different else '' }}">
+                                <td>{{ row.label }}</td>
+                                <td>{{ row.local_value }}</td>
+                                <td>{{ row.garmin_value }}</td>
+                                <td>{{ row.suggested_action }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="empty-state">Garmin no devolvio datos generales comparables en esta revision.</p>
+                {% endif %}
+
+                <div class="athlete-zone-grid">
+                    <div>
+                        <h3 class="subsection-title">Zonas de frecuencia cardiaca</h3>
+                        {% if comparison.hr_zone_rows %}
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Zona</th>
+                                        <th>Actual</th>
+                                        <th>Garmin</th>
+                                        <th>Accion sugerida</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in comparison.hr_zone_rows %}
+                                    <tr class="{{ 'comparison-different' if row.is_different else '' }}">
+                                        <td>{{ sport_label(row.sport) if row.sport != "general" else "General" }} - {{ row.zone_name }}</td>
+                                        <td>{{ row.local_value }}</td>
+                                        <td>{{ row.garmin_value }}</td>
+                                        <td>{{ row.suggested_action }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="empty-state">No hay diferencias o datos Garmin de zonas FC para mostrar.</p>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <h3 class="subsection-title">Zonas de potencia</h3>
+                        {% if comparison.power_zone_rows %}
+                        <div class="table-wrap">
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th>Zona</th>
+                                        <th>Actual</th>
+                                        <th>Garmin</th>
+                                        <th>Accion sugerida</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for row in comparison.power_zone_rows %}
+                                    <tr class="{{ 'comparison-different' if row.is_different else '' }}">
+                                        <td>{{ sport_label(row.sport) if row.sport != "general" else "General" }} - {{ row.zone_name }}</td>
+                                        <td>{{ row.local_value }}</td>
+                                        <td>{{ row.garmin_value }}</td>
+                                        <td>{{ row.suggested_action }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <p class="empty-state">No hay diferencias o datos Garmin de zonas potencia para mostrar.</p>
+                        {% endif %}
+                    </div>
+                </div>
+            {% else %}
+            <p class="empty-state">Todavia no hay una comparacion cargada. Usa "Comparar con Garmin" para ver diferencias.</p>
+            {% endif %}
+        </section>
+
+        <section class="panel panel-subtle">
+            <p class="eyebrow">Acciones</p>
+            <div class="actions-inline athlete-apply-actions">
+                <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar atleta</a>
+                <form method="post" action="/athletes/{{ athlete.id }}/compare-garmin">
+                    <button class="button" type="submit">Comparar con Garmin</button>
+                </form>
+                <form method="post" action="/athletes/{{ athlete.id }}/apply-garmin">
+                    <input type="hidden" name="scope" value="general">
+                    <button class="button button-secondary" type="submit" {% if not comparison.has_general_differences %}disabled{% endif %}>Aplicar datos generales</button>
+                </form>
+                <form method="post" action="/athletes/{{ athlete.id }}/apply-garmin">
+                    <input type="hidden" name="scope" value="hr_zones">
+                    <button class="button button-secondary" type="submit" {% if not comparison.has_hr_zone_differences %}disabled{% endif %}>Aplicar zonas FC</button>
+                </form>
+                <form method="post" action="/athletes/{{ athlete.id }}/apply-garmin">
+                    <input type="hidden" name="scope" value="power_zones">
+                    <button class="button button-secondary" type="submit" {% if not comparison.has_power_zone_differences %}disabled{% endif %}>Aplicar zonas potencia</button>
+                </form>
+            </div>
+        </section>
+    </div>
+</section>
+
+<script>
+async function deleteAthlete(athleteId, athleteName) {
+    const confirmed = window.confirm(`Eliminar a ${athleteName}?`);
+    if (!confirmed) return;
+
+    const response = await fetch(`/athletes/${athleteId}`, {
+        method: "DELETE",
+        headers: { "Accept": "application/json" }
+    });
+
+    if (!response.ok) {
+        window.alert("No se pudo eliminar el atleta.");
+        return;
+    }
+
+    window.location.href = "/athletes";
+}
+</script>
+{% endblock %}

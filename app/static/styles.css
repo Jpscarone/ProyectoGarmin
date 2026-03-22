@@ -142,6 +142,11 @@ p {
     margin-top: 1.5rem;
 }
 
+.actions-inline form,
+.form-actions form {
+    display: inline-flex;
+}
+
 .button {
     display: inline-flex;
     align-items: center;
@@ -158,6 +163,11 @@ p {
 
 .button:hover {
     background: var(--primary-dark);
+}
+
+.button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
 }
 
 .button-secondary {
@@ -201,6 +211,48 @@ p {
 
 .empty-state {
     color: var(--muted);
+}
+
+.status-note {
+    margin-bottom: 1rem;
+    padding: 0.9rem 1rem;
+    border-radius: 16px;
+    background: rgba(37, 99, 235, 0.08);
+    color: var(--text);
+}
+
+.status-note-error {
+    background: rgba(185, 28, 28, 0.08);
+    color: #991b1b;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.status-badge-manual {
+    background: rgba(37, 99, 235, 0.1);
+    color: #1d4ed8;
+}
+
+.status-badge-garmin {
+    background: rgba(22, 163, 74, 0.12);
+    color: #15803d;
+}
+
+.status-badge-active {
+    background: rgba(245, 158, 11, 0.15);
+    color: #b45309;
+}
+
+.status-badge-empty {
+    background: rgba(148, 163, 184, 0.15);
+    color: #475569;
 }
 
 .form-grid {
@@ -461,6 +513,16 @@ h3 {
     gap: 1rem;
 }
 
+.detail-pill {
+    padding: 1rem;
+    border-radius: 18px;
+    background: rgba(226, 232, 240, 0.55);
+}
+
+.detail-pill-full {
+    grid-column: 1 / -1;
+}
+
 .detail-item {
     padding: 1rem;
     border-radius: 18px;
@@ -479,6 +541,94 @@ h3 {
 
 .training-plan-overview-full {
     grid-column: 1 / -1;
+}
+
+.athlete-list {
+    display: grid;
+    gap: 1rem;
+}
+
+.athlete-row-card {
+    padding: 1.25rem;
+}
+
+.athlete-row-main {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 1rem;
+}
+
+.athlete-row-title {
+    margin: 0 0 0.4rem;
+    font-size: 1.5rem;
+}
+
+.athlete-row-meta {
+    color: var(--muted);
+    font-size: 0.98rem;
+}
+
+.athlete-detail-layout {
+    display: grid;
+    gap: 1.5rem;
+}
+
+.athlete-zone-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.subsection-title {
+    margin: 0 0 0.9rem;
+    font-size: 1.15rem;
+}
+
+.zone-card {
+    margin-bottom: 0.9rem;
+    padding: 1rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.82);
+    border: 1px solid #dbe3ef;
+}
+
+.zone-source-line {
+    margin: 0 0 0.8rem;
+    color: var(--muted);
+}
+
+.zones-form-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.zone-input-card {
+    padding: 1rem;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid #dbe3ef;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.zone-list {
+    margin: 0.75rem 0 0;
+    padding-left: 1.1rem;
+}
+
+.zone-list li + li {
+    margin-top: 0.3rem;
+}
+
+.comparison-different td {
+    background: rgba(37, 99, 235, 0.05);
+}
+
+.athlete-apply-actions {
+    margin-top: 1rem;
+    flex-wrap: wrap;
 }
 
 .day-card,
@@ -858,8 +1008,14 @@ details.detail-item summary {
     .calendar-grid,
     .day-card-header,
     .session-card,
-    .detail-grid {
+    .detail-grid,
+    .athlete-zone-grid,
+    .athlete-row-main {
         display: grid;
+    }
+
+    .zones-form-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .form-grid {
@@ -949,7 +1105,8 @@ details.detail-item summary {
     .quick-simple-top-grid,
     .quick-simple-metrics-grid,
     .quick-text-top-grid,
-    .quick-text-advanced-grid {
+    .quick-text-advanced-grid,
+    .zones-form-grid {
         grid-template-columns: 1fr;
     }
 }

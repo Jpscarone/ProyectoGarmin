@@ -51,6 +51,14 @@ class GarminClient:
             "training_readiness": self._safe_call("training_readiness", lambda: self.api.get_training_readiness(date_str), {}),
         }
 
+    def get_profile_payloads(self) -> dict[str, object]:
+        return {
+            "user_profile": self._safe_call("user_profile", self.api.get_user_profile, {}),
+            "userprofile_settings": self._safe_call("userprofile_settings", self.api.get_userprofile_settings, {}),
+            "cycling_ftp": self._safe_call("cycling_ftp", self.api.get_cycling_ftp, {}),
+            "lactate_threshold": self._safe_call("lactate_threshold", lambda: self.api.get_lactate_threshold(latest=True), {}),
+        }
+
     def _safe_call(self, name: str, func, default: object) -> object:
         try:
             return func() or default

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Editar zonas | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Atletas</p>
+            <h1>Editar zonas</h1>
+            <p>{{ athlete.name }}</p>
+        </div>
+        <a class="button button-secondary" href="/athletes/{{ athlete.id }}">Volver al atleta</a>
+    </div>
+
+    {% if status_message %}
+    <p class="status-note">{{ status_message }}</p>
+    {% endif %}
+    {% if error_message %}
+    <p class="status-note status-note-error">{{ error_message }}</p>
+    {% endif %}
+
+    <form class="form-grid" method="post" action="/athletes/{{ athlete.id }}/zones/edit">
+        <section class="form-section field-full">
+            <div class="form-section-header">
+                <div>
+                    <h2>Zonas de frecuencia cardiaca</h2>
+                    <p>Carga rangos Z1 a Z5 para este atleta.</p>
+                </div>
+            </div>
+            <div class="zones-form-grid">
+                {% for row in hr_rows %}
+                <div class="zone-input-card">
+                    <h3>{{ row.name }}</h3>
+                    <label class="field">
+                        <span>Min</span>
+                        <input type="number" name="hr_z{{ loop.index }}_min" value="{{ row.min if row.min is not none else '' }}">
+                    </label>
+                    <label class="field">
+                        <span>Max</span>
+                        <input type="number" name="hr_z{{ loop.index }}_max" value="{{ row.max if row.max is not none else '' }}">
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="form-section field-full">
+            <div class="form-section-header">
+                <div>
+                    <h2>Zonas de potencia</h2>
+                    <p>Carga rangos Z1 a Z5 para este atleta.</p>
+                </div>
+            </div>
+            <div class="zones-form-grid">
+                {% for row in power_rows %}
+                <div class="zone-input-card">
+                    <h3>{{ row.name }}</h3>
+                    <label class="field">
+                        <span>Min</span>
+                        <input type="number" name="power_z{{ loop.index }}_min" value="{{ row.min if row.min is not none else '' }}">
+                    </label>
+                    <label class="field">
+                        <span>Max</span>
+                        <input type="number" name="power_z{{ loop.index }}_max" value="{{ row.max if row.max is not none else '' }}">
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar zonas</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

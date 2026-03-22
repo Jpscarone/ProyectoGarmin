@@ -33,6 +33,15 @@ class Athlete(Base):
     cycling_ftp: Mapped[int | None] = mapped_column(Integer, nullable=True)
     vo2max: Mapped[float | None] = mapped_column(Float, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    hr_zones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    power_zones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_hr_zones: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_power_zones: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    garmin_profile_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    garmin_profile_last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
