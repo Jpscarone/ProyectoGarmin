@@ -21,6 +21,17 @@
 </section>
 
 <script>
+const secondaryGoalTemplate = document.getElementById("secondary-goal-template");
+const secondaryGoalsList = document.getElementById("secondary-goals-list");
+
+function addSecondaryGoal() {
+    secondaryGoalsList.appendChild(secondaryGoalTemplate.content.firstElementChild.cloneNode(true));
+}
+
+function removeSecondaryGoal(button) {
+    button.closest("[data-secondary-goal]").remove();
+}
+
 document.getElementById("training-plan-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const payload = serializeForm(event.currentTarget);
@@ -37,7 +48,8 @@ document.getElementById("training-plan-form").addEventListener("submit", async (
         return;
     }
 
-    window.location.href = "/training_plans";
+    const created = await response.json();
+    window.location.href = `/training_plans/${created.id}`;
 });
 
 function serializeForm(form) {
@@ -46,7 +58,45 @@ function serializeForm(form) {
     for (const [key, value] of formData.entries()) {
         payload[key] = value === "" ? null : value;
     }
+    payload.primary_goal = serializePrimaryGoal(form);
+    payload.secondary_goals = serializeSecondaryGoals();
     return payload;
+}
+
+function serializePrimaryGoal(form) {
+    return {
+        id: emptyToNull(form.querySelector('[name="primary_goal_id"]').value),
+        name: emptyToNull(form.querySelector('[name="primary_goal_name"]').value),
+        sport_type: emptyToNull(form.querySelector('[name="primary_goal_sport_type"]').value),
+        event_date: emptyToNull(form.querySelector('[name="primary_goal_event_date"]').value),
+        distance_km: floatOrNull(form.querySelector('[name="primary_goal_distance_km"]').value),
+        elevation_gain_m: floatOrNull(form.querySelector('[name="primary_goal_elevation_gain_m"]').value),
+        location_name: emptyToNull(form.querySelector('[name="primary_goal_location_name"]').value),
+        priority: emptyToNull(form.querySelector('[name="primary_goal_priority"]').value),
+        notes: emptyToNull(form.querySelector('[name="primary_goal_notes"]').value),
+    };
+}
+
+function serializeSecondaryGoals() {
+    return Array.from(document.querySelectorAll("[data-secondary-goal]")).map((card) => ({
+        id: emptyToNull(card.querySelector('[data-goal-field="id"]').value),
+        name: emptyToNull(card.querySelector('[data-goal-field="name"]').value),
+        sport_type: emptyToNull(card.querySelector('[data-goal-field="sport_type"]').value),
+        event_date: emptyToNull(card.querySelector('[data-goal-field="event_date"]').value),
+        distance_km: floatOrNull(card.querySelector('[data-goal-field="distance_km"]').value),
+        elevation_gain_m: floatOrNull(card.querySelector('[data-goal-field="elevation_gain_m"]').value),
+        location_name: emptyToNull(card.querySelector('[data-goal-field="location_name"]').value),
+        priority: emptyToNull(card.querySelector('[data-goal-field="priority"]').value),
+        notes: emptyToNull(card.querySelector('[data-goal-field="notes"]').value),
+    }));
+}
+
+function emptyToNull(value) {
+    return value === "" ? null : value;
+}
+
+function floatOrNull(value) {
+    return value === "" ? null : Number(value);
 }
 
 async function safeError(response) {

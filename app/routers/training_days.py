@@ -97,6 +97,7 @@ def read_training_day(training_day_id: int, request: Request, db: Session = Depe
                 "training_day": training_day,
                 "back_label": back_label,
                 "back_href": back_href,
+                "ui_status": request.query_params.get("ui_status"),
                 "match_status": request.query_params.get("match_status"),
                 "analysis_status": request.query_params.get("analysis_status"),
                 "latest_report": get_latest_day_report(db, training_day.id),

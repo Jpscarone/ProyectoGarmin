@@ -15,6 +15,7 @@
             <form method="post" action="/analysis/session/{{ planned_session.id }}">
                 <button class="button" type="submit">Analizar sesion</button>
             </form>
+            <a class="button button-secondary" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
             <a class="button button-secondary" href="/analysis/bundle/session/{{ planned_session.id }}">Generar bundle</a>
             <a class="button button-secondary" href="/analysis/bundle/session/{{ planned_session.id }}#chatgpt">Ver resumen para ChatGPT</a>
             <form method="post" action="/match/day/{{ training_day.id }}">

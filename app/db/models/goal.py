@@ -18,7 +18,9 @@ class Goal(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     athlete_id: Mapped[int] = mapped_column(ForeignKey("athletes.id"), nullable=False, index=True)
+    training_plan_id: Mapped[int | None] = mapped_column(ForeignKey("training_plans.id"), nullable=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    goal_role: Mapped[str | None] = mapped_column(String(20), nullable=True)
     sport_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     event_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     event_date: Mapped[date | None] = mapped_column(Date, nullable=True)
@@ -37,4 +39,4 @@ class Goal(Base):
     )
 
     athlete: Mapped["Athlete"] = relationship(back_populates="goals")
-    training_plans: Mapped[list["TrainingPlan"]] = relationship(back_populates="goal")
+    training_plan: Mapped["TrainingPlan | None"] = relationship(back_populates="goals", foreign_keys=[training_plan_id])

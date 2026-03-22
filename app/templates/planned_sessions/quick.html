@@ -16,13 +16,7 @@
                 {% endif %}
             </p>
         </div>
-        <div class="actions-inline">
-            {% if training_day %}
-            <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
-            {% else %}
-            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}">Volver al plan</a>
-            {% endif %}
-        </div>
+        <div></div>
     </div>
 
     {% if error %}
@@ -34,6 +28,9 @@
         <input type="hidden" name="training_day_id" value="{{ training_day.id }}">
         {% endif %}
         <input type="hidden" name="training_plan_id" value="{{ (training_day.training_plan.id if training_day else training_plan.id) }}">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <input type="hidden" name="return_month" value="{{ return_month }}">
+        <input type="hidden" name="return_selected_date" value="{{ return_selected_date or selected_day_date }}">
         <input type="hidden" name="mode" id="quick-mode-input" value="{{ initial_mode }}">
         <input type="hidden" name="builder_raw_text" id="builder-raw-text">
 
@@ -54,6 +51,11 @@
             <button class="quick-mode-tab{% if initial_mode == 'simple' %} is-active{% endif %}" type="button" data-mode-target="simple" onclick="switchQuickMode('simple')">Sesion simple</button>
             <button class="quick-mode-tab{% if initial_mode == 'text' %} is-active{% endif %}" type="button" data-mode-target="text" onclick="switchQuickMode('text')">Texto libre</button>
             <button class="quick-mode-tab{% if initial_mode == 'builder' %} is-active{% endif %}" type="button" data-mode-target="builder" onclick="switchQuickMode('builder')">Sesion por bloques</button>
+            {% if training_day %}
+            <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_day_id={{ training_day.id }}&return_to={{ return_to or 'day' }}&month={{ return_month or training_day.day_date.strftime('%Y-%m') }}">Biblioteca</a>
+            {% elif training_plan %}
+            <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_plan_id={{ training_plan.id }}&planned_day_date={{ selected_day_date or '' }}&return_to={{ return_to or 'plan' }}">Biblioteca</a>
+            {% endif %}
         </div>
 
         <div class="quick-mode-panels">
@@ -354,7 +356,11 @@
             <p class="text-muted">La estructura de la sesion es la fuente principal. Los datos avanzados completan metadata sin romper la coherencia de pasos, duracion y distancia derivadas.</p>
             <div class="actions-inline">
                 <button class="button" type="submit">Crear sesion</button>
-                {% if training_day %}
+                {% if return_to == 'calendar' %}
+                <a class="button button-secondary" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}/calendar?month={{ return_month or (selected_day_date or '')[:7] }}&selected_date={{ return_selected_date or selected_day_date }}">Volver al calendario</a>
+                {% elif return_to == 'plan' %}
+                <a class="button button-secondary" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}{% if training_day %}#training-day-{{ training_day.id }}{% endif %}">Volver a dias del plan</a>
+                {% elif training_day %}
                 <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
                 {% else %}
                 <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}">Volver al plan</a>
@@ -863,6 +869,18 @@ window.addEventListener("load", () => {
     document.querySelectorAll('[name="simple_expected_distance_km"], [name="advanced_expected_distance_value"]').forEach((field) => {
         field.addEventListener("blur", () => validateNumericDistanceFieldOnBlur(field));
     });
+
+    const dateField = document.querySelector('[name="planned_day_date"]');
+    const libraryLink = document.getElementById("quick-library-link");
+    if (dateField && libraryLink) {
+        const syncLibraryLink = () => {
+            const url = new URL(libraryLink.href, window.location.origin);
+            url.searchParams.set("planned_day_date", dateField.value || "");
+            libraryLink.href = `${url.pathname}${url.search}${url.hash}`;
+        };
+        dateField.addEventListener("change", syncLibraryLink);
+        syncLibraryLink();
+    }
 });
 </script>
 {% endblock %}

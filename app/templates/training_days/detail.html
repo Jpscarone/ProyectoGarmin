@@ -19,6 +19,7 @@
         <div class="actions-inline">
             <a class="button button-secondary" href="{{ back_href }}">{{ back_label }}</a>
             <a class="button" href="/planned_sessions/quick?training_day_id={{ training_day.id }}">Sesion rapida</a>
+            <a class="button button-secondary" href="/session_templates?training_day_id={{ training_day.id }}&return_to={{ 'plan' if back_label == 'Volver a dias del plan' else 'calendar' }}&month={{ training_day.day_date.strftime('%Y-%m') }}">Agregar desde biblioteca</a>
             <form method="post" action="/analysis/day/{{ training_day.id }}">
                 <button class="button" type="submit">Analizar dia</button>
             </form>
@@ -30,6 +31,9 @@
         </div>
     </div>
 
+    {% if ui_status %}
+    <div class="alert alert-info">{{ ui_status }}</div>
+    {% endif %}
     {% if match_status %}
     <div class="alert alert-info">{{ match_status }}</div>
     {% endif %}

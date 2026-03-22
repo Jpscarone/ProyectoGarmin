@@ -18,11 +18,13 @@
             <thead>
                 <tr>
                     <th>Nombre</th>
+                    <th>Deporte</th>
                     <th>Atleta</th>
-                    <th>Objetivo</th>
-                    <th>Inicio</th>
-                    <th>Fin</th>
+                    <th>Objetivo principal</th>
+                    <th>Fecha objetivo</th>
+                    <th>Periodo</th>
                     <th>Estado</th>
+                    <th>Secundarios</th>
                     <th>Acciones</th>
                 </tr>
             </thead>
@@ -30,11 +32,13 @@
                 {% for training_plan in training_plans %}
                 <tr id="training-plan-{{ training_plan.id }}">
                     <td>{{ training_plan.name }}</td>
+                    <td>{{ sport_label(training_plan.sport_type) }}</td>
                     <td>{{ training_plan.athlete.name }}</td>
                     <td>{{ training_plan.goal.name if training_plan.goal else "-" }}</td>
-                    <td>{{ training_plan.start_date or "-" }}</td>
-                    <td>{{ training_plan.end_date or "-" }}</td>
+                    <td>{{ training_plan.goal.event_date if training_plan.goal and training_plan.goal.event_date else "-" }}</td>
+                    <td>{{ training_plan.start_date or "-" }}{% if training_plan.end_date %} a {{ training_plan.end_date }}{% endif %}</td>
                     <td>{{ training_plan.status or "-" }}</td>
+                    <td>{{ training_plan.goals | selectattr('goal_role', 'equalto', 'secondary') | list | length }}</td>
                     <td class="actions-inline">
                         <a class="button" href="/training_plans/{{ training_plan.id }}">Dias del plan</a>
                         <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/calendar">Calendario</a>

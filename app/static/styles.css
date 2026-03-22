@@ -473,7 +473,7 @@ h3 {
 
 .training-plan-overview {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 1rem;
 }
 
@@ -710,6 +710,20 @@ details.detail-item summary {
     border: 1px solid rgba(148, 163, 184, 0.22);
 }
 
+.calendar-goal-chip {
+    border-width: 2px;
+}
+
+.calendar-goal-primary {
+    background: rgba(254, 243, 199, 0.95);
+    border-color: rgba(245, 158, 11, 0.45);
+}
+
+.calendar-goal-secondary {
+    background: rgba(220, 252, 231, 0.95);
+    border-color: rgba(34, 197, 94, 0.35);
+}
+
 .calendar-session-chip span,
 .calendar-more,
 .calendar-empty-text,
@@ -853,7 +867,7 @@ details.detail-item summary {
     }
 
     .training-plan-overview {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .calendar-grid {
@@ -906,6 +920,10 @@ details.detail-item summary {
 }
 
 @media (max-width: 640px) {
+    .training-plan-overview {
+        grid-template-columns: 1fr;
+    }
+
     .quick-layout-triple {
         grid-template-columns: 1fr;
     }

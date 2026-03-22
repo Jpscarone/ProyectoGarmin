@@ -1,0 +1,229 @@
+<div class="form-section">
+    <div class="form-section-header">
+        <p class="eyebrow">Plantilla</p>
+        <h2>Datos generales</h2>
+    </div>
+    <div class="form-grid">
+        <label class="field">
+            <span>Titulo</span>
+            <input name="title" type="text" value="{{ template_input.title }}" placeholder="Ej: Running 5x2km Z4" required>
+        </label>
+        <label class="field">
+            <span>Deporte</span>
+            <select name="sport_type">
+                <option value="">Sin definir</option>
+                {% for option in sport_options %}
+                <option value="{{ option.value }}" {% if template_input.sport_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Variante</span>
+            <input name="discipline_variant" type="text" value="{{ template_input.discipline_variant or '' }}" placeholder="ruta, trail, pileta...">
+        </label>
+        <label class="field">
+            <span>Tipo de sesion</span>
+            <select name="session_type">
+                <option value="">Sin tipo</option>
+                {% for option in session_type_options %}
+                <option value="{{ option.value }}" {% if template_input.session_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Duracion esperada</span>
+            <input name="expected_duration_min" type="text" value="{{ duration_minutes_hhmm(template_input.expected_duration_min) if template_input.expected_duration_min else '' }}" placeholder="Ej: 1:15">
+        </label>
+        <label class="field">
+            <span>Distancia esperada (km)</span>
+            <input name="expected_distance_km" type="number" step="0.1" min="0" value="{{ template_input.expected_distance_km if template_input.expected_distance_km is not none else '' }}" placeholder="Ej: 12">
+        </label>
+        <label class="field">
+            <span>Desnivel esperado (m)</span>
+            <input name="expected_elevation_gain_m" type="number" step="1" min="0" value="{{ template_input.expected_elevation_gain_m if template_input.expected_elevation_gain_m is not none else '' }}" placeholder="Ej: 800">
+        </label>
+        <label class="field">
+            <span>Zona FC objetivo</span>
+            <select name="target_hr_zone">
+                <option value="">Sin zona</option>
+                {% for option in zone_options %}
+                <option value="{{ option.value }}" {% if template_input.target_hr_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Zona potencia objetivo</span>
+            <select name="target_power_zone">
+                <option value="">Sin zona</option>
+                {% for option in zone_options %}
+                <option value="{{ option.value }}" {% if template_input.target_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field checkbox-field">
+            <span>Plantilla activa</span>
+            <input name="is_active" type="checkbox" {% if template_input.is_active %}checked{% endif %}>
+        </label>
+        <label class="field field-full">
+            <span>Descripcion</span>
+            <textarea name="description_text" rows="3" placeholder="Descripcion breve de la sesion">{{ template_input.description_text or '' }}</textarea>
+        </label>
+        <label class="field field-full">
+            <span>Notas objetivo</span>
+            <textarea name="target_notes" rows="3" placeholder="Notas reutilizables para esta plantilla">{{ template_input.target_notes or '' }}</textarea>
+        </label>
+    </div>
+</div>
+
+<div class="form-section">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Pasos</p>
+            <h2>Pasos de la plantilla</h2>
+        </div>
+        <button class="button button-secondary" type="button" onclick="addTemplateStep()">Agregar paso</button>
+    </div>
+    <div id="template-step-list" class="session-stack">
+        {% for step in template_row_steps %}
+        <article class="builder-card form-section">
+            <div class="builder-card-header">
+                <strong>Paso</strong>
+                <button class="button button-danger" type="button" onclick="removeTemplateStep(this)">Eliminar</button>
+            </div>
+            <div class="form-grid">
+                <label class="field">
+                    <span>Orden</span>
+                    <input name="step_order[]" type="number" min="1" value="{{ step.step_order }}">
+                </label>
+                <label class="field">
+                    <span>Tipo</span>
+                    <select name="step_type[]">
+                        {% for option in step_type_options %}
+                        <option value="{{ option.value }}" {% if step.step_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Repeticiones</span>
+                    <input name="repeat_count[]" type="number" min="1" value="{{ step.repeat_count if step.repeat_count is not none else '' }}" placeholder="Ej: 4">
+                </label>
+                <label class="field">
+                    <span>Duracion</span>
+                    <input name="duration_text[]" type="text" value="{{ step.duration_text }}" placeholder="Ej: 10min, 1:30, 30s">
+                </label>
+                <label class="field">
+                    <span>Distancia (m)</span>
+                    <input name="distance_m[]" type="number" min="0" step="1" value="{{ step.distance_m if step.distance_m is not none else '' }}" placeholder="Ej: 400">
+                </label>
+                <label class="field">
+                    <span>HR min</span>
+                    <input name="target_hr_min[]" type="number" min="0" step="1" value="{{ step.target_hr_min if step.target_hr_min is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>HR max</span>
+                    <input name="target_hr_max[]" type="number" min="0" step="1" value="{{ step.target_hr_max if step.target_hr_max is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Potencia min</span>
+                    <input name="target_power_min[]" type="number" min="0" step="1" value="{{ step.target_power_min if step.target_power_min is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Potencia max</span>
+                    <input name="target_power_max[]" type="number" min="0" step="1" value="{{ step.target_power_max if step.target_power_max is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Ritmo min (seg/km)</span>
+                    <input name="target_pace_min_sec_km[]" type="number" min="0" step="1" value="{{ step.target_pace_min_sec_km if step.target_pace_min_sec_km is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Ritmo max (seg/km)</span>
+                    <input name="target_pace_max_sec_km[]" type="number" min="0" step="1" value="{{ step.target_pace_max_sec_km if step.target_pace_max_sec_km is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Cadencia min</span>
+                    <input name="target_cadence_min[]" type="number" min="0" step="1" value="{{ step.target_cadence_min if step.target_cadence_min is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Cadencia max</span>
+                    <input name="target_cadence_max[]" type="number" min="0" step="1" value="{{ step.target_cadence_max if step.target_cadence_max is not none else '' }}">
+                </label>
+                <label class="field field-full">
+                    <span>Notas del paso</span>
+                    <input name="step_target_notes[]" type="text" value="{{ step.target_notes or '' }}" placeholder="Ej: suave, Z3, rec 30s">
+                </label>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+</div>
+
+<template id="template-step-template">
+    <article class="builder-card form-section">
+        <div class="builder-card-header">
+            <strong>Paso</strong>
+            <button class="button button-danger" type="button" onclick="removeTemplateStep(this)">Eliminar</button>
+        </div>
+        <div class="form-grid">
+            <label class="field">
+                <span>Orden</span>
+                <input name="step_order[]" type="number" min="1" value="">
+            </label>
+            <label class="field">
+                <span>Tipo</span>
+                <select name="step_type[]">
+                    {% for option in step_type_options %}
+                    <option value="{{ option.value }}" {% if option.value == 'steady' %}selected{% endif %}>{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
+                <span>Repeticiones</span>
+                <input name="repeat_count[]" type="number" min="1" value="" placeholder="Ej: 4">
+            </label>
+            <label class="field">
+                <span>Duracion</span>
+                <input name="duration_text[]" type="text" value="" placeholder="Ej: 10min, 1:30, 30s">
+            </label>
+            <label class="field">
+                <span>Distancia (m)</span>
+                <input name="distance_m[]" type="number" min="0" step="1" value="" placeholder="Ej: 400">
+            </label>
+            <label class="field">
+                <span>HR min</span>
+                <input name="target_hr_min[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>HR max</span>
+                <input name="target_hr_max[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Potencia min</span>
+                <input name="target_power_min[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Potencia max</span>
+                <input name="target_power_max[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Ritmo min (seg/km)</span>
+                <input name="target_pace_min_sec_km[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Ritmo max (seg/km)</span>
+                <input name="target_pace_max_sec_km[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Cadencia min</span>
+                <input name="target_cadence_min[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Cadencia max</span>
+                <input name="target_cadence_max[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field field-full">
+                <span>Notas del paso</span>
+                <input name="step_target_notes[]" type="text" value="" placeholder="Ej: suave, Z3, rec 30s">
+            </label>
+        </div>
+    </article>
+</template>

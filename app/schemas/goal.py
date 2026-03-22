@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict
 
 class GoalBase(BaseModel):
     athlete_id: int
+    training_plan_id: int | None = None
+    goal_role: str | None = None
     name: str
     sport_type: str | None = None
     event_type: str | None = None
@@ -25,6 +27,8 @@ class GoalCreate(GoalBase):
 
 class GoalUpdate(BaseModel):
     athlete_id: int | None = None
+    training_plan_id: int | None = None
+    goal_role: str | None = None
     name: str | None = None
     sport_type: str | None = None
     event_type: str | None = None

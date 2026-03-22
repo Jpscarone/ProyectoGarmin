@@ -4,6 +4,8 @@
 
 {% block content %}
 <section class="panel">
+    {% set primary_goal = training_plan.goal if training_plan.goal else None %}
+    {% set secondary_goals = training_plan.goals | selectattr('goal_role', 'equalto', 'secondary') | list %}
     <div class="section-heading">
         <div>
             <p class="eyebrow">Planes</p>
@@ -12,16 +14,69 @@
         </div>
         <div class="actions-inline">
             <a class="button" href="/training_plans/{{ training_plan.id }}/calendar">Ver calendario</a>
-            <a class="button" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}">Agregar dia</a>
+            <a class="button" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&return_to=plan">Agregar dia</a>
         </div>
     </div>
 
     <div class="training-plan-overview">
+        <div class="detail-item"><strong>Deporte principal:</strong> {{ sport_label(training_plan.sport_type) }}</div>
         <div class="detail-item"><strong>Inicio:</strong> {{ training_plan.start_date or "-" }}</div>
         <div class="detail-item"><strong>Fin:</strong> {{ training_plan.end_date or "-" }}</div>
         <div class="detail-item"><strong>Estado:</strong> {{ training_plan.status or "-" }}</div>
         <div class="detail-item training-plan-overview-full"><strong>Descripcion:</strong> {{ training_plan.description or "-" }}</div>
     </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Objetivo principal</p>
+        </div>
+    </div>
+
+    {% if primary_goal %}
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Evento:</strong> {{ primary_goal.name }}</div>
+        <div class="detail-item"><strong>Fecha:</strong> {{ primary_goal.event_date or "-" }}</div>
+        <div class="detail-item"><strong>Deporte:</strong> {{ sport_label(primary_goal.sport_type) }}</div>
+        <div class="detail-item"><strong>Distancia:</strong> {{ distance_label_km(primary_goal.distance_km) if primary_goal.distance_km is not none else "-" }}</div>
+        <div class="detail-item"><strong>Desnivel:</strong> {{ primary_goal.elevation_gain_m if primary_goal.elevation_gain_m is not none else "-" }}</div>
+        <div class="detail-item"><strong>Ubicacion:</strong> {{ primary_goal.location_name or "-" }}</div>
+        <div class="detail-item"><strong>Prioridad:</strong> {{ primary_goal.priority or "-" }}</div>
+        <div class="detail-item detail-item-full"><strong>Notas:</strong> {{ primary_goal.notes or "-" }}</div>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay objetivo principal cargado para este plan.</p>
+    {% endif %}
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Objetivos secundarios</p>
+        </div>
+    </div>
+
+    {% if secondary_goals %}
+    <div class="session-stack">
+        {% for goal in secondary_goals %}
+        <article class="session-card">
+            <div>
+                <strong>{{ goal.name }}</strong>
+                <p class="text-muted">
+                    {{ goal.event_date or "-" }}
+                    {% if goal.sport_type %}| {{ sport_label(goal.sport_type) }}{% endif %}
+                    {% if goal.distance_km is not none %}| {{ distance_label_km(goal.distance_km) }}{% endif %}
+                    {% if goal.priority %}| Prioridad {{ goal.priority }}{% endif %}
+                </p>
+                <p>{{ goal.location_name or goal.notes or "Sin notas." }}</p>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay objetivos secundarios cargados.</p>
+    {% endif %}
 </section>
 
 <section class="panel">

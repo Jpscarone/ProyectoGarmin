@@ -13,7 +13,6 @@ from app.db.session import get_db
 from app.schemas.training_day import TrainingDayCreate
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanRead, TrainingPlanUpdate
 from app.services.athlete_service import get_athletes
-from app.services.goal_service import get_goals
 from app.services.planning.presentation import derive_session_metrics
 from app.services.training_day_service import create_training_day
 from app.services.training_plan_service import (
@@ -56,7 +55,6 @@ def create_training_plan_page(request: Request, db: Session = Depends(get_db)) -
         context={
             "training_plan": None,
             "athletes": get_athletes(db),
-            "goals": get_goals(db),
         },
     )
 
@@ -151,7 +149,7 @@ def create_training_day_from_calendar(
 
 @router.get("/{training_plan_id}/edit", response_class=HTMLResponse)
 def edit_training_plan_page(training_plan_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
-    training_plan = get_training_plan(db, training_plan_id)
+    training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
 
@@ -161,7 +159,6 @@ def edit_training_plan_page(training_plan_id: int, request: Request, db: Session
         context={
             "training_plan": training_plan,
             "athletes": get_athletes(db),
-            "goals": get_goals(db),
         },
     )
 
@@ -255,6 +252,8 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
             matched_count = 0
             analyzed_count = 0
             session_summaries: list[dict[str, object]] = []
+            primary_goals = []
+            secondary_goals = []
 
             if training_day:
                 for planned_session in training_day.planned_sessions:
@@ -278,6 +277,33 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                             "has_analysis": has_analysis,
                         }
                     )
+                for goal in training_plan.goals:
+                    if goal.event_date != current_day:
+                        continue
+                    summary = {
+                        "id": goal.id,
+                        "name": goal.name,
+                        "sport_type": goal.sport_type,
+                        "priority": goal.priority,
+                    }
+                    if goal.goal_role == "primary":
+                        primary_goals.append(summary)
+                    else:
+                        secondary_goals.append(summary)
+            else:
+                for goal in training_plan.goals:
+                    if goal.event_date != current_day:
+                        continue
+                    summary = {
+                        "id": goal.id,
+                        "name": goal.name,
+                        "sport_type": goal.sport_type,
+                        "priority": goal.priority,
+                    }
+                    if goal.goal_role == "primary":
+                        primary_goals.append(summary)
+                    else:
+                        secondary_goals.append(summary)
 
             cell = {
                 "date": current_day,
@@ -289,6 +315,8 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                 "group_count": group_count,
                 "matched_count": matched_count,
                 "analyzed_count": analyzed_count,
+                "primary_goals": primary_goals,
+                "secondary_goals": secondary_goals,
                 "session_summaries": session_summaries[:3],
                 "overflow_count": max(0, len(session_summaries) - 3),
             }
@@ -334,9 +362,10 @@ def _month_label(value: date) -> str:
 def _calendar_next_action_url(training_plan_id: int, training_day_id: int, day_date: date, next_action: str) -> str:
     calendar_url = f"/training_plans/{training_plan_id}/calendar?{urlencode({'month': day_date.strftime('%Y-%m'), 'selected_date': day_date.isoformat(), 'status': 'Dia creado'})}"
     if next_action == "quick":
-        return f"/planned_sessions/quick?training_day_id={training_day_id}"
-    if next_action == "structured":
-        return f"/planned_sessions/quick?training_day_id={training_day_id}&mode=builder#builder"
+        return (
+            f"/planned_sessions/quick?training_day_id={training_day_id}"
+            f"&return_to=calendar&month={day_date.strftime('%Y-%m')}&selected_date={day_date.isoformat()}"
+        )
     if next_action == "group":
         return f"/session_groups/create?training_day_id={training_day_id}"
     if next_action == "detail":

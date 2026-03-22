@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}Biblioteca de sesiones | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Biblioteca de sesiones</p>
+            <h1>Plantillas reutilizables</h1>
+            {% if training_day %}
+            <p class="text-muted">Dia destino: {{ training_day.day_date.strftime('%d/%m/%Y') }} | {{ training_day.training_plan.name }}</p>
+            {% elif training_plan and planned_day_date %}
+            <p class="text-muted">Fecha destino: {{ planned_day_date }} | {{ training_plan.name }}</p>
+            {% else %}
+            <p class="text-muted">Guarda sesiones reutilizables y copialas a cualquier dia del plan.</p>
+            {% endif %}
+        </div>
+        <div class="actions-inline">
+            <a class="button" href="/session_templates/create">Nueva plantilla</a>
+            {% if training_day %}
+            {% if return_to == "calendar" %}
+            <a class="button button-secondary" href="/training_plans/{{ training_day.training_plan.id }}/calendar?month={{ calendar_month or training_day.day_date.strftime('%Y-%m') }}&selected_date={{ training_day.day_date.isoformat() }}">Volver al calendario</a>
+            {% elif return_to == "plan" %}
+            <a class="button button-secondary" href="/training_plans/{{ training_day.training_plan.id }}#training-day-{{ training_day.id }}">Volver a dias del plan</a>
+            {% else %}
+            <a class="button button-secondary" href="/training_days/{{ training_day.id }}?return_to=plan">Volver al dia</a>
+            {% endif %}
+            {% elif training_plan and return_to == "plan" %}
+            <a class="button button-secondary" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&return_to=plan&day_date={{ planned_day_date }}">Volver a crear sesion</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <form method="get" class="form-grid form-grid-compact">
+        {% if training_day %}
+        <input type="hidden" name="training_day_id" value="{{ training_day.id }}">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <input type="hidden" name="month" value="{{ calendar_month }}">
+        {% elif training_plan %}
+        <input type="hidden" name="training_plan_id" value="{{ training_plan.id }}">
+        <input type="hidden" name="planned_day_date" value="{{ planned_day_date }}">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <input type="hidden" name="month" value="{{ calendar_month }}">
+        {% endif %}
+        <label class="field">
+            <span>Deporte</span>
+            <select name="sport_type">
+                <option value="">Todos</option>
+                {% for option in sport_options %}
+                <option value="{{ option.value }}" {% if selected_sport_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Tipo de sesion</span>
+            <select name="session_type">
+                <option value="">Todos</option>
+                {% for option in session_type_options %}
+                <option value="{{ option.value }}" {% if selected_session_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <div class="form-actions">
+            <button class="button button-secondary" type="submit">Filtrar</button>
+        </div>
+    </form>
+</section>
+
+<section class="panel">
+    {% if templates_list %}
+    <div class="session-stack">
+        {% for template in templates_list %}
+        <article class="session-card">
+            <div>
+                <strong>{{ template.title }}</strong>
+                <p class="text-muted">
+                    {{ sport_label(template.sport_type) }}
+                    {% if template.session_type %}| {{ session_type_label(template.session_type) }}{% endif %}
+                    {% if template.expected_duration_min %}| {{ duration_minutes_hhmm(template.expected_duration_min) }}{% endif %}
+                    {% if template.expected_distance_km is not none %}| {{ distance_label_km(template.expected_distance_km) }}{% endif %}
+                    | {{ template.steps | length }} pasos
+                </p>
+                <p>{{ template.description_text or template.target_notes or "Sin descripcion." }}</p>
+            </div>
+            <div class="actions-inline">
+                {% if training_day %}
+                <form method="post" action="/session_templates/{{ template.id }}/use">
+                    <input type="hidden" name="training_day_id" value="{{ training_day.id }}">
+                    <input type="hidden" name="return_to" value="{{ return_to }}">
+                    <input type="hidden" name="month" value="{{ calendar_month }}">
+                    <button class="button" type="submit">Copiar al dia</button>
+                </form>
+                {% elif training_plan and planned_day_date %}
+                <form method="post" action="/session_templates/{{ template.id }}/use">
+                    <input type="hidden" name="training_plan_id" value="{{ training_plan.id }}">
+                    <input type="hidden" name="planned_day_date" value="{{ planned_day_date }}">
+                    <input type="hidden" name="return_to" value="{{ return_to }}">
+                    <input type="hidden" name="month" value="{{ calendar_month }}">
+                    <button class="button" type="submit">Copiar al dia</button>
+                </form>
+                {% endif %}
+                <a class="button button-secondary" href="/session_templates/{{ template.id }}{% if training_day %}?training_day_id={{ training_day.id }}&return_to={{ return_to }}&month={{ calendar_month }}{% elif training_plan and planned_day_date %}?training_plan_id={{ training_plan.id }}&planned_day_date={{ planned_day_date }}&return_to={{ return_to }}&month={{ calendar_month }}{% endif %}">Ver plantilla</a>
+                <a class="button button-secondary" href="/session_templates/{{ template.id }}/edit">Editar</a>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay plantillas cargadas en la biblioteca.</p>
+    {% endif %}
+</section>
+{% endblock %}

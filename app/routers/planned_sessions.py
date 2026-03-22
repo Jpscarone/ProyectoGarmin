@@ -63,6 +63,9 @@ def create_quick_session_page(
     day_date: str | None = Query(default=None),
     mode: str | None = Query(default=None),
     session_group_id: int | None = Query(default=None),
+    return_to: str | None = Query(default=None),
+    month: str | None = Query(default=None),
+    selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     training_day = get_training_day(db, training_day_id) if training_day_id is not None else None
@@ -105,6 +108,9 @@ def create_quick_session_page(
             "error": request.query_params.get("error"),
             "initial_mode": initial_mode,
             "initial_session_group_id": initial_session_group_id,
+            "return_to": (return_to or "").strip().lower(),
+            "return_month": month or "",
+            "return_selected_date": selected_date or (selected_day_date.isoformat() if selected_day_date else ""),
         },
     )
 
@@ -165,6 +171,9 @@ def create_quick_session_endpoint(
     advanced_target_hr_zone: str | None = Form(default=None),
     advanced_target_power_zone: str | None = Form(default=None),
     advanced_target_notes: str | None = Form(default=None),
+    return_to: str | None = Form(default=None),
+    return_month: str | None = Form(default=None),
+    return_selected_date: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     normalized_mode = (mode or "simple").strip().lower()
@@ -236,6 +245,23 @@ def create_quick_session_endpoint(
             is_key_session=advanced_is_key_session,
             advanced_data=advanced_data,
         )
+        created_training_day = get_training_day(db, effective_training_day_id)
+        normalized_return_to = (return_to or "").strip().lower()
+        if normalized_return_to == "calendar" and created_training_day is not None:
+            calendar_month = return_month or created_training_day.day_date.strftime("%Y-%m")
+            selected_day = return_selected_date or created_training_day.day_date.isoformat()
+            return RedirectResponse(
+                url=(
+                    f"/training_plans/{created_training_day.training_plan.id}/calendar"
+                    f"?month={quote(calendar_month)}&selected_date={quote(selected_day)}&status={quote('Sesion creada')}"
+                ),
+                status_code=303,
+            )
+        if normalized_return_to == "plan" and created_training_day is not None:
+            return RedirectResponse(
+                url=f"/training_plans/{created_training_day.training_plan.id}#training-day-{created_training_day.id}",
+                status_code=303,
+            )
         return RedirectResponse(url=f"/planned_sessions/{result.planned_session.id}", status_code=303)
     except ValueError as exc:
         redirect_target = _quick_session_redirect_target(
@@ -244,6 +270,9 @@ def create_quick_session_endpoint(
             planned_day_date=planned_day_date,
             mode=normalized_mode,
             error=str(exc),
+            return_to=return_to,
+            return_month=return_month,
+            return_selected_date=return_selected_date,
         )
         return RedirectResponse(
             url=redirect_target,
@@ -502,6 +531,9 @@ def _quick_session_redirect_target(
     planned_day_date: str | None,
     mode: str,
     error: str,
+    return_to: str | None = None,
+    return_month: str | None = None,
+    return_selected_date: str | None = None,
 ) -> str:
     query_parts: list[str] = [f"mode={quote(mode)}", f"error={quote(error)}"]
     normalized_training_day_id = (training_day_id or "").strip()
@@ -514,4 +546,13 @@ def _quick_session_redirect_target(
         query_parts.append(f"training_plan_id={quote(normalized_training_plan_id)}")
     if normalized_day_date:
         query_parts.append(f"day_date={quote(normalized_day_date)}")
+    normalized_return_to = (return_to or "").strip()
+    normalized_return_month = (return_month or "").strip()
+    normalized_return_selected_date = (return_selected_date or "").strip()
+    if normalized_return_to:
+        query_parts.append(f"return_to={quote(normalized_return_to)}")
+    if normalized_return_month:
+        query_parts.append(f"month={quote(normalized_return_month)}")
+    if normalized_return_selected_date:
+        query_parts.append(f"selected_date={quote(normalized_return_selected_date)}")
     return f"/planned_sessions/quick?{'&'.join(query_parts)}#{quote(mode)}"

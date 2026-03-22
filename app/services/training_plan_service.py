@@ -15,7 +15,7 @@ from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanUpdate
 def get_training_plans(db: Session) -> list[TrainingPlan]:
     statement = (
         select(TrainingPlan)
-        .options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal))
+        .options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal), selectinload(TrainingPlan.goals))
         .order_by(TrainingPlan.start_date.desc(), TrainingPlan.id.desc())
     )
     return list(db.scalars(statement).all())
@@ -32,6 +32,7 @@ def get_training_plan_detail(db: Session, training_plan_id: int) -> TrainingPlan
         .options(
             selectinload(TrainingPlan.athlete),
             selectinload(TrainingPlan.goal),
+            selectinload(TrainingPlan.goals),
             selectinload(TrainingPlan.training_days)
             .selectinload(TrainingDay.session_groups)
             .selectinload(SessionGroup.planned_sessions),
@@ -55,20 +56,23 @@ def get_training_plan_detail(db: Session, training_plan_id: int) -> TrainingPlan
 
 
 def create_training_plan(db: Session, training_plan_in: TrainingPlanCreate) -> TrainingPlan:
-    if training_plan_in.goal_id is not None:
-        goal = db.get(Goal, training_plan_in.goal_id)
+    payload = training_plan_in.model_dump(exclude={"primary_goal", "secondary_goals"})
+    if payload.get("goal_id") is not None:
+        goal = db.get(Goal, payload["goal_id"])
         if goal is None or goal.athlete_id != training_plan_in.athlete_id:
             raise ValueError("Selected goal does not belong to the selected athlete")
 
-    training_plan = TrainingPlan(**training_plan_in.model_dump())
+    training_plan = TrainingPlan(**payload)
     db.add(training_plan)
+    db.flush()
+    _sync_plan_goals(db, training_plan, training_plan_in.athlete_id, training_plan_in.primary_goal, training_plan_in.secondary_goals)
     db.commit()
     db.refresh(training_plan)
     return training_plan
 
 
 def update_training_plan(db: Session, training_plan: TrainingPlan, training_plan_in: TrainingPlanUpdate) -> TrainingPlan:
-    data = training_plan_in.model_dump(exclude_unset=True)
+    data = training_plan_in.model_dump(exclude_unset=True, exclude={"primary_goal", "secondary_goals"})
     athlete_id = data.get("athlete_id", training_plan.athlete_id)
     goal_id = data.get("goal_id", training_plan.goal_id)
 
@@ -81,6 +85,14 @@ def update_training_plan(db: Session, training_plan: TrainingPlan, training_plan
         setattr(training_plan, field, value)
 
     db.add(training_plan)
+    if "primary_goal" in training_plan_in.model_fields_set or "secondary_goals" in training_plan_in.model_fields_set:
+        _sync_plan_goals(
+            db,
+            training_plan,
+            athlete_id,
+            training_plan_in.primary_goal,
+            training_plan_in.secondary_goals or [],
+        )
     db.commit()
     db.refresh(training_plan)
     return training_plan
@@ -89,3 +101,79 @@ def update_training_plan(db: Session, training_plan: TrainingPlan, training_plan
 def delete_training_plan(db: Session, training_plan: TrainingPlan) -> None:
     db.delete(training_plan)
     db.commit()
+
+
+def _sync_plan_goals(
+    db: Session,
+    training_plan: TrainingPlan,
+    athlete_id: int,
+    primary_goal_data,
+    secondary_goal_data_list,
+) -> None:
+    existing_goals = {goal.id: goal for goal in training_plan.goals if goal.id is not None}
+    keep_goal_ids: set[int] = set()
+    primary_goal_id: int | None = None
+
+    if primary_goal_data and _goal_has_content(primary_goal_data):
+        primary_goal = _upsert_goal(
+            db,
+            existing_goal=existing_goals.get(primary_goal_data.id) if primary_goal_data.id else None,
+            athlete_id=athlete_id,
+            training_plan_id=training_plan.id,
+            goal_role="primary",
+            goal_data=primary_goal_data,
+        )
+        primary_goal_id = primary_goal.id
+        keep_goal_ids.add(primary_goal.id)
+
+    for secondary_goal_data in secondary_goal_data_list or []:
+        if not _goal_has_content(secondary_goal_data):
+            continue
+        secondary_goal = _upsert_goal(
+            db,
+            existing_goal=existing_goals.get(secondary_goal_data.id) if secondary_goal_data.id else None,
+            athlete_id=athlete_id,
+            training_plan_id=training_plan.id,
+            goal_role="secondary",
+            goal_data=secondary_goal_data,
+        )
+        keep_goal_ids.add(secondary_goal.id)
+
+    for goal in list(training_plan.goals):
+        if goal.id not in keep_goal_ids:
+            db.delete(goal)
+
+    training_plan.goal_id = primary_goal_id
+
+
+def _upsert_goal(db: Session, *, existing_goal: Goal | None, athlete_id: int, training_plan_id: int, goal_role: str, goal_data) -> Goal:
+    goal = existing_goal or Goal(athlete_id=athlete_id, training_plan_id=training_plan_id)
+    goal.athlete_id = athlete_id
+    goal.training_plan_id = training_plan_id
+    goal.goal_role = goal_role
+    goal.name = (goal_data.name or "").strip() or ("Objetivo principal" if goal_role == "primary" else "Objetivo secundario")
+    goal.sport_type = goal_data.sport_type
+    goal.event_date = goal_data.event_date
+    goal.distance_km = goal_data.distance_km
+    goal.elevation_gain_m = goal_data.elevation_gain_m
+    goal.location_name = goal_data.location_name
+    goal.priority = goal_data.priority
+    goal.notes = goal_data.notes
+    db.add(goal)
+    db.flush()
+    return goal
+
+
+def _goal_has_content(goal_data) -> bool:
+    return any(
+        [
+            getattr(goal_data, "name", None),
+            getattr(goal_data, "sport_type", None),
+            getattr(goal_data, "event_date", None),
+            getattr(goal_data, "distance_km", None) is not None,
+            getattr(goal_data, "elevation_gain_m", None) is not None,
+            getattr(goal_data, "location_name", None),
+            getattr(goal_data, "priority", None),
+            getattr(goal_data, "notes", None),
+        ]
+    )

@@ -1,51 +1,243 @@
-<label class="field">
-    <span>Atleta</span>
-    <select name="athlete_id" required>
-        <option value="">Seleccionar atleta</option>
-        {% for athlete in athletes %}
-        <option value="{{ athlete.id }}" {% if training_plan and training_plan.athlete_id == athlete.id %}selected{% endif %}>{{ athlete.name }}</option>
+{% set primary_goal = training_plan.goal if training_plan and training_plan.goal else None %}
+{% set secondary_goals = training_plan.goals | selectattr('goal_role', 'equalto', 'secondary') | list if training_plan and training_plan.goals else [] %}
+
+<section class="form-section field-full">
+    <div class="form-section-header">
+        <h2>Datos del plan</h2>
+        <p class="text-muted">Este es el bloque principal de trabajo. Desde aca se organiza todo el plan y sus objetivos.</p>
+    </div>
+    <div class="form-grid">
+        <label class="field">
+            <span>Atleta</span>
+            <select name="athlete_id" required>
+                <option value="">Seleccionar atleta</option>
+                {% for athlete in athletes %}
+                <option value="{{ athlete.id }}" {% if training_plan and training_plan.athlete_id == athlete.id %}selected{% endif %}>{{ athlete.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Deporte principal</span>
+            <select name="sport_type">
+                <option value="">Sin deporte</option>
+                {% for option in sport_options %}
+                <option value="{{ option.value }}" {% if training_plan and training_plan.sport_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Nombre del plan</span>
+            <input name="name" type="text" value="{{ training_plan.name if training_plan else '' }}" required>
+        </label>
+
+        <label class="field">
+            <span>Estado</span>
+            {% set current_status = training_plan.status if training_plan and training_plan.status else '' %}
+            <select name="status">
+                <option value="">Sin estado</option>
+                <option value="draft" {% if current_status == 'draft' %}selected{% endif %}>Borrador</option>
+                <option value="active" {% if current_status == 'active' %}selected{% endif %}>Activo</option>
+                <option value="completed" {% if current_status == 'completed' %}selected{% endif %}>Completado</option>
+                <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archivado</option>
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Fecha inicio del plan</span>
+            <input name="start_date" type="date" value="{{ training_plan.start_date.isoformat() if training_plan and training_plan.start_date else '' }}">
+        </label>
+
+        <label class="field">
+            <span>Fecha fin del plan</span>
+            <input name="end_date" type="date" value="{{ training_plan.end_date.isoformat() if training_plan and training_plan.end_date else '' }}">
+        </label>
+
+        <label class="field field-full">
+            <span>Descripcion general</span>
+            <textarea name="description" rows="4" placeholder="Objetivo general del bloque, enfoque del plan o notas importantes.">{{ training_plan.description if training_plan and training_plan.description else '' }}</textarea>
+        </label>
+    </div>
+</section>
+
+<section class="form-section field-full">
+    <div class="form-section-header">
+        <h2>Objetivo principal</h2>
+        <p class="text-muted">Es el evento o meta principal que ordena este plan.</p>
+    </div>
+    <div class="form-grid">
+        <input type="hidden" name="primary_goal_id" value="{{ primary_goal.id if primary_goal else '' }}">
+
+        <label class="field">
+            <span>Nombre del evento</span>
+            <input name="primary_goal_name" type="text" value="{{ primary_goal.name if primary_goal else '' }}" placeholder="Ej: 21k Venado Tuerto">
+        </label>
+
+        <label class="field">
+            <span>Fecha del evento</span>
+            <input name="primary_goal_event_date" type="date" value="{{ primary_goal.event_date.isoformat() if primary_goal and primary_goal.event_date else '' }}">
+        </label>
+
+        <label class="field">
+            <span>Deporte</span>
+            <select name="primary_goal_sport_type">
+                <option value="">Sin deporte</option>
+                {% for option in sport_options %}
+                <option value="{{ option.value }}" {% if primary_goal and primary_goal.sport_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>Distancia (km)</span>
+            <input name="primary_goal_distance_km" type="number" min="0" step="0.1" value="{{ primary_goal.distance_km if primary_goal and primary_goal.distance_km is not none else '' }}" placeholder="Ej: 21.1">
+        </label>
+
+        <label class="field">
+            <span>Desnivel positivo esperado (m)</span>
+            <input name="primary_goal_elevation_gain_m" type="number" min="0" step="1" value="{{ primary_goal.elevation_gain_m if primary_goal and primary_goal.elevation_gain_m is not none else '' }}" placeholder="Ej: 600">
+        </label>
+
+        <label class="field">
+            <span>Ubicacion</span>
+            <input name="primary_goal_location_name" type="text" value="{{ primary_goal.location_name if primary_goal else '' }}" placeholder="Ej: Venado Tuerto">
+        </label>
+
+        <label class="field">
+            <span>Prioridad</span>
+            <select name="primary_goal_priority">
+                <option value="">Sin prioridad</option>
+                <option value="A" {% if primary_goal and primary_goal.priority == 'A' %}selected{% endif %}>A</option>
+                <option value="B" {% if primary_goal and primary_goal.priority == 'B' %}selected{% endif %}>B</option>
+                <option value="C" {% if primary_goal and primary_goal.priority == 'C' %}selected{% endif %}>C</option>
+            </select>
+        </label>
+
+        <label class="field field-full">
+            <span>Notas</span>
+            <textarea name="primary_goal_notes" rows="3" placeholder="Notas del objetivo principal.">{{ primary_goal.notes if primary_goal and primary_goal.notes else '' }}</textarea>
+        </label>
+    </div>
+</section>
+
+<section class="form-section field-full">
+    <div class="form-section-header">
+        <h2>Objetivos secundarios</h2>
+        <p class="text-muted">Podes agregar carreras o eventos de preparacion sin salir del plan.</p>
+    </div>
+
+    <div id="secondary-goals-list" class="session-stack">
+        {% for goal in secondary_goals %}
+        <article class="advanced-panel secondary-goal-card" data-secondary-goal>
+            <input type="hidden" data-goal-field="id" value="{{ goal.id }}">
+            <div class="builder-card-header">
+                <strong>Objetivo secundario</strong>
+                <button class="button button-danger" type="button" onclick="removeSecondaryGoal(this)">Eliminar</button>
+            </div>
+            <div class="form-grid">
+                <label class="field">
+                    <span>Nombre</span>
+                    <input type="text" data-goal-field="name" value="{{ goal.name or '' }}" placeholder="Ej: 10k preparatorio">
+                </label>
+                <label class="field">
+                    <span>Fecha</span>
+                    <input type="date" data-goal-field="event_date" value="{{ goal.event_date.isoformat() if goal.event_date else '' }}">
+                </label>
+                <label class="field">
+                    <span>Deporte</span>
+                    <select data-goal-field="sport_type">
+                        <option value="">Sin deporte</option>
+                        {% for option in sport_options %}
+                        <option value="{{ option.value }}" {% if goal.sport_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Distancia (km)</span>
+                    <input type="number" min="0" step="0.1" data-goal-field="distance_km" value="{{ goal.distance_km if goal.distance_km is not none else '' }}" placeholder="Ej: 10">
+                </label>
+                <label class="field">
+                    <span>Desnivel (m)</span>
+                    <input type="number" min="0" step="1" data-goal-field="elevation_gain_m" value="{{ goal.elevation_gain_m if goal.elevation_gain_m is not none else '' }}" placeholder="Ej: 250">
+                </label>
+                <label class="field">
+                    <span>Ubicacion</span>
+                    <input type="text" data-goal-field="location_name" value="{{ goal.location_name or '' }}" placeholder="Ej: Rosario">
+                </label>
+                <label class="field">
+                    <span>Prioridad</span>
+                    <select data-goal-field="priority">
+                        <option value="">Sin prioridad</option>
+                        <option value="A" {% if goal.priority == 'A' %}selected{% endif %}>A</option>
+                        <option value="B" {% if goal.priority == 'B' %}selected{% endif %}>B</option>
+                        <option value="C" {% if goal.priority == 'C' %}selected{% endif %}>C</option>
+                    </select>
+                </label>
+                <label class="field field-full">
+                    <span>Notas</span>
+                    <textarea rows="3" data-goal-field="notes" placeholder="Notas del objetivo secundario.">{{ goal.notes or '' }}</textarea>
+                </label>
+            </div>
+        </article>
         {% endfor %}
-    </select>
-</label>
+    </div>
 
-<label class="field">
-    <span>Objetivo</span>
-    <select name="goal_id">
-        <option value="">Sin objetivo</option>
-        {% for goal in goals %}
-        <option value="{{ goal.id }}" {% if training_plan and training_plan.goal_id == goal.id %}selected{% endif %}>{{ goal.name }}</option>
-        {% endfor %}
-    </select>
-</label>
+    <div class="form-actions">
+        <button class="button button-secondary" type="button" onclick="addSecondaryGoal()">Agregar objetivo secundario</button>
+    </div>
+</section>
 
-<label class="field">
-    <span>Nombre</span>
-    <input name="name" type="text" value="{{ training_plan.name if training_plan else '' }}" required>
-</label>
-
-<label class="field">
-    <span>Estado</span>
-    {% set current_status = training_plan.status if training_plan and training_plan.status else '' %}
-    <select name="status">
-        <option value="">Sin estado</option>
-        <option value="draft" {% if current_status == 'draft' %}selected{% endif %}>Borrador</option>
-        <option value="active" {% if current_status == 'active' %}selected{% endif %}>Activo</option>
-        <option value="completed" {% if current_status == 'completed' %}selected{% endif %}>Completado</option>
-        <option value="archived" {% if current_status == 'archived' %}selected{% endif %}>Archivado</option>
-    </select>
-</label>
-
-<label class="field">
-    <span>Fecha inicio</span>
-    <input name="start_date" type="date" value="{{ training_plan.start_date.isoformat() if training_plan and training_plan.start_date else '' }}">
-</label>
-
-<label class="field">
-    <span>Fecha fin</span>
-    <input name="end_date" type="date" value="{{ training_plan.end_date.isoformat() if training_plan and training_plan.end_date else '' }}">
-</label>
-
-<label class="field field-full">
-    <span>Descripcion</span>
-    <textarea name="description" rows="5" placeholder="Objetivo general del bloque, foco del plan o notas importantes.">{{ training_plan.description if training_plan and training_plan.description else '' }}</textarea>
-</label>
+<template id="secondary-goal-template">
+    <article class="advanced-panel secondary-goal-card" data-secondary-goal>
+        <input type="hidden" data-goal-field="id" value="">
+        <div class="builder-card-header">
+            <strong>Objetivo secundario</strong>
+            <button class="button button-danger" type="button" onclick="removeSecondaryGoal(this)">Eliminar</button>
+        </div>
+        <div class="form-grid">
+            <label class="field">
+                <span>Nombre</span>
+                <input type="text" data-goal-field="name" placeholder="Ej: 10k preparatorio">
+            </label>
+            <label class="field">
+                <span>Fecha</span>
+                <input type="date" data-goal-field="event_date">
+            </label>
+            <label class="field">
+                <span>Deporte</span>
+                <select data-goal-field="sport_type">
+                    <option value="">Sin deporte</option>
+                    {% for option in sport_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
+                <span>Distancia (km)</span>
+                <input type="number" min="0" step="0.1" data-goal-field="distance_km" placeholder="Ej: 10">
+            </label>
+            <label class="field">
+                <span>Desnivel (m)</span>
+                <input type="number" min="0" step="1" data-goal-field="elevation_gain_m" placeholder="Ej: 250">
+            </label>
+            <label class="field">
+                <span>Ubicacion</span>
+                <input type="text" data-goal-field="location_name" placeholder="Ej: Rosario">
+            </label>
+            <label class="field">
+                <span>Prioridad</span>
+                <select data-goal-field="priority">
+                    <option value="">Sin prioridad</option>
+                    <option value="A">A</option>
+                    <option value="B">B</option>
+                    <option value="C">C</option>
+                </select>
+            </label>
+            <label class="field field-full">
+                <span>Notas</span>
+                <textarea rows="3" data-goal-field="notes" placeholder="Notas del objetivo secundario."></textarea>
+            </label>
+        </div>
+    </article>
+</template>

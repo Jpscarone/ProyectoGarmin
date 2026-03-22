@@ -4,6 +4,8 @@
 
 {% block content %}
 <section class="panel">
+    {% set primary_goal = training_plan.goal if training_plan.goal else None %}
+    {% set secondary_goals = training_plan.goals | selectattr('goal_role', 'equalto', 'secondary') | list %}
     <div class="section-heading">
         <div>
             <p class="eyebrow">Planes</p>
@@ -20,6 +22,7 @@
     {% endif %}
 
     <div class="training-plan-overview">
+        <div class="detail-item"><strong>Deporte principal:</strong> {{ sport_label(training_plan.sport_type) }}</div>
         <div class="detail-item"><strong>Inicio:</strong> {{ training_plan.start_date or "-" }}</div>
         <div class="detail-item"><strong>Fin:</strong> {{ training_plan.end_date or "-" }}</div>
         <div class="detail-item"><strong>Estado:</strong> {{ training_plan.status or "-" }}</div>
@@ -74,6 +77,18 @@
 
                 {% if cell.training_day %}
                 <div class="calendar-cell-body">
+                    {% for goal in cell.primary_goals %}
+                    <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
+                        <strong>Objetivo principal</strong>
+                        <span>{{ goal.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% for goal in cell.secondary_goals %}
+                    <div class="calendar-session-chip calendar-goal-chip calendar-goal-secondary">
+                        <strong>Objetivo secundario</strong>
+                        <span>{{ goal.name }}</span>
+                    </div>
+                    {% endfor %}
                     {% for summary in cell.session_summaries %}
                     <div class="calendar-session-chip">
                         <strong>{{ summary.summary_title or summary.name }}</strong>
@@ -95,7 +110,20 @@
                     </div>
                 </div>
                 {% else %}
-                <div class="calendar-cell-body"></div>
+                <div class="calendar-cell-body">
+                    {% for goal in cell.primary_goals %}
+                    <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
+                        <strong>Objetivo principal</strong>
+                        <span>{{ goal.name }}</span>
+                    </div>
+                    {% endfor %}
+                    {% for goal in cell.secondary_goals %}
+                    <div class="calendar-session-chip calendar-goal-chip calendar-goal-secondary">
+                        <strong>Objetivo secundario</strong>
+                        <span>{{ goal.name }}</span>
+                    </div>
+                    {% endfor %}
+                </div>
                 {% endif %}
             </article>
             {% endfor %}
@@ -123,18 +151,6 @@
                         <a class="button button-secondary" href="/training_days/{{ cell.training_day.id }}?return_to=calendar">Ver dia</a>
                         <a class="button button-secondary" href="/training_days/{{ cell.training_day.id }}/edit?return_to=calendar">Editar dia</a>
                         <button class="button button-danger" type="button" onclick="deleteTrainingDayFromCalendar(event, {{ cell.training_day.id }}, '{{ cell.date.isoformat() }}')">Eliminar dia</button>
-                        {% else %}
-                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day" class="actions-inline">
-                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
-                            <input type="hidden" name="next_action" value="quick">
-                            <button class="button" type="submit">Crear dia y sesion rapida</button>
-                        </form>
-                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day" class="actions-inline">
-                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
-                            <input type="hidden" name="next_action" value="structured">
-                            <button class="button button-secondary" type="submit">Crear dia y sesion por bloques</button>
-                        </form>
-                        <a class="button button-secondary" href="/training_days/create?training_plan_id={{ training_plan.id }}&day_date={{ cell.date.isoformat() }}&return_to=/training_plans/{{ training_plan.id }}/calendar?month={{ visible_month }}%26selected_date={{ cell.date.isoformat() }}">Editar datos del dia</a>
                         {% endif %}
                     </div>
                 </div>
@@ -144,6 +160,30 @@
                     <div class="detail-item"><strong>Tipo:</strong> {{ day_type_label(cell.training_day.day_type) }}</div>
                     <div class="detail-item"><strong>Notas:</strong> {{ cell.training_day.day_notes or "-" }}</div>
                 </div>
+
+                {% if cell.primary_goals or cell.secondary_goals %}
+                <div class="calendar-day-block">
+                    <h3>Objetivos del dia</h3>
+                    <div class="session-stack">
+                        {% for goal in cell.primary_goals %}
+                        <article class="session-card">
+                            <div>
+                                <strong>Objetivo principal: {{ goal.name }}</strong>
+                                <p class="text-muted">{{ sport_label(goal.sport_type) }}{% if goal.priority %} | Prioridad {{ goal.priority }}{% endif %}</p>
+                            </div>
+                        </article>
+                        {% endfor %}
+                        {% for goal in cell.secondary_goals %}
+                        <article class="session-card">
+                            <div>
+                                <strong>Objetivo secundario: {{ goal.name }}</strong>
+                                <p class="text-muted">{{ sport_label(goal.sport_type) }}{% if goal.priority %} | Prioridad {{ goal.priority }}{% endif %}</p>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
 
                 {% if cell.training_day.session_groups %}
                 <div class="calendar-day-block">
@@ -217,18 +257,6 @@
                 {% else %}
                 <div class="calendar-empty-actions">
                     <p>Podes crear el dia directamente desde esta vista y seguir con la carga enseguida.</p>
-                    <div class="actions-inline">
-                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day">
-                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
-                            <input type="hidden" name="next_action" value="detail">
-                            <button class="button button-secondary" type="submit">Crear dia y ver detalle</button>
-                        </form>
-                        <form method="post" action="/training_plans/{{ training_plan.id }}/calendar/create-day">
-                            <input type="hidden" name="day_date" value="{{ cell.date.isoformat() }}">
-                            <input type="hidden" name="next_action" value="group">
-                            <button class="button button-secondary" type="submit">Crear dia y grupo</button>
-                        </form>
-                    </div>
                 </div>
                 {% endif %}
             </div>

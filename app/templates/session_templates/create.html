@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Nueva plantilla | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Biblioteca de sesiones</p>
+            <h1>Nueva plantilla</h1>
+            {% if source_session %}
+            <p class="text-muted">Basada en la sesion: {{ source_session.name }}</p>
+            {% else %}
+            <p class="text-muted">Crea una sesion reutilizable para volver a usarla en cualquier dia.</p>
+            {% endif %}
+        </div>
+        <div class="actions-inline">
+            <a class="button button-secondary" href="{% if source_session %}/planned_sessions/{{ source_session.id }}{% else %}/session_templates{% endif %}">
+                {% if source_session %}Volver a la sesion{% else %}Volver a la biblioteca{% endif %}
+            </a>
+        </div>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="/session_templates/create" class="session-stack">
+        {% if source_session %}
+        <input type="hidden" name="source_session_id" value="{{ source_session.id }}">
+        {% endif %}
+        {% include "session_templates/partials/form_fields.html" %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar plantilla</button>
+        </div>
+    </form>
+</section>
+
+<script>
+function addTemplateStep() {
+    const template = document.getElementById("template-step-template");
+    const container = document.getElementById("template-step-list");
+    container.appendChild(template.content.cloneNode(true));
+}
+
+function removeTemplateStep(button) {
+    const card = button.closest(".builder-card");
+    if (card) {
+        card.remove();
+    }
+}
+</script>
+{% endblock %}

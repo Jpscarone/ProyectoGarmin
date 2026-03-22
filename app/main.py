@@ -16,6 +16,7 @@ from app.routers.health import router as health_router
 from app.routers.planned_sessions import router as planned_sessions_router
 from app.routers.planned_session_steps import router as planned_session_steps_router
 from app.routers.session_groups import router as session_groups_router
+from app.routers.session_templates import router as session_templates_router
 from app.routers.training_days import router as training_days_router
 from app.routers.training_plans import router as training_plans_router
 from app.routers.weather_sync import router as weather_sync_router
@@ -42,6 +43,7 @@ app.include_router(training_days_router)
 app.include_router(planned_sessions_router)
 app.include_router(planned_session_steps_router)
 app.include_router(session_groups_router)
+app.include_router(session_templates_router)
 app.include_router(weather_sync_router)
 
 

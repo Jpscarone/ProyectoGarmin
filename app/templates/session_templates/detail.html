@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}{{ session_template.title }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Biblioteca de sesiones</p>
+            <h1>{{ session_template.title }}</h1>
+            <p class="text-muted">{{ sport_label(session_template.sport_type) }}{% if session_template.session_type %} | {{ session_type_label(session_template.session_type) }}{% endif %}</p>
+        </div>
+        <div class="actions-inline">
+            {% if training_day %}
+            <form method="post" action="/session_templates/{{ session_template.id }}/use">
+                <input type="hidden" name="training_day_id" value="{{ training_day.id }}">
+                <input type="hidden" name="return_to" value="{{ return_to }}">
+                <input type="hidden" name="month" value="{{ calendar_month }}">
+                <button class="button" type="submit">Copiar al dia</button>
+            </form>
+            {% elif training_plan and planned_day_date %}
+            <form method="post" action="/session_templates/{{ session_template.id }}/use">
+                <input type="hidden" name="training_plan_id" value="{{ training_plan.id }}">
+                <input type="hidden" name="planned_day_date" value="{{ planned_day_date }}">
+                <input type="hidden" name="return_to" value="{{ return_to }}">
+                <input type="hidden" name="month" value="{{ calendar_month }}">
+                <button class="button" type="submit">Copiar al dia</button>
+            </form>
+            {% endif %}
+            <a class="button button-secondary" href="/session_templates/{{ session_template.id }}/edit">Editar plantilla</a>
+            {% if training_day and return_to == "calendar" %}
+            <a class="button button-secondary" href="/training_plans/{{ training_day.training_plan.id }}/calendar?month={{ calendar_month or training_day.day_date.strftime('%Y-%m') }}&selected_date={{ training_day.day_date.isoformat() }}">Volver al calendario</a>
+            {% elif training_day and return_to == "plan" %}
+            <a class="button button-secondary" href="/training_plans/{{ training_day.training_plan.id }}#training-day-{{ training_day.id }}">Volver a dias del plan</a>
+            {% elif training_plan and return_to == "plan" %}
+            <a class="button button-secondary" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&return_to=plan&day_date={{ planned_day_date }}">Volver a crear sesion</a>
+            {% elif training_day %}
+            <a class="button button-secondary" href="/training_days/{{ training_day.id }}?return_to=plan">Volver al dia</a>
+            {% else %}
+            <a class="button button-secondary" href="/session_templates">Volver a la biblioteca</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Deporte:</strong> {{ sport_label(session_template.sport_type) }}</div>
+        <div class="detail-item"><strong>Tipo:</strong> {{ session_type_label(session_template.session_type) }}</div>
+        <div class="detail-item"><strong>Duracion esperada:</strong> {{ duration_minutes_hhmm(session_template.expected_duration_min) if session_template.expected_duration_min else "-" }}</div>
+        <div class="detail-item"><strong>Distancia esperada:</strong> {{ distance_label_km(session_template.expected_distance_km) if session_template.expected_distance_km is not none else "-" }}</div>
+        <div class="detail-item"><strong>Desnivel esperado:</strong> {{ session_template.expected_elevation_gain_m if session_template.expected_elevation_gain_m is not none else "-" }}</div>
+        <div class="detail-item"><strong>Activa:</strong> {{ "Si" if session_template.is_active else "No" }}</div>
+        <div class="detail-item"><strong>Zona FC:</strong> {{ session_template.target_hr_zone or "-" }}</div>
+        <div class="detail-item"><strong>Zona potencia:</strong> {{ session_template.target_power_zone or "-" }}</div>
+        <div class="detail-item detail-item-full"><strong>Descripcion:</strong> {{ session_template.description_text or "-" }}</div>
+        <div class="detail-item detail-item-full"><strong>Notas objetivo:</strong> {{ session_template.target_notes or "-" }}</div>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Pasos</p>
+            <h2>Pasos de la plantilla</h2>
+        </div>
+    </div>
+
+    {% if session_template.steps %}
+    <div class="session-stack">
+        {% for step in session_template.steps %}
+        <article class="session-card">
+            <div>
+                <strong>Paso {{ step.step_order }} · {{ step_type_label(step.step_type) }}</strong>
+                <p class="text-muted">
+                    {% if step.repeat_count %}x{{ step.repeat_count }} | {% endif %}
+                    {% if step.duration_sec %}{{ duration_seconds_human(step.duration_sec) }}{% endif %}
+                    {% if step.duration_sec and step.distance_m %} | {% endif %}
+                    {% if step.distance_m %}{{ distance_label_meters(step.distance_m) }}{% endif %}
+                </p>
+                <p>
+                    {% if step.target_hr_min or step.target_hr_max %}HR {{ step.target_hr_min or "-" }}-{{ step.target_hr_max or "-" }} {% endif %}
+                    {% if step.target_power_min or step.target_power_max %}| Potencia {{ step.target_power_min or "-" }}-{{ step.target_power_max or "-" }} {% endif %}
+                    {% if step.target_pace_min_sec_km or step.target_pace_max_sec_km %}| Ritmo {{ step.target_pace_min_sec_km or "-" }}-{{ step.target_pace_max_sec_km or "-" }} seg/km {% endif %}
+                    {% if step.target_cadence_min or step.target_cadence_max %}| Cadencia {{ step.target_cadence_min or "-" }}-{{ step.target_cadence_max or "-" }}{% endif %}
+                </p>
+                <p>{{ step.target_notes or "-" }}</p>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay pasos cargados en esta plantilla.</p>
+    {% endif %}
+</section>
+{% endblock %}
