@@ -37,10 +37,10 @@
                     </p>
                 </div>
                 <div class="actions-inline">
-                    <a class="button" href="/athletes/{{ athlete.id }}">Ver detalle</a>
+                    <a class="button button-nav" href="/athletes/{{ athlete.id }}">Ver detalle</a>
                     <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar</a>
                     <form method="post" action="/athletes/{{ athlete.id }}/compare-garmin">
-                        <button class="button button-secondary" type="submit">Comparar con Garmin</button>
+                        <button class="button button-utility" type="submit">Comparar con Garmin</button>
                     </form>
                     <button class="button button-danger" type="button" onclick='deleteAthlete({{ athlete.id }}, {{ athlete.name | tojson }})'>Eliminar</button>
                 </div>

@@ -354,16 +354,16 @@
 
         <div class="quick-submit-bar">
             <p class="text-muted">La estructura de la sesion es la fuente principal. Los datos avanzados completan metadata sin romper la coherencia de pasos, duracion y distancia derivadas.</p>
-            <div class="actions-inline">
+            <div class="actions-inline quick-submit-actions">
                 <button class="button" type="submit">Crear sesion</button>
                 {% if return_to == 'calendar' %}
-                <a class="button button-secondary" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}/calendar?month={{ return_month or (selected_day_date or '')[:7] }}&selected_date={{ return_selected_date or selected_day_date }}">Volver al calendario</a>
+                <a class="button button-nav" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}/calendar?month={{ return_month or (selected_day_date or '')[:7] }}&selected_date={{ return_selected_date or selected_day_date }}">Volver al calendario</a>
                 {% elif return_to == 'plan' %}
-                <a class="button button-secondary" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}{% if training_day %}#training-day-{{ training_day.id }}{% endif %}">Volver a dias del plan</a>
+                <a class="button button-nav" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}{% if training_day %}#training-day-{{ training_day.id }}{% endif %}">Volver a dias del plan</a>
                 {% elif training_day %}
-                <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
+                <a class="button button-nav" href="/training_days/{{ training_day.id }}">Volver al dia</a>
                 {% else %}
-                <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}">Volver al plan</a>
+                <a class="button button-nav" href="/training_plans/{{ training_plan.id }}">Volver al plan</a>
                 {% endif %}
             </div>
         </div>

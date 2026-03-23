@@ -13,7 +13,7 @@
             <p class="text-muted">Atleta: {{ training_plan.athlete.name }}{% if training_plan.goal %} | Objetivo: {{ training_plan.goal.name }}{% endif %}</p>
         </div>
         <div class="actions-inline">
-            <a class="button" href="/training_plans/{{ training_plan.id }}/calendar">Ver calendario</a>
+            <a class="button button-nav" href="/training_plans/{{ training_plan.id }}/calendar">Ver calendario</a>
             <a class="button" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&return_to=plan">Agregar dia</a>
         </div>
     </div>
@@ -96,7 +96,7 @@
                     <p class="text-muted">{{ day_type_label(training_day.day_type) }}</p>
                 </div>
                 <div class="actions-inline">
-                    <a class="button" href="/training_days/{{ training_day.id }}?return_to=plan">Ver dia</a>
+                    <a class="button button-nav" href="/training_days/{{ training_day.id }}?return_to=plan">Ver dia</a>
                     <a class="button button-secondary" href="/training_days/{{ training_day.id }}/edit?return_to=plan">Editar dia</a>
                     <button class="button button-danger" type="button" onclick="deleteTrainingDay({{ training_day.id }}, {{ training_plan.id }})">Eliminar dia</button>
                 </div>
@@ -129,7 +129,7 @@
                         {% endif %}
                     </div>
                     <div class="actions-inline">
-                        <a class="button" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                        <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
                         <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
                         <button class="button button-danger" type="button" onclick="deletePlannedSession({{ planned_session.id }}, {{ training_plan.id }})">Eliminar</button>
                     </div>

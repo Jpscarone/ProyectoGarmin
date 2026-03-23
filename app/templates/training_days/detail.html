@@ -17,16 +17,16 @@
             </p>
         </div>
         <div class="actions-inline">
-            <a class="button button-secondary" href="{{ back_href }}">{{ back_label }}</a>
+            <a class="button button-nav" href="{{ back_href }}">{{ back_label }}</a>
             <a class="button" href="/planned_sessions/quick?training_day_id={{ training_day.id }}">Crear sesion</a>
             <form method="post" action="/analysis/day/{{ training_day.id }}">
-                <button class="button" type="submit">Analizar dia</button>
+                <button class="button button-utility" type="submit">Analizar dia</button>
             </form>
             <form method="post" action="/match/day/{{ training_day.id }}">
-                <button class="button button-secondary" type="submit">Vincular actividades del dia</button>
+                <button class="button button-utility" type="submit">Vincular actividades del dia</button>
             </form>
             <a class="button button-secondary" href="/training_days/{{ training_day.id }}/edit?return_to={{ 'plan' if back_label == 'Volver a dias del plan' else 'calendar' }}">Editar dia</a>
-            <a class="button button-secondary" href="/session_groups/create?training_day_id={{ training_day.id }}">Crear grupo</a>
+            <a class="button button-utility" href="/session_groups/create?training_day_id={{ training_day.id }}">Crear grupo</a>
         </div>
     </div>
 
@@ -70,7 +70,7 @@
                 {% endif %}
             </div>
             <div class="actions-inline">
-                <a class="button" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
                 <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
                 <button class="button button-danger" type="button" onclick="deletePlannedSession({{ planned_session.id }}, {{ training_day.id }})">Eliminar</button>
             </div>
@@ -138,7 +138,7 @@
                     {% endif %}
                 </div>
                 <div class="actions-inline">
-                    <a class="button" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                    <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
                     <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
                     <button class="button button-danger" type="button" onclick="deletePlannedSession({{ planned_session.id }}, {{ training_day.id }})">Eliminar</button>
                 </div>
@@ -174,7 +174,7 @@
         <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
     </div>
     <div class="actions-inline">
-        <a class="button" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+        <a class="button button-nav" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
     </div>
     {% else %}
     <p class="empty-state">Todavia no hay reporte de analisis para este dia.</p>

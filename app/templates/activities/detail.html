@@ -12,15 +12,15 @@
         </div>
         <div class="actions-inline">
             <form method="post" action="/match/activity/{{ activity.id }}">
-                <button class="button" type="submit">Recalcular vinculacion</button>
+                <button class="button button-utility" type="submit">Recalcular vinculacion</button>
             </form>
             <form method="post" action="/analysis/activity/{{ activity.id }}">
-                <button class="button button-secondary" type="submit">Analizar actividad</button>
+                <button class="button button-utility" type="submit">Analizar actividad</button>
             </form>
-            <a class="button button-secondary" href="/analysis/bundle/activity/{{ activity.id }}">Generar bundle</a>
-            <a class="button button-secondary" href="/analysis/bundle/activity/{{ activity.id }}#chatgpt">Ver resumen para ChatGPT</a>
-            <a class="button button-secondary" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
-            <a class="button button-secondary" href="/activities">Volver a actividades</a>
+            <a class="button button-utility" href="/analysis/bundle/activity/{{ activity.id }}">Generar bundle</a>
+            <a class="button button-utility" href="/analysis/bundle/activity/{{ activity.id }}#chatgpt">Ver resumen para ChatGPT</a>
+            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
+            <a class="button button-nav" href="/activities">Volver a actividades</a>
         </div>
     </div>
 
@@ -90,7 +90,7 @@
         <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
     </div>
     <div class="actions-inline">
-        <a class="button" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+        <a class="button button-nav" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
     </div>
     {% else %}
     <p class="empty-state">Todavia no hay reporte de analisis para esta actividad.</p>

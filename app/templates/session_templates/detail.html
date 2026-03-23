@@ -29,15 +29,15 @@
             {% endif %}
             <a class="button button-secondary" href="/session_templates/{{ session_template.id }}/edit">Editar plantilla</a>
             {% if training_day and return_to == "calendar" %}
-            <a class="button button-secondary" href="/training_plans/{{ training_day.training_plan.id }}/calendar?month={{ calendar_month or training_day.day_date.strftime('%Y-%m') }}&selected_date={{ training_day.day_date.isoformat() }}">Volver al calendario</a>
+            <a class="button button-nav" href="/training_plans/{{ training_day.training_plan.id }}/calendar?month={{ calendar_month or training_day.day_date.strftime('%Y-%m') }}&selected_date={{ training_day.day_date.isoformat() }}">Volver al calendario</a>
             {% elif training_day and return_to == "plan" %}
-            <a class="button button-secondary" href="/training_plans/{{ training_day.training_plan.id }}#training-day-{{ training_day.id }}">Volver a dias del plan</a>
+            <a class="button button-nav" href="/training_plans/{{ training_day.training_plan.id }}#training-day-{{ training_day.id }}">Volver a dias del plan</a>
             {% elif training_plan and return_to == "plan" %}
-            <a class="button button-secondary" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&return_to=plan&day_date={{ planned_day_date }}">Volver a crear sesion</a>
+            <a class="button button-nav" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&return_to=plan&day_date={{ planned_day_date }}">Volver a crear sesion</a>
             {% elif training_day %}
-            <a class="button button-secondary" href="/training_days/{{ training_day.id }}?return_to=plan">Volver al dia</a>
+            <a class="button button-nav" href="/training_days/{{ training_day.id }}?return_to=plan">Volver al dia</a>
             {% else %}
-            <a class="button button-secondary" href="/session_templates">Volver a la biblioteca</a>
+            <a class="button button-nav" href="/session_templates">Volver a la biblioteca</a>
             {% endif %}
         </div>
     </div>

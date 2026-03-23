@@ -14,16 +14,16 @@
         </div>
         <div class="actions-inline">
             <form method="post" action="/analysis/session/{{ planned_session.id }}">
-                <button class="button" type="submit">Analizar sesion</button>
+                <button class="button button-utility" type="submit">Analizar sesion</button>
             </form>
-            <a class="button button-secondary" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
-            <a class="button button-secondary" href="/analysis/bundle/session/{{ planned_session.id }}">Generar bundle</a>
+            <a class="button button-utility" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
+            <a class="button button-utility" href="/analysis/bundle/session/{{ planned_session.id }}">Generar bundle</a>
             <form method="post" action="/match/day/{{ training_day.id }}">
-                <button class="button button-secondary" type="submit">Vincular actividad</button>
+                <button class="button button-utility" type="submit">Vincular actividad</button>
             </form>
             <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar sesion</a>
             <a class="button" href="/planned_session_steps/create?planned_session_id={{ planned_session.id }}">Agregar paso</a>
-            <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
+            <a class="button button-nav" href="/training_days/{{ training_day.id }}">Volver al dia</a>
         </div>
     </div>
 
@@ -194,7 +194,7 @@
         <div class="detail-item detail-item-full"><strong>Recomendacion:</strong> {{ latest_report.recommendation_text or '-' }}</div>
     </div>
     <div class="actions-inline">
-        <a class="button" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+        <a class="button button-nav" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
     </div>
     {% else %}
     <p class="empty-state">Todavia no hay reporte de analisis para esta sesion.</p>

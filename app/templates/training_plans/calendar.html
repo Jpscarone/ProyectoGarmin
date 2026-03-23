@@ -13,7 +13,7 @@
             <p class="text-muted">Atleta: {{ training_plan.athlete.name }}{% if training_plan.goal %} | Objetivo: {{ training_plan.goal.name }}{% endif %}</p>
         </div>
         <div class="actions-inline">
-            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}">Ver lista</a>
+            <a class="button button-nav" href="/training_plans/{{ training_plan.id }}">Ver lista</a>
         </div>
     </div>
 
@@ -37,8 +37,8 @@
             <h2>{{ calendar_month_label }}</h2>
         </div>
         <div class="actions-inline">
-            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/calendar?month={{ previous_month }}">Mes anterior</a>
-            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/calendar?month={{ next_month }}">Mes siguiente</a>
+            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ previous_month }}">Mes anterior</a>
+            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ next_month }}">Mes siguiente</a>
         </div>
     </div>
 
@@ -106,9 +106,11 @@
                 </div>
                 {% else %}
                 <div class="calendar-cell-body">
+                    {% if cell.primary_goals or cell.secondary_goals %}
                     <div class="calendar-state-row calendar-state-row-top">
                         <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
                     </div>
+                    {% endif %}
                     {% for goal in cell.primary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
                         <strong>Principal</strong>
@@ -146,7 +148,7 @@
                     </div>
                     <div class="actions-inline">
                         {% if cell.training_day %}
-                        <a class="button button-secondary" href="/training_days/{{ cell.training_day.id }}?return_to=calendar">Ver dia</a>
+                        <a class="button button-nav" href="/training_days/{{ cell.training_day.id }}?return_to=calendar">Ver dia</a>
                         <a class="button button-secondary" href="/training_days/{{ cell.training_day.id }}/edit?return_to=calendar">Editar dia</a>
                         <button class="button button-danger" type="button" onclick="deleteTrainingDayFromCalendar(event, {{ cell.training_day.id }}, '{{ cell.date.isoformat() }}')">Eliminar dia</button>
                         {% endif %}
@@ -241,7 +243,7 @@
                                 <p>{{ planned_session.description_text or planned_session.target_notes or "Sin descripcion." }}</p>
                             </div>
                             <div class="actions-inline">
-                                <a class="button" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                                <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
                                 <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
                                 <button class="button button-danger" type="button" onclick="deletePlannedSessionFromCalendar(event, {{ planned_session.id }}, '{{ cell.date.isoformat() }}')">Eliminar</button>
                             </div>

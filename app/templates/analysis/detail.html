@@ -12,15 +12,15 @@
         </div>
         <div class="actions-inline">
             {% if report.planned_session %}
-            <a class="button button-secondary" href="/planned_sessions/{{ report.planned_session.id }}">Ver sesion</a>
+            <a class="button button-nav" href="/planned_sessions/{{ report.planned_session.id }}">Ver sesion</a>
             {% endif %}
             {% if report.garmin_activity %}
-            <a class="button button-secondary" href="/activities/{{ report.garmin_activity.id }}">Ver actividad</a>
+            <a class="button button-nav" href="/activities/{{ report.garmin_activity.id }}">Ver actividad</a>
             {% endif %}
             {% if report.training_day %}
-            <a class="button button-secondary" href="/training_days/{{ report.training_day.id }}">Ver dia</a>
+            <a class="button button-nav" href="/training_days/{{ report.training_day.id }}">Ver dia</a>
             {% endif %}
-            <a class="button" href="/analysis/bundle/report/{{ report.id }}">Generar bundle</a>
+            <a class="button button-utility" href="/analysis/bundle/report/{{ report.id }}">Generar bundle</a>
         </div>
     </div>
 

@@ -11,9 +11,9 @@
         </div>
         <div class="actions-inline">
             <form method="post" action="/match/recent">
-                <button class="button button-secondary" type="submit">Vincular recientes</button>
+                <button class="button button-utility" type="submit">Vincular recientes</button>
             </form>
-            <a class="button" href="/sync/garmin/activities">Sincronizar Garmin</a>
+            <a class="button button-utility" href="/sync/garmin/activities">Sincronizar Garmin</a>
         </div>
     </div>
 
@@ -47,15 +47,17 @@
                     <td>{{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</td>
                     <td>{{ distance_label_meters(activity.distance_m) }}</td>
                     <td>{{ 'Disponible' if activity.weather else 'Pendiente' }}</td>
-                    <td class="actions-inline">
-                        <a class="button" href="/activities/{{ activity.id }}">Ver detalle</a>
-                        <a class="button button-secondary" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
-                        <form method="post" action="/match/activity/{{ activity.id }}">
-                            <button class="button button-secondary" type="submit">Recalcular vinculacion</button>
-                        </form>
-                        <form method="post" action="/analysis/activity/{{ activity.id }}">
-                            <button class="button button-secondary" type="submit">Analizar</button>
-                        </form>
+                    <td>
+                        <div class="actions-inline table-actions-inline activity-actions-inline">
+                            <a class="button button-nav" href="/activities/{{ activity.id }}">Ver detalle</a>
+                            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
+                            <form method="post" action="/match/activity/{{ activity.id }}">
+                                <button class="button button-utility" type="submit">Recalcular vinculacion</button>
+                            </form>
+                            <form method="post" action="/analysis/activity/{{ activity.id }}">
+                                <button class="button button-utility" type="submit">Analizar</button>
+                            </form>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
