@@ -54,7 +54,7 @@
         {% for week in calendar_weeks %}
             {% for cell in week %}
             <article
-                class="calendar-cell{% if not cell.is_current_month %} calendar-cell-muted{% endif %}{% if cell.is_today %} calendar-cell-today{% endif %}{% if cell.is_selected %} calendar-cell-selected{% endif %}{% if cell.training_day %} calendar-cell-filled{% endif %} calendar-cell-interactive"
+                class="calendar-cell{% if not cell.is_current_month %} calendar-cell-muted{% endif %}{% if cell.is_today %} calendar-cell-today{% endif %}{% if cell.is_selected %} calendar-cell-selected{% endif %}{% if cell.training_day %} calendar-cell-filled{% endif %} calendar-cell-status-{{ cell.day_status }} calendar-cell-interactive"
                 data-date="{{ cell.date.isoformat() }}"
                 onclick="selectCalendarDay('{{ cell.date.isoformat() }}')"
                 ondblclick="openCalendarDetail(event, '{{ cell.session_summaries[0].id if cell.session_summaries|length == 1 else '' }}', '{{ cell.training_day.id if cell.training_day else '' }}')"
@@ -77,49 +77,47 @@
 
                 {% if cell.training_day %}
                 <div class="calendar-cell-body">
+                    <div class="calendar-state-row calendar-state-row-top">
+                        <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
+                    </div>
                     {% for goal in cell.primary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
-                        <strong>Objetivo principal</strong>
+                        <strong>Principal</strong>
                         <span>{{ goal.name }}</span>
                     </div>
                     {% endfor %}
                     {% for goal in cell.secondary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-secondary">
-                        <strong>Objetivo secundario</strong>
+                        <strong>Secundario</strong>
                         <span>{{ goal.name }}</span>
                     </div>
                     {% endfor %}
                     {% for summary in cell.session_summaries %}
-                    <div class="calendar-session-chip">
-                        <strong>{{ summary.summary_title or summary.name }}</strong>
-                    </div>
+                    <a class="calendar-session-chip calendar-session-line" href="/planned_sessions/{{ summary.id }}" onclick="event.stopPropagation()">
+                        <strong>{{ summary.compact_label }}</strong>
+                    </a>
                     {% endfor %}
+                    {% if not cell.session_summaries and not cell.primary_goals and not cell.secondary_goals %}
+                    <p class="calendar-empty-text">Sin sesiones</p>
+                    {% endif %}
                     {% if cell.overflow_count %}
                     <p class="calendar-more">+{{ cell.overflow_count }} sesiones mas</p>
                     {% endif %}
-                    <div class="calendar-state-row">
-                        {% if cell.group_count %}
-                        <span class="calendar-state-badge">Grupos: {{ cell.group_count }}</span>
-                        {% endif %}
-                        {% if cell.matched_count %}
-                        <span class="calendar-state-badge calendar-state-badge-success">Vinculadas: {{ cell.matched_count }}</span>
-                        {% endif %}
-                        {% if cell.analyzed_count %}
-                        <span class="calendar-state-badge calendar-state-badge-info">Analisis: {{ cell.analyzed_count }}</span>
-                        {% endif %}
-                    </div>
                 </div>
                 {% else %}
                 <div class="calendar-cell-body">
+                    <div class="calendar-state-row calendar-state-row-top">
+                        <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
+                    </div>
                     {% for goal in cell.primary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
-                        <strong>Objetivo principal</strong>
+                        <strong>Principal</strong>
                         <span>{{ goal.name }}</span>
                     </div>
                     {% endfor %}
                     {% for goal in cell.secondary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-secondary">
-                        <strong>Objetivo secundario</strong>
+                        <strong>Secundario</strong>
                         <span>{{ goal.name }}</span>
                     </div>
                     {% endfor %}

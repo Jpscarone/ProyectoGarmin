@@ -256,6 +256,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
             secondary_goals = []
 
             if training_day:
+                day_status, day_status_label = _resolve_calendar_day_status(training_day)
                 for planned_session in training_day.planned_sessions:
                     derived_metrics = derive_session_metrics(planned_session)
                     has_match = planned_session.activity_match is not None and planned_session.activity_match.garmin_activity is not None
@@ -269,6 +270,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                             "sport_type": planned_session.sport_type,
                             "session_type": planned_session.session_type,
                             "summary_title": describe_session_structure_short(planned_session) or derived_metrics.title or planned_session.name,
+                            "compact_label": _calendar_session_compact_label(planned_session, derived_metrics),
                             "expected_duration_min": planned_session.expected_duration_min,
                             "has_steps": bool(planned_session.planned_session_steps),
                             "has_group": planned_session.session_group is not None,
@@ -291,6 +293,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                     else:
                         secondary_goals.append(summary)
             else:
+                day_status, day_status_label = ("empty", "Sin actividad")
                 for goal in training_plan.goals:
                     if goal.event_date != current_day:
                         continue
@@ -315,6 +318,8 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                 "group_count": group_count,
                 "matched_count": matched_count,
                 "analyzed_count": analyzed_count,
+                "day_status": day_status,
+                "day_status_label": day_status_label,
                 "primary_goals": primary_goals,
                 "secondary_goals": secondary_goals,
                 "session_summaries": session_summaries[:3],
@@ -339,6 +344,98 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
         "next_month": next_month,
         "month_label": month_label,
     }
+
+
+def _resolve_calendar_day_status(training_day) -> tuple[str, str]:
+    day_reports = [report for report in training_day.analysis_reports if report.report_type == "day_summary"]
+    latest_day_report = max(day_reports, key=lambda report: report.generated_at) if day_reports else None
+    if latest_day_report is not None:
+        status = latest_day_report.overall_status
+        mapping = {
+            "correct": ("correct", "Correcto"),
+            "partial": ("partial", "Parcial"),
+            "failed": ("failed", "No completado"),
+            "not_completed": ("failed", "No completado"),
+            "review": ("empty", "Revisar"),
+            "skipped": ("empty", "Sin actividad"),
+        }
+        return mapping.get(status, ("empty", "Sin actividad"))
+
+    session_reports = []
+    for planned_session in training_day.planned_sessions:
+        session_reports.extend([report for report in planned_session.analysis_reports if report.report_type == "session"])
+    if not session_reports:
+        return ("empty", "Sin actividad")
+
+    statuses = {report.overall_status for report in session_reports}
+    if "correct" in statuses and statuses <= {"correct"}:
+        return ("correct", "Correcto")
+    if statuses & {"failed", "not_completed"}:
+        return ("failed", "No completado")
+    if "partial" in statuses:
+        return ("partial", "Parcial")
+    return ("empty", "Revisar")
+
+
+def _calendar_session_compact_label(planned_session, derived_metrics) -> str:
+    sport = _calendar_sport_icon(planned_session.sport_type)
+    title = _calendar_short_title(planned_session)
+    metric = "-"
+    if derived_metrics.duration_sec:
+        metric = _duration_from_seconds_short(derived_metrics.duration_sec)
+    elif derived_metrics.distance_m:
+        metric = _distance_from_meters_short(derived_metrics.distance_m)
+    return f"{sport} {title} - {metric}".strip()
+
+
+def _calendar_sport_icon(sport_type: str | None) -> str:
+    mapping = {
+        "running": "RUN",
+        "trail_running": "TRAIL",
+        "cycling": "BIKE",
+        "mtb": "MTB",
+        "swimming": "SWIM",
+        "multisport": "MULTI",
+    }
+    return mapping.get(sport_type or "", "SES")
+
+
+def _calendar_short_title(planned_session) -> str:
+    if planned_session.target_hr_zone:
+        return planned_session.target_hr_zone
+    if planned_session.target_power_zone:
+        return planned_session.target_power_zone
+    if planned_session.session_type:
+        labels = {
+            "easy": "Suave",
+            "base": "Base",
+            "long": "Fondo",
+            "tempo": "Tempo",
+            "hard": "Fuerte",
+            "technique": "Tecnica",
+            "recovery": "Recup",
+            "race": "Carrera",
+            "intervals": "Series",
+        }
+        return labels.get(planned_session.session_type, planned_session.session_type.title())
+    return (planned_session.name or "Sesion")[:18].strip()
+
+
+def _duration_from_seconds_short(value: int) -> str:
+    total_minutes = round(value / 60)
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours}h" if minutes == 0 else f"{hours}h{minutes:02d}"
+    return f"{minutes}min"
+
+
+def _distance_from_meters_short(value: int) -> str:
+    if value >= 1000:
+        km_value = value / 1000
+        if km_value.is_integer():
+            return f"{int(km_value)}km"
+        return f"{km_value:.1f}km"
+    return f"{int(value)}m"
 
 
 def _month_label(value: date) -> str:

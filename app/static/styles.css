@@ -898,6 +898,22 @@ details.detail-item summary {
     background: rgba(239, 246, 255, 0.75);
 }
 
+.calendar-cell-status-correct {
+    border-color: rgba(34, 197, 94, 0.35);
+}
+
+.calendar-cell-status-partial {
+    border-color: rgba(245, 158, 11, 0.35);
+}
+
+.calendar-cell-status-failed {
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.calendar-cell-status-empty {
+    border-color: rgba(203, 213, 225, 0.95);
+}
+
 .calendar-cell-interactive {
     cursor: pointer;
 }
@@ -934,6 +950,10 @@ details.detail-item summary {
     flex-wrap: wrap;
 }
 
+.calendar-state-row-top {
+    justify-content: flex-start;
+}
+
 .calendar-day-link {
     font-size: 1.1rem;
     font-weight: 700;
@@ -964,6 +984,26 @@ details.detail-item summary {
 
 .calendar-state-badge-info {
     background: rgba(191, 219, 254, 0.9);
+}
+
+.calendar-state-badge-correct {
+    background: rgba(220, 252, 231, 0.95);
+    color: #166534;
+}
+
+.calendar-state-badge-partial {
+    background: rgba(254, 249, 195, 0.98);
+    color: #a16207;
+}
+
+.calendar-state-badge-failed {
+    background: rgba(254, 226, 226, 0.98);
+    color: #b91c1c;
+}
+
+.calendar-state-badge-empty {
+    background: rgba(226, 232, 240, 0.88);
+    color: #475569;
 }
 
 .calendar-inline-form {
@@ -999,6 +1039,15 @@ details.detail-item summary {
     text-decoration: none;
     background: rgba(255, 255, 255, 0.88);
     border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.calendar-session-line {
+    padding: 0.45rem 0.6rem;
+}
+
+.calendar-session-line strong {
+    font-size: 0.92rem;
+    line-height: 1.25;
 }
 
 .calendar-goal-chip {
