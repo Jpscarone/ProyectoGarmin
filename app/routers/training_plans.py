@@ -13,7 +13,7 @@ from app.db.session import get_db
 from app.schemas.training_day import TrainingDayCreate
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanRead, TrainingPlanUpdate
 from app.services.athlete_service import get_athletes
-from app.services.planning.presentation import derive_session_metrics
+from app.services.planning.presentation import derive_session_metrics, describe_session_structure_short
 from app.services.training_day_service import create_training_day
 from app.services.training_plan_service import (
     create_training_plan,
@@ -268,7 +268,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                             "name": planned_session.name,
                             "sport_type": planned_session.sport_type,
                             "session_type": planned_session.session_type,
-                            "summary_title": derived_metrics.title or planned_session.name,
+                            "summary_title": describe_session_structure_short(planned_session) or derived_metrics.title or planned_session.name,
                             "expected_duration_min": planned_session.expected_duration_min,
                             "has_steps": bool(planned_session.planned_session_steps),
                             "has_group": planned_session.session_group is not None,

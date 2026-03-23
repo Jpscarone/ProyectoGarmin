@@ -5,9 +5,10 @@ from typing import Iterable
 
 def compare_relative(expected: float | None, actual: float | None) -> dict[str, float | str | None]:
     if expected in (None, 0) or actual is None:
-        return {"score": None, "status": "review", "delta_pct": None}
+        return {"score": None, "status": "review", "delta_pct": None, "fulfillment_pct": None}
 
     delta_pct = abs(actual - expected) / expected * 100.0
+    fulfillment_pct = min((actual / expected) * 100.0, 999.0) if expected else None
     if delta_pct <= 10:
         score = 100.0
         status = "correct"
@@ -17,7 +18,12 @@ def compare_relative(expected: float | None, actual: float | None) -> dict[str, 
     else:
         score = 35.0
         status = "failed"
-    return {"score": score, "status": status, "delta_pct": round(delta_pct, 1)}
+    return {
+        "score": score,
+        "status": status,
+        "delta_pct": round(delta_pct, 1),
+        "fulfillment_pct": round(fulfillment_pct, 1) if fulfillment_pct is not None else None,
+    }
 
 
 def compare_range(

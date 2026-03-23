@@ -21,7 +21,6 @@
             <a class="button button-secondary" href="/training_days/{{ report.training_day.id }}">Ver dia</a>
             {% endif %}
             <a class="button" href="/analysis/bundle/report/{{ report.id }}">Generar bundle</a>
-            <a class="button button-secondary" href="/analysis/bundle/report/{{ report.id }}#chatgpt">Ver resumen para ChatGPT</a>
         </div>
     </div>
 
@@ -34,7 +33,10 @@
         <div class="detail-item"><strong>Estado general:</strong> {{ analysis_status_label(report.overall_status) }}</div>
         <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ report.summary_text or '-' }}</div>
         <div class="detail-item detail-item-full"><strong>Recomendacion:</strong> {{ report.recommendation_text or '-' }}</div>
-        <div class="detail-item detail-item-full"><strong>Contexto:</strong> <pre class="raw-json">{{ report.analysis_context_json or '-' }}</pre></div>
+        <details class="detail-item detail-item-full">
+            <summary><strong>Contexto y score</strong></summary>
+            <pre class="raw-json">{{ report.analysis_context_json or '-' }}</pre>
+        </details>
     </div>
 </section>
 
@@ -75,7 +77,7 @@
                 <p class="text-muted">{{ item.item_type }} | {{ analysis_status_label(item.item_status) }}{% if item.item_score is not none %} | score {{ item.item_score }}{% endif %}</p>
                 <p><strong>Planificado:</strong> {{ item.planned_value_text or '-' }}</p>
                 <p><strong>Real:</strong> {{ item.actual_value_text or '-' }}</p>
-                <p>{{ item.comment_text or '-' }}</p>
+                <p><strong>Comentario:</strong> {{ item.comment_text or '-' }}</p>
             </div>
         </article>
         {% endfor %}

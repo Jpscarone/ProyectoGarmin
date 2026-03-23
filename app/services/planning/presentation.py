@@ -155,6 +155,18 @@ def describe_session_structure(planned_session: object) -> str | None:
     return " + ".join(parts)
 
 
+def describe_session_structure_short(planned_session: object) -> str | None:
+    display_blocks = build_session_display_blocks_for_session(planned_session)
+    if not display_blocks:
+        return None
+
+    parts = [_describe_display_block_short(block) for block in display_blocks]
+    parts = [part for part in parts if part]
+    if not parts:
+        return None
+    return " + ".join(parts)
+
+
 def _flush_repeat_group(
     blocks: list[SessionDisplayBlock],
     repeat_count: int | None,
@@ -264,7 +276,7 @@ def _display_blocks_title(planned_session: object, blocks: list[SessionDisplayBl
     repeat_blocks = [block for block in blocks if isinstance(block, SessionDisplayRepeatBlock)]
     if repeat_blocks:
         repeat_block = repeat_blocks[0]
-        repeat_fragment = _display_repeat_fragment(repeat_block)
+        repeat_fragment = _display_repeat_fragment_short(repeat_block)
         intensity = _display_repeat_intensity(repeat_block)
         return " ".join(part for part in (sport_label, repeat_fragment, intensity) if part).strip()
 
@@ -307,6 +319,25 @@ def _display_repeat_fragment(block: SessionDisplayRepeatBlock) -> str:
     return f"{block.repeat_count}x({work_fragment} + {recovery_fragment})"
 
 
+def _display_repeat_fragment_short(block: SessionDisplayRepeatBlock) -> str:
+    work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
+    work_fragment = _display_step_measurement(work_step)
+
+    recovery_step = next(
+        (
+            step
+            for step in block.steps
+            if step.step_type == "recovery" and (step.duration_sec is not None or step.distance_m is not None)
+        ),
+        None,
+    )
+    if recovery_step is None:
+        return f"{block.repeat_count}x{work_fragment}"
+
+    recovery_fragment = _display_step_measurement(recovery_step)
+    return f"{block.repeat_count}x({work_fragment}+{recovery_fragment})"
+
+
 def _display_repeat_intensity(block: SessionDisplayRepeatBlock) -> str:
     work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
     return (work_step.target_notes or "").strip()
@@ -319,6 +350,29 @@ def _describe_display_block(block: SessionDisplayBlock) -> str:
         if not nested:
             return ""
         return f"{block.repeat_count}x({ ' + '.join(nested) })"
+    return _describe_simple_step(block)
+
+
+def _describe_display_block_short(block: SessionDisplayBlock) -> str:
+    if isinstance(block, SessionDisplayRepeatBlock):
+        work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
+        recovery_step = next(
+            (
+                step
+                for step in block.steps
+                if step.step_type == "recovery" and (step.duration_sec is not None or step.distance_m is not None)
+            ),
+            None,
+        )
+        work_fragment = _display_step_measurement(work_step)
+        work_intensity = (work_step.target_notes or "").strip()
+        if recovery_step is None:
+            return " ".join(part for part in (f"{block.repeat_count}x{work_fragment}", work_intensity) if part)
+
+        recovery_fragment = _display_step_measurement(recovery_step)
+        return " ".join(
+            part for part in (f"{block.repeat_count}x({work_fragment}+{recovery_fragment})", work_intensity) if part
+        )
     return _describe_simple_step(block)
 
 

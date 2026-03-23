@@ -17,6 +17,64 @@ from app.db.models.training_day import TrainingDay
 logger = logging.getLogger(__name__)
 
 
+SPORT_FAMILY_ALIASES: dict[str, str] = {
+    "running": "run",
+    "run": "run",
+    "street_running": "run",
+    "road_running": "run",
+    "road_run": "run",
+    "trail_running": "run",
+    "trail_run": "run",
+    "running_trail": "run",
+    "treadmill_running": "run",
+    "cycling": "bike",
+    "ciclismo": "bike",
+    "bicicleta": "bike",
+    "bike": "bike",
+    "bike_ride": "bike",
+    "road_cycling": "bike",
+    "road_biking": "bike",
+    "road": "bike",
+    "gravel_cycling": "bike",
+    "indoor_cycling": "bike",
+    "mountain_biking": "bike",
+    "mountain_bike": "bike",
+    "mtb": "bike",
+    "swimming": "swim",
+    "swim": "swim",
+    "natacion": "swim",
+    "natación": "swim",
+    "lap_swimming": "swim",
+    "pool_swim": "swim",
+    "pool_swimming": "swim",
+    "open_water_swim": "swim",
+    "open_water_swimming": "swim",
+    "multisport_block": "multisport",
+    "brick": "multisport",
+    "duathlon": "multisport",
+    "triathlon": "multisport",
+}
+
+
+VARIANT_ALIASES: dict[str, str] = {
+    "road_cycling": "road",
+    "road_biking": "road",
+    "road": "road",
+    "mtb": "mtb",
+    "mountain_bike": "mtb",
+    "mountain_biking": "mtb",
+    "trail_running": "trail",
+    "trail_run": "trail",
+    "street_running": "road",
+    "road_running": "road",
+    "lap_swimming": "pool",
+    "pool_swim": "pool",
+    "pool_swimming": "pool",
+    "open_water_swim": "open_water",
+    "open_water_swimming": "open_water",
+}
+
+
 @dataclass
 class ActivityMatchResult:
     activity_id: int
@@ -43,7 +101,7 @@ def match_activity_to_plan(db: Session, activity_id: int) -> ActivityMatchResult
         _delete_existing_activity_match(db, activity)
         return ActivityMatchResult(activity_id=activity_id, matched=False, message="Activity has no start time.")
 
-    activity_date = activity.start_time.date()
+    activity_date = _activity_local_date(activity)
     logger.info(
         "Matching activity_id=%s athlete_id=%s activity_date=%s sport_type=%r discipline_variant=%r",
         activity.id,
@@ -66,8 +124,8 @@ def match_activity_to_plan(db: Session, activity_id: int) -> ActivityMatchResult
             activity_id=activity.id,
             matched=False,
             message=(
-                "No training day exists for this athlete on the activity date. "
-                f"Debug: athlete_id={activity.athlete_id}, activity_date={activity_date.isoformat()}."
+                "No se encontro TrainingDay para la fecha local de la actividad. "
+                f"Debug: athlete_id={activity.athlete_id}, fecha_local={activity_date.isoformat()}."
             ),
         )
 
@@ -111,8 +169,8 @@ def match_activity_to_plan(db: Session, activity_id: int) -> ActivityMatchResult
             activity_id=activity.id,
             matched=False,
             message=(
-                "No planned session on that day matched the activity sport. "
-                f"Debug: activity_id={activity.id}, athlete_id={activity.athlete_id}, activity_date={activity_date.isoformat()}, "
+                "Se encontraron sesiones del dia, pero ninguna compatible con el deporte de la actividad. "
+                f"Debug: activity_id={activity.id}, athlete_id={activity.athlete_id}, fecha_local={activity_date.isoformat()}, "
                 f"activity_sport={activity.sport_type!r}, activity_variant={activity.discipline_variant!r}, candidates=[{candidate_debug}]"
             ),
         )
@@ -146,8 +204,8 @@ def match_activity_to_plan(db: Session, activity_id: int) -> ActivityMatchResult
         method=method,
         planned_session_id=best["session"].id,
         message=(
-            f"Matched to planned session #{best['session'].id} with confidence {confidence:.2f}. "
-            f"Debug: athlete_id={activity.athlete_id}, activity_date={activity_date.isoformat()}, "
+            f"Se vinculo con la sesion #{best['session'].id} con confianza {confidence:.2f}. "
+            f"Debug: athlete_id={activity.athlete_id}, fecha_local={activity_date.isoformat()}, "
             f"activity_sport={activity.sport_type!r}, session_sport={best['session'].sport_type!r}."
         ),
     )
@@ -170,7 +228,7 @@ def match_day_activities(db: Session, training_day_id: int) -> BatchMatchResult:
     activities = [
         activity
         for activity in db.scalars(statement).all()
-        if activity.start_time and activity.start_time.date() == training_day.day_date
+        if activity.start_time and _activity_local_date(activity) == training_day.day_date
     ]
     return _match_many(db, activities)
 
@@ -224,11 +282,12 @@ def _get_activity_with_context(db: Session, activity_id: int) -> GarminActivity 
 def _get_training_day_for_activity(db: Session, activity: GarminActivity) -> TrainingDay | None:
     if activity.start_time is None or activity.athlete_id is None:
         return None
+    activity_date = _activity_local_date(activity)
     statement = (
         select(TrainingDay)
         .where(
             TrainingDay.athlete_id == activity.athlete_id,
-            TrainingDay.day_date == activity.start_time.date(),
+            TrainingDay.day_date == activity_date,
         )
         .options(
             selectinload(TrainingDay.planned_sessions).selectinload(PlannedSession.session_group),
@@ -274,10 +333,11 @@ def _activity_rank_for_day(db: Session, activity: GarminActivity, training_day: 
         )
         .order_by(GarminActivity.start_time.asc(), GarminActivity.id.asc())
     )
+    activity_date = _activity_local_date(activity)
     same_day_activities = [
         item
         for item in db.scalars(statement).all()
-        if item.start_time and item.start_time.date() == training_day.day_date
+        if item.start_time and _activity_local_date(item) == activity_date
     ]
     for index, item in enumerate(same_day_activities, start=1):
         if item.id == activity.id:
@@ -292,53 +352,62 @@ def _score_candidate(
     ordered_sessions: list[PlannedSession],
     activity_rank: int | None,
 ) -> dict[str, object]:
-    score = 30.0
+    compatibility = _evaluate_sport_compatibility(activity, session)
+    score = 25.0 + compatibility["sport_score"]
     exact_time = False
+    score_reasons: list[str] = [compatibility["score_reason"]]
     if session.planned_start_time and activity.start_time:
         planned_dt = datetime.combine(training_day.day_date, session.planned_start_time)
         diff_minutes = abs((activity.start_time.replace(tzinfo=None) - planned_dt).total_seconds()) / 60.0
         if diff_minutes <= 30:
-            score += 35
+            score += 24
             exact_time = True
+            score_reasons.append("horario muy cercano")
         elif diff_minutes <= 90:
-            score += 22
+            score += 16
+            score_reasons.append("horario compatible")
         elif diff_minutes <= 180:
-            score += 10
+            score += 7
+            score_reasons.append("horario parcialmente compatible")
     else:
         diff_minutes = None
-        score += 6
+        score += 4
+        score_reasons.append("sin horario planificado")
 
     if session.expected_duration_min and activity.duration_sec:
         actual_minutes = activity.duration_sec / 60.0
         duration_diff = abs(actual_minutes - session.expected_duration_min)
-        if duration_diff <= 15:
-            score += 18
-        elif duration_diff <= 30:
+        if duration_diff <= 10:
+            score += 16
+            score_reasons.append("duracion muy cercana")
+        elif duration_diff <= 25:
             score += 10
-        elif duration_diff <= 60:
-            score += 4
+            score_reasons.append("duracion compatible")
+        elif duration_diff <= 45:
+            score += 5
+            score_reasons.append("duracion parcialmente compatible")
     else:
         duration_diff = None
-        score += 4
+        score += 2
 
     session_rank = ordered_sessions.index(session) + 1
     if activity_rank is not None:
         rank_diff = abs(session_rank - activity_rank)
         if rank_diff == 0:
-            score += 14
+            score += 12
+            score_reasons.append("orden del dia coincide")
         elif rank_diff == 1:
-            score += 8
+            score += 7
+            score_reasons.append("orden del dia cercano")
         elif rank_diff == 2:
             score += 3
+            score_reasons.append("orden del dia razonable")
     else:
         rank_diff = None
 
-    compatibility = _evaluate_sport_compatibility(activity, session)
-    if compatibility["variant_bonus"]:
-        score += 3
-
     if session.session_group is not None:
         score += 4
+        score_reasons.append("sesion dentro de grupo")
 
     return {
         "session": session,
@@ -348,28 +417,48 @@ def _score_candidate(
         "duration_diff": duration_diff,
         "rank_diff": rank_diff,
         "has_group": session.session_group is not None,
+        "compatibility": compatibility,
+        "score_reasons": score_reasons,
     }
 
 
 def _derive_match_method(candidate: dict[str, object]) -> str:
+    compatibility = candidate["compatibility"]
     if candidate["exact_time"]:
         return "exact_time"
-    if candidate["has_group"]:
+    if compatibility["family_match"] and not compatibility["exact_sport"]:
+        return "same_day_family"
+    if candidate["has_group"] and candidate["rank_diff"] in (0, 1):
         return "group_match"
-    return "same_day_sport"
+    if compatibility["exact_sport"]:
+        return "same_day_sport"
+    return "same_day_candidate"
 
 
 def _build_match_notes(best: dict[str, object], alternatives: list[dict[str, object]]) -> str:
+    best_session = best["session"]
     notes = [
-        f"score={best['score']:.1f}",
-        f"time_diff_min={best['diff_minutes'] if best['diff_minutes'] is not None else 'n/a'}",
-        f"duration_diff_min={best['duration_diff'] if best['duration_diff'] is not None else 'n/a'}",
-        f"order_diff={best['rank_diff'] if best['rank_diff'] is not None else 'n/a'}",
+        f"Se encontraron {len(alternatives) + 1} sesiones compatibles.",
+        f"Se eligio la sesion #{best_session.id} por {', '.join(best['score_reasons'])}.",
+        f"Fecha usada: {best_session.training_day.day_date.isoformat()}.",
+        f"Score final: {best['score']:.1f}.",
     ]
+    if best["compatibility"]["reason"]:
+        notes.append(f"Compatibilidad deporte: {best['compatibility']['reason']}.")
+    if best["diff_minutes"] is not None:
+        notes.append(f"Diferencia horaria: {round(best['diff_minutes'])} min.")
+    if best["duration_diff"] is not None:
+        notes.append(f"Diferencia de duracion: {round(best['duration_diff'])} min.")
+    if best["rank_diff"] is not None:
+        notes.append(f"Diferencia de orden en el dia: {best['rank_diff']}.")
     if alternatives:
         next_best = alternatives[0]
-        notes.append(f"next_best_score={next_best['score']:.1f}")
-    return " | ".join(notes)
+        next_session = next_best["session"]
+        notes.append(
+            f"Siguiente candidata: sesion #{next_session.id} con score {next_best['score']:.1f} "
+            f"({', '.join(next_best['score_reasons'])})."
+        )
+    return " ".join(notes)
 
 
 def _save_match(
@@ -422,30 +511,89 @@ def _delete_existing_activity_match(db: Session, activity: GarminActivity) -> No
 def _evaluate_sport_compatibility(activity: GarminActivity, session: PlannedSession) -> dict[str, object]:
     activity_sport = _normalize_sport(activity.sport_type)
     session_sport = _normalize_sport(session.sport_type)
+    activity_family = _sport_family(activity.sport_type)
+    session_family = _sport_family(session.sport_type)
     activity_variant = _normalize_variant(activity.discipline_variant)
     session_variant = _normalize_variant(session.discipline_variant)
 
     if activity_sport is None:
-        return {"session": session, "compatible": False, "reason": "activity sport_type is missing", "variant_bonus": False}
-    if session_sport is None:
-        return {"session": session, "compatible": False, "reason": "planned session sport_type is missing", "variant_bonus": False}
-    if activity_sport != session_sport:
         return {
             "session": session,
             "compatible": False,
-            "reason": f"sport mismatch after normalization: activity={activity_sport}, session={session_sport}",
+            "reason": "la actividad no tiene sport_type",
             "variant_bonus": False,
+            "exact_sport": False,
+            "family_match": False,
+            "sport_score": 0.0,
+            "score_reason": "sin deporte en actividad",
         }
+    if session_sport is None:
+        return {
+            "session": session,
+            "compatible": False,
+            "reason": "la sesion planificada no tiene sport_type",
+            "variant_bonus": False,
+            "exact_sport": False,
+            "family_match": False,
+            "sport_score": 0.0,
+            "score_reason": "sesion sin deporte",
+        }
+    exact_sport = activity_sport == session_sport
+    family_match = (
+        exact_sport
+        or (activity_family is not None and session_family is not None and activity_family == session_family)
+        or activity_family == "multisport"
+        or session_family == "multisport"
+    )
+    if not family_match:
+        return {
+            "session": session,
+            "compatible": False,
+            "reason": f"familia deportiva incompatible: actividad={activity_family or activity_sport}, sesion={session_family or session_sport}",
+            "variant_bonus": False,
+            "exact_sport": False,
+            "family_match": False,
+            "sport_score": 0.0,
+            "score_reason": "deporte incompatible",
+        }
+    sport_score = 24.0 if exact_sport else 16.0
+    score_reason = "deporte exacto"
+    reason = "mismo sport_type"
     if activity_variant and session_variant and activity_variant == session_variant:
-        return {"session": session, "compatible": True, "reason": "sport and discipline_variant match", "variant_bonus": True}
+        return {
+            "session": session,
+            "compatible": True,
+            "reason": "mismo deporte y misma variante",
+            "variant_bonus": True,
+            "exact_sport": exact_sport,
+            "family_match": True,
+            "sport_score": sport_score + 4.0,
+            "score_reason": f"{score_reason} y variante exacta",
+        }
     if activity_variant and session_variant and activity_variant != session_variant:
         return {
             "session": session,
             "compatible": True,
-            "reason": f"base sport matches; discipline_variant differs ({activity_variant} vs {session_variant})",
+            "reason": f"familia compatible; variante distinta ({activity_variant} vs {session_variant})",
             "variant_bonus": False,
+            "exact_sport": exact_sport,
+            "family_match": True,
+            "sport_score": sport_score,
+            "score_reason": f"{score_reason} con variante distinta",
         }
-    return {"session": session, "compatible": True, "reason": "base sport matches; variant not required", "variant_bonus": False}
+    if not exact_sport:
+        reason = f"misma familia deportiva ({activity_family})"
+        score_reason = "misma familia deportiva"
+    return {
+        "session": session,
+        "compatible": True,
+        "reason": reason,
+        "variant_bonus": False,
+        "exact_sport": exact_sport,
+        "family_match": True,
+        "sport_score": sport_score,
+        "score_reason": score_reason,
+    }
 
 
 def _normalize_sport(value: str | None) -> str | None:
@@ -507,3 +655,18 @@ def _normalize_variant(value: str | None) -> str | None:
         "open_water_swimming": "open_water",
     }
     return aliases.get(normalized, normalized)
+
+
+def _sport_family(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    return SPORT_FAMILY_ALIASES.get(normalized, normalized)
+
+
+def _activity_local_date(activity: GarminActivity):
+    if activity.start_time is None:
+        return None
+    if activity.start_time.tzinfo is not None:
+        return activity.start_time.astimezone().date()
+    return activity.start_time.date()

@@ -109,6 +109,7 @@ def analyze_session(db: Session, planned_session_id: int) -> AnalysisReport:
             **comparison.analysis_context,
             "summary_facts": comparison.summary_facts,
             "context_notes": comparison.context_notes,
+            "score_breakdown": _score_breakdown_from_items(comparison.item_rows),
         },
         ensure_ascii=True,
         default=str,
@@ -178,9 +179,9 @@ def analyze_training_day(db: Session, training_day_id: int) -> AnalysisReport:
                 "item_order": index,
                 "item_type": "segment",
                 "reference_label": planned_session.name,
-                "planned_value_text": planned_session.sport_type or planned_session.session_type or "Sesion",
+                "planned_value_text": _session_day_planned_text(planned_session),
                 "actual_value_text": (
-                    session_report.garmin_activity.activity_name
+                    _session_day_actual_text(session_report.garmin_activity)
                     if session_report.garmin_activity is not None
                     else "Sin actividad vinculada"
                 ),
@@ -209,14 +210,14 @@ def analyze_training_day(db: Session, training_day_id: int) -> AnalysisReport:
     report.title = f"Resumen del dia {training_day.day_date}"
     report.overall_score = overall_score
     report.overall_status = overall_status
-    report.summary_text = f"Dia analizado con {len(session_reports)} sesiones. Resultado general: {overall_status}."
-    report.recommendation_text = (
-        "Revisar las sesiones con estado parcial o fallido para ajustar la ejecucion futura."
-        if session_reports
-        else "No hay sesiones para analizar en este dia."
-    )
+    report.summary_text = _build_day_summary_text(training_day, session_reports, overall_status)
+    report.recommendation_text = _build_day_recommendation_text(session_reports, overall_status)
     report.analysis_context_json = json.dumps(
-        {"training_day_id": training_day.id, "session_report_ids": [item.id for item in session_reports]},
+        {
+            "training_day_id": training_day.id,
+            "session_report_ids": [item.id for item in session_reports],
+            "score_breakdown": _score_breakdown_from_items(item_rows),
+        },
         ensure_ascii=True,
         default=str,
     )
@@ -243,6 +244,121 @@ def _replace_report_items(report: AnalysisReport, item_rows: list[dict[str, Any]
                 comment_text=row.get("comment_text"),
             )
         )
+
+
+def _score_breakdown_from_items(item_rows: list[dict[str, Any]]) -> dict[str, float | None]:
+    grouped: dict[str, list[float]] = {
+        "score_duration": [],
+        "score_distance": [],
+        "score_intensity": [],
+        "score_structure": [],
+        "score_context": [],
+    }
+    for row in item_rows:
+        score = row.get("item_score")
+        if score is None:
+            continue
+        label = str(row.get("reference_label") or "").lower()
+        item_type = str(row.get("item_type") or "").lower()
+        if "duracion" in label:
+            grouped["score_duration"].append(score)
+        elif "distancia" in label or "elevacion" in label:
+            grouped["score_distance"].append(score)
+        elif "intensidad" in label or any(token in label for token in ("hr", "power", "pace", "cadencia")):
+            grouped["score_intensity"].append(score)
+        elif item_type in {"segment", "lap", "work", "warmup", "recovery", "cooldown", "steady"}:
+            grouped["score_structure"].append(score)
+        else:
+            grouped["score_context"].append(score)
+    breakdown = {key: _average_scores(values) for key, values in grouped.items()}
+    breakdown["score_total"] = _average_scores([row.get("item_score") for row in item_rows])
+    return breakdown
+
+
+def _average_scores(values: list[float | None]) -> float | None:
+    usable = [float(value) for value in values if value is not None]
+    if not usable:
+        return None
+    return round(sum(usable) / len(usable), 1)
+
+
+def _session_day_planned_text(planned_session: PlannedSession) -> str:
+    parts: list[str] = []
+    if planned_session.sport_type:
+        parts.append(str(planned_session.sport_type).replace("_", " ").title())
+    if planned_session.expected_duration_min:
+        parts.append(f"{planned_session.expected_duration_min} min")
+    if planned_session.expected_distance_km:
+        parts.append(f"{planned_session.expected_distance_km} km")
+    if planned_session.target_hr_zone:
+        parts.append(f"FC {planned_session.target_hr_zone}")
+    if planned_session.target_power_zone:
+        parts.append(f"Pot {planned_session.target_power_zone}")
+    if planned_session.target_notes:
+        parts.append(planned_session.target_notes)
+    return " | ".join(parts) or planned_session.name
+
+
+def _session_day_actual_text(activity: GarminActivity | None) -> str:
+    if activity is None:
+        return "Sin actividad vinculada"
+    parts: list[str] = []
+    if activity.duration_sec:
+        parts.append(f"{round(activity.duration_sec / 60.0, 1)} min")
+    if activity.distance_m:
+        parts.append(f"{round(activity.distance_m / 1000.0, 2)} km")
+    if activity.avg_hr:
+        parts.append(f"avg HR {activity.avg_hr}")
+    if activity.avg_pace_sec_km:
+        parts.append(f"pace {round(activity.avg_pace_sec_km)} s/km")
+    return " | ".join(parts) or (activity.activity_name or "Actividad")
+
+
+def _build_day_summary_text(training_day: TrainingDay, session_reports: list[AnalysisReport], overall_status: str) -> str:
+    if not session_reports:
+        return "No hay sesiones planificadas en este dia para analizar."
+    if len(session_reports) == 1:
+        report = session_reports[0]
+        return f"Día {_status_text(overall_status)}: {report.summary_text or 'la unica sesion del dia no tiene suficiente informacion.'}"
+
+    correct_count = sum(1 for report in session_reports if report.overall_status == "correct")
+    partial_count = sum(1 for report in session_reports if report.overall_status == "partial")
+    failed_count = sum(1 for report in session_reports if report.overall_status in {"failed", "not_completed"})
+    review_count = sum(1 for report in session_reports if report.overall_status == "review")
+    parts = [
+        f"Dia {analysis_status_label(overall_status).lower()}: {correct_count} correctas",
+        f"{partial_count} parciales",
+        f"{failed_count} no completadas",
+    ]
+    if review_count:
+        parts.append(f"{review_count} en revision")
+    return ", ".join(parts) + "."
+
+
+def _build_day_recommendation_text(session_reports: list[AnalysisReport], overall_status: str) -> str:
+    if not session_reports:
+        return "No hay sesiones para analizar en este dia."
+    if overall_status == "correct":
+        return "Mantener el plan del dia tal como estaba previsto."
+    failed_reports = [report for report in session_reports if report.overall_status in {"failed", "not_completed"}]
+    partial_reports = [report for report in session_reports if report.overall_status == "partial"]
+    if failed_reports:
+        return "Revisar primero las sesiones no completadas y confirmar si faltan actividades por vincular o si la ejecucion quedo realmente incompleta."
+    if partial_reports:
+        return "Revisar las sesiones parciales y confirmar si el desvio vino de duracion, distancia o intensidad antes de ajustar el plan."
+    return "Hay datos en revision; conviene revisar match, zonas y actividad vinculada antes de sacar conclusiones."
+
+
+def _status_text(value: str) -> str:
+    mapping = {
+        "correct": "correcto",
+        "partial": "parcial",
+        "review": "en revision",
+        "failed": "fallido",
+        "not_completed": "no completado",
+        "skipped": "omitido",
+    }
+    return mapping.get(value, value)
 
 
 def _find_or_create_session_report(db: Session, planned_session: PlannedSession, activity: GarminActivity | None) -> AnalysisReport:

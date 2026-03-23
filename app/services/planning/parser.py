@@ -29,6 +29,11 @@ INTENSITY_LABEL_PATTERNS = [
     (r"\britmo\s*10k\b", lambda _: "ritmo 10k"),
     (r"\bumbral\b", lambda _: "umbral"),
     (r"\btempo\b", lambda _: "tempo"),
+    (r"\bfondo\b", lambda _: "fondo"),
+    (r"\btecnica\b", lambda _: "tecnica"),
+    (r"\bregenerativ[oa]?\b|\brecuperacion\b|\brecuperativo\b", lambda _: "recuperacion"),
+    (r"\bcontinu[oa]s?\b", lambda _: "base"),
+    (r"\bbase\b", lambda _: "base"),
     (r"\bfuerte(?:s)?\b|\bduro(?:s)?\b", lambda _: "fuerte"),
     (r"\bsuave(?:s)?\b", lambda _: "suave"),
     (r"\benfriar\b|\benfriamiento\b|\bafloje\b", lambda _: "enfriar"),
@@ -39,9 +44,12 @@ SESSION_TYPE_FROM_INTENSITY = {
     "suave": "easy",
     "enfriar": "easy",
     "base": "base",
+    "fondo": "long",
     "tempo": "tempo",
     "fuerte": "hard",
     "umbral": "tempo",
+    "tecnica": "technique",
+    "recuperacion": "recovery",
 }
 
 
@@ -284,10 +292,16 @@ def _parse_block(text: str) -> StructuredBlock:
             steps=nested_steps,
         )
 
+    natural_repeat = _parse_natural_repeat_block(block)
+    if natural_repeat is not None:
+        return natural_repeat
+
     if re.search(r"\b\d+\s*x\s*[^(]", _normalize_text(block)):
-        raise SessionParseError(
-            "Formato de repeticion invalido. Usa Nx(...), por ejemplo: 5x(2min fuerte + 2min suave)"
-        )
+        normalized = _normalize_text(block)
+        if " con " not in normalized and " rec " not in normalized and " pausa" not in normalized and " recuper" not in normalized:
+            raise SessionParseError(
+                "Formato de repeticion invalido. Usa Nx(...), por ejemplo: 5x(2min fuerte + 2min suave)"
+            )
 
     return _parse_simple_block(block)
 
@@ -331,6 +345,33 @@ def _parse_simple_block(text: str) -> StructuredSimpleBlock:
     )
 
 
+def _parse_natural_repeat_block(text: str) -> StructuredRepeatBlock | None:
+    normalized = _normalize_text(text)
+    match = re.match(
+        r"^\s*(\d+)\s*x\s*(.+?)\s+(?:con|c\/|rec|recuperacion|recuperar|pausa|descanso|entre cada (?:uno|una))\s+(.+?)\s*$",
+        normalized,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    repeat_count = int(match.group(1))
+    work_text = match.group(2).strip()
+    recovery_text = match.group(3).strip()
+    if not work_text or not recovery_text:
+        raise SessionParseError("La repeticion no tiene bloques validos de trabajo y recuperacion.")
+
+    work_step = _parse_simple_block(work_text)
+    recovery_step = _parse_simple_block(recovery_text)
+    recovery_step.step_type = "recovery"
+    return StructuredRepeatBlock(
+        type="repeat",
+        raw_text=text.strip(),
+        repeat_count=repeat_count,
+        steps=[work_step, recovery_step],
+    )
+
+
 def _extract_measurement(normalized: str) -> dict[str, object] | None:
     pace_like = re.search(r"\b(\d+):(\d{2})h\b", normalized)
     if pace_like:
@@ -347,6 +388,17 @@ def _extract_measurement(normalized: str) -> dict[str, object] | None:
     if compact_hhmm:
         hours = int(compact_hhmm.group(1))
         minutes = int(compact_hhmm.group(2))
+        return {
+            "kind": "time",
+            "value": hours * 60 + minutes,
+            "unit": "min",
+            "seconds": hours * 3600 + minutes * 60,
+        }
+
+    spaced_hhmm = re.search(r"\b(\d+)\s*h(?:s|ora|horas)?\s*(\d{1,2})\b", normalized)
+    if spaced_hhmm:
+        hours = int(spaced_hhmm.group(1))
+        minutes = int(spaced_hhmm.group(2))
         return {
             "kind": "time",
             "value": hours * 60 + minutes,
@@ -375,7 +427,17 @@ def _extract_measurement(normalized: str) -> dict[str, object] | None:
             "seconds": minutes * 60 + seconds,
         }
 
-    minutes = re.search(r"\b(\d+(?:[.,]\d+)?)\s*(min|minuto|minutos)\b", normalized)
+    apostrophe_minutes = re.search(r"\b(\d+(?:[.,]\d+)?)\s*'\b", normalized)
+    if apostrophe_minutes:
+        value = float(apostrophe_minutes.group(1).replace(",", "."))
+        return {
+            "kind": "time",
+            "value": value,
+            "unit": "min",
+            "seconds": int(round(value * 60)),
+        }
+
+    minutes = re.search(r"\b(\d+(?:[.,]\d+)?)\s*(min\w*|mins|minuto|minutos)\b", normalized)
     if minutes:
         value = float(minutes.group(1).replace(",", "."))
         return {
@@ -437,8 +499,6 @@ def _extract_intensity_label(normalized: str) -> str | None:
         match = re.search(pattern, normalized)
         if match:
             return builder(match)
-    if "base" in normalized:
-        return "base"
     return None
 
 
@@ -453,6 +513,10 @@ def _infer_step_type(normalized: str, intensity_label: str | None) -> str:
         return "transition"
     if "tecnica" in normalized:
         return "drills"
+    if "strides" in normalized:
+        return "strides"
+    if "repeticion" in normalized and any(token in normalized for token in ("m", "km")):
+        return "swim_repeat"
     if intensity_label in {"fuerte", "tempo", "umbral", "ritmo 5k", "ritmo 10k", "Z3", "Z4", "Z5"}:
         return "work"
     return "steady"
@@ -685,10 +749,24 @@ def _main_block_title_fragment(steps: list[StructuredBlock]) -> str | None:
     if repeat_blocks:
         main_repeat = repeat_blocks[0]
         main_work = next((step for step in main_repeat.steps if step.step_type == "work"), main_repeat.steps[0])
-        measurement = _measurement_label(main_work)
-        intensity = main_work.intensity_label or ""
-        suffix = f" {intensity}" if intensity else ""
-        return f"{main_repeat.repeat_count}x{measurement}{suffix}".strip()
+        work_measurement = _measurement_label(main_work)
+        recovery_step = next((step for step in main_repeat.steps if step.step_type == "recovery"), None)
+        if recovery_step is None and len(main_repeat.steps) > 1:
+            recovery_step = next((step for step in main_repeat.steps if step is not main_work), None)
+        work_intensity = _title_intensity_label(main_work.intensity_label)
+        if recovery_step is not None:
+            recovery_measurement = _measurement_label(recovery_step)
+            recovery_intensity = _title_intensity_label(recovery_step.intensity_label)
+            recovery_fragment = " ".join(
+                part for part in (recovery_measurement, recovery_intensity) if part
+            ).strip()
+            work_fragment = " ".join(
+                part for part in (work_measurement, work_intensity) if part
+            ).strip()
+            return f"{main_repeat.repeat_count}x({work_fragment} + {recovery_fragment})"
+
+        suffix = f" {work_intensity}" if work_intensity else ""
+        return f"{main_repeat.repeat_count}x{work_measurement}{suffix}".strip()
 
     meaningful_simple_steps = [
         step
@@ -703,7 +781,7 @@ def _main_block_title_fragment(steps: list[StructuredBlock]) -> str | None:
         return None
 
     measurement = _measurement_label(main_step)
-    intensity = main_step.intensity_label or ""
+    intensity = _title_intensity_label(main_step.intensity_label)
     return " ".join(part for part in (measurement, intensity) if part).strip() or None
 
 
@@ -731,6 +809,16 @@ def _measurement_label(step: StructuredSimpleBlock) -> str:
             return f"{hours}h{minutes:02d}"
         return f"{hours}h"
     return f"{int(round(total_seconds / 60))}min"
+
+
+def _title_intensity_label(intensity_label: str | None) -> str:
+    if intensity_label is None:
+        return ""
+    labels = {
+        "enfriar": "suave",
+        "recuperacion": "suave",
+    }
+    return labels.get(intensity_label, intensity_label)
 
 
 def _normalize_text(text: str) -> str:

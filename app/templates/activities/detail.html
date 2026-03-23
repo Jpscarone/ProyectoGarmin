@@ -59,6 +59,7 @@
         <div class="detail-item"><strong>Clima:</strong> {{ 'Disponible' if activity.weather else 'No sincronizado' }}</div>
         <div class="detail-item"><strong>Vinculacion:</strong> {{ match_method_label(activity.activity_match.match_method) if activity.activity_match else 'Sin vinculacion' }}</div>
         <div class="detail-item"><strong>Confianza:</strong> {{ activity.activity_match.match_confidence if activity.activity_match else '-' }}</div>
+        <div class="detail-item"><strong>Metodo:</strong> {{ activity.activity_match.match_method if activity.activity_match else '-' }}</div>
         <div class="detail-item detail-item-full"><strong>Sesion planificada:</strong>
             {% if activity.activity_match and activity.activity_match.planned_session %}
             <a href="/planned_sessions/{{ activity.activity_match.planned_session.id }}">{{ activity.activity_match.planned_session.name }}</a>
@@ -66,6 +67,7 @@
             Sin sesion vinculada
             {% endif %}
         </div>
+        <div class="detail-item detail-item-full"><strong>Notas del matching:</strong> {{ activity.activity_match.match_notes if activity.activity_match and activity.activity_match.match_notes else '-' }}</div>
         <details class="detail-item detail-item-full">
             <summary><strong>JSON crudo de Garmin</strong></summary>
             <pre class="raw-json">{{ activity.raw_summary_json or '-' }}</pre>

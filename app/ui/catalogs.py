@@ -149,6 +149,8 @@ ZONE_OPTIONS = [
 MATCH_METHOD_LABELS = {
     "exact_time": "Horario exacto",
     "same_day_sport": "Mismo dia y deporte",
+    "same_day_family": "Mismo dia y familia deportiva",
+    "same_day_candidate": "Candidata del mismo dia",
     "group_match": "Coincidencia por grupo",
     "manual": "Manual",
 }

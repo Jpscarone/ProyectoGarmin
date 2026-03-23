@@ -8,6 +8,7 @@ from app.services.planning.presentation import (
     build_session_display_blocks,
     build_session_display_blocks_for_session,
     describe_session_structure,
+    describe_session_structure_short,
     derive_session_metrics,
     format_duration_human_from_minutes,
     format_duration_human_from_seconds,
@@ -154,6 +155,7 @@ def build_templates(base_path: Path) -> Jinja2Templates:
         session_display_blocks=build_session_display_blocks,
         session_display_blocks_for_session=build_session_display_blocks_for_session,
         session_structure_summary=describe_session_structure,
+        session_structure_summary_short=describe_session_structure_short,
         derive_session_metrics=derive_session_metrics,
     )
     return templates

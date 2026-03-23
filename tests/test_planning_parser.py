@@ -37,14 +37,14 @@ class PlanningParserTests(unittest.TestCase):
     def test_dynamic_title_for_repeat_distance_session(self) -> None:
         result = parse_session_text("Running + 10min suave + 4x(2km Z4 + 90seg suave)")
 
-        self.assertEqual(result.name, "Running 4x2km Z4")
+        self.assertEqual(result.name, "Running 4x(2km Z4 + 1:30 suave)")
         self.assertEqual(result.expected_distance_km, 8.0)
         self.assertIsNone(result.expected_duration_min)
 
     def test_dynamic_title_for_repeat_time_session(self) -> None:
         result = parse_session_text("Running + 10min suave + 5x(2min fuerte + 2min suave) + 10min suave")
 
-        self.assertEqual(result.name, "Running 5x2min fuerte")
+        self.assertEqual(result.name, "Running 5x(2min fuerte + 2min suave)")
 
     def test_mtb_zone_session(self) -> None:
         structured = parse_standardized_session_text("MTB + 20min Z2 + 3x(8min Z4 + 3min Z1) + 15min Z2")
@@ -62,6 +62,41 @@ class PlanningParserTests(unittest.TestCase):
         self.assertEqual(result.expected_duration_min, 45)
         self.assertEqual(result.session_type, "easy")
         self.assertEqual(result.steps, [])
+
+    def test_simple_duration_session_with_real_world_minutes_wording(self) -> None:
+        result = parse_session_text("60 minitos suaves")
+
+        self.assertEqual(result.expected_duration_min, 60)
+        self.assertEqual(result.session_type, "easy")
+        self.assertIn("suave", result.target_notes or "")
+        self.assertEqual(result.steps, [])
+
+    def test_simple_bike_base_session(self) -> None:
+        result = parse_session_text("1h bici base")
+
+        self.assertEqual(result.expected_duration_min, 60)
+        self.assertEqual(result.sport_type, "cycling")
+        self.assertEqual(result.session_type, "base")
+        self.assertEqual(result.steps, [])
+
+    def test_simple_swimming_distance_session(self) -> None:
+        result = parse_session_text("natacion 2000 m continua")
+
+        self.assertEqual(result.expected_distance_km, 2.0)
+        self.assertEqual(result.sport_type, "swimming")
+        self.assertEqual(result.session_type, "base")
+        self.assertEqual(result.steps, [])
+
+    def test_natural_repeat_session_without_parentheses(self) -> None:
+        result = parse_session_text("4 x 6 min en Z3 con 3 min suaves")
+
+        self.assertEqual(result.session_type, "intervals")
+        self.assertEqual(result.expected_duration_min, 36)
+        self.assertEqual(len(result.steps), 2)
+        self.assertEqual(result.steps[0].repeat_count, 4)
+        self.assertEqual(result.steps[0].step_type, "work")
+        self.assertEqual(result.steps[1].repeat_count, 4)
+        self.assertEqual(result.steps[1].step_type, "recovery")
 
     def test_simple_distance_session(self) -> None:
         result = parse_session_text("10km Z2")

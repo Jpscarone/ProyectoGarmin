@@ -52,9 +52,9 @@
             <button class="quick-mode-tab{% if initial_mode == 'text' %} is-active{% endif %}" type="button" data-mode-target="text" onclick="switchQuickMode('text')">Texto libre</button>
             <button class="quick-mode-tab{% if initial_mode == 'builder' %} is-active{% endif %}" type="button" data-mode-target="builder" onclick="switchQuickMode('builder')">Sesion por bloques</button>
             {% if training_day %}
-            <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_day_id={{ training_day.id }}&return_to={{ return_to or 'day' }}&month={{ return_month or training_day.day_date.strftime('%Y-%m') }}">Biblioteca</a>
+            <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_day_id={{ training_day.id }}&return_to={{ return_to or 'day' }}&month={{ return_month or training_day.day_date.strftime('%Y-%m') }}">Biblioteca de sesiones</a>
             {% elif training_plan %}
-            <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_plan_id={{ training_plan.id }}&planned_day_date={{ selected_day_date or '' }}&return_to={{ return_to or 'plan' }}">Biblioteca</a>
+            <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_plan_id={{ training_plan.id }}&planned_day_date={{ selected_day_date or '' }}&return_to={{ return_to or 'plan' }}">Biblioteca de sesiones</a>
             {% endif %}
         </div>
 

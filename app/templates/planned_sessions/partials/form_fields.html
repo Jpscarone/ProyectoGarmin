@@ -2,21 +2,34 @@
 
 <section class="form-section field-full">
     <div class="form-section-header">
+        <h2>Descripcion de la sesion</h2>
+        <p class="text-muted">Resumen general para entender rapido el objetivo de la sesion.</p>
+    </div>
+    <div class="form-grid planned-session-edit-description-panel">
+        <label class="field field-full">
+            <span>Descripcion</span>
+            <textarea name="description_text" rows="4" placeholder="Detalles libres de la sesion.">{{ planned_session.description_text if planned_session and planned_session.description_text else '' }}</textarea>
+        </label>
+    </div>
+</section>
+
+<section class="form-section field-full">
+    <div class="form-section-header">
         <h2>Datos principales</h2>
         <p class="text-muted">Lo minimo para que la sesion quede clara y consistente.</p>
     </div>
-    <div class="form-grid form-grid-compact">
-        <label class="field field-full">
+    <div class="form-grid form-grid-compact planned-session-main-grid">
+        <label class="field planned-session-main-title">
             <span>Nombre</span>
             <input name="name" type="text" value="{{ planned_session.name if planned_session else '' }}" placeholder="Ej: Rodaje suave 50 min" required>
         </label>
 
-        <label class="field">
+        <label class="field planned-session-main-order">
             <span>Orden</span>
             <input name="session_order" type="number" min="1" value="{{ planned_session.session_order if planned_session else '1' }}" placeholder="Ej: 1" required>
         </label>
 
-        <label class="field">
+        <label class="field planned-session-main-time">
             <span>Hora prevista</span>
             <input name="planned_start_time" type="time" value="{{ planned_session.planned_start_time.strftime('%H:%M') if planned_session and planned_session.planned_start_time else '' }}">
         </label>
@@ -97,15 +110,17 @@
             <span>Sesion clave</span>
             <input name="is_key_session" type="checkbox" {% if planned_session and planned_session.is_key_session %}checked{% endif %}>
         </label>
+
+        <label class="field field-full">
+            <span>Notas objetivo</span>
+            <input name="target_notes" type="text" value="{{ planned_session.target_notes if planned_session and planned_session.target_notes else '' }}" placeholder="Ej: base, suave, control de Z2">
+        </label>
     </div>
 </section>
 
-<section class="form-section field-full">
-    <div class="form-section-header">
-        <h2>Objetivo</h2>
-        <p class="text-muted">Duracion, distancia y zonas objetivo para analizar despues.</p>
-    </div>
-    <div class="form-grid form-grid-compact">
+<details class="advanced-panel field-full">
+    <summary>Objetivo</summary>
+    <div class="form-grid form-grid-compact planned-session-goal-grid">
         <label class="field">
             <span>Duracion esperada</span>
             <input name="expected_duration_hhmm" type="text" value="{{ duration_minutes_hhmm(planned_session.expected_duration_min) if planned_session else '' }}" placeholder="Ej: 1:15">
@@ -148,21 +163,6 @@
                 <option value="{{ option.value }}" {% if current_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
                 {% endfor %}
             </select>
-        </label>
-
-        <label class="field field-full">
-            <span>Notas objetivo</span>
-            <input name="target_notes" type="text" value="{{ planned_session.target_notes if planned_session and planned_session.target_notes else '' }}" placeholder="Ej: base, suave, control de Z2">
-        </label>
-    </div>
-</section>
-
-<details class="advanced-panel field-full">
-    <summary>Campos avanzados</summary>
-    <div class="form-grid">
-        <label class="field field-full">
-            <span>Descripcion</span>
-            <textarea name="description_text" rows="4" placeholder="Detalles libres de la sesion.">{{ planned_session.description_text if planned_session and planned_session.description_text else '' }}</textarea>
         </label>
     </div>
 </details>

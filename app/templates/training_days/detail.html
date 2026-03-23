@@ -18,8 +18,7 @@
         </div>
         <div class="actions-inline">
             <a class="button button-secondary" href="{{ back_href }}">{{ back_label }}</a>
-            <a class="button" href="/planned_sessions/quick?training_day_id={{ training_day.id }}">Sesion rapida</a>
-            <a class="button button-secondary" href="/session_templates?training_day_id={{ training_day.id }}&return_to={{ 'plan' if back_label == 'Volver a dias del plan' else 'calendar' }}&month={{ training_day.day_date.strftime('%Y-%m') }}">Agregar desde biblioteca</a>
+            <a class="button" href="/planned_sessions/quick?training_day_id={{ training_day.id }}">Crear sesion</a>
             <form method="post" action="/analysis/day/{{ training_day.id }}">
                 <button class="button" type="submit">Analizar dia</button>
             </form>
@@ -61,6 +60,10 @@
                     {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
                     {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}| Vinculada: {{ planned_session.activity_match.garmin_activity.activity_name or ('Actividad ' ~ planned_session.activity_match.garmin_activity.id) }}{% endif %}
                 </p>
+                {% set structure_summary_short = session_structure_summary_short(planned_session) %}
+                {% if structure_summary_short %}
+                <p class="text-muted"><strong>Resumen:</strong> {{ structure_summary_short }}</p>
+                {% endif %}
                 {% set structure_summary = session_structure_summary(planned_session) %}
                 {% if structure_summary %}
                 <p class="text-muted"><strong>Estructura:</strong> {{ structure_summary }}</p>
@@ -125,6 +128,10 @@
                         {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
                         {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}| Vinculada: {{ planned_session.activity_match.garmin_activity.activity_name or ('Actividad ' ~ planned_session.activity_match.garmin_activity.id) }}{% endif %}
                     </p>
+                    {% set structure_summary_short = session_structure_summary_short(planned_session) %}
+                    {% if structure_summary_short %}
+                    <p class="text-muted"><strong>Resumen:</strong> {{ structure_summary_short }}</p>
+                    {% endif %}
                     {% set structure_summary = session_structure_summary(planned_session) %}
                     {% if structure_summary %}
                     <p class="text-muted"><strong>Estructura:</strong> {{ structure_summary }}</p>

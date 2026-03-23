@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from app.services.planning.presentation import (
     build_session_display_blocks,
     describe_session_structure,
+    describe_session_structure_short,
     derive_session_metrics,
     format_duration_human_from_minutes,
     format_duration_human_from_seconds,
@@ -335,6 +336,71 @@ class PlanningPresentationTests(unittest.TestCase):
         summary = describe_session_structure(session)
 
         self.assertEqual(summary, "10min suave + 5x(2min fuerte + 2min suave) + 10min suave")
+
+    def test_structure_summary_short_is_compact_but_clear(self) -> None:
+        session = SimpleNamespace(
+            expected_duration_min=None,
+            expected_distance_km=None,
+            target_notes=None,
+            session_type="intervals",
+            planned_session_steps=[
+                SimpleNamespace(
+                    id=1,
+                    step_order=1,
+                    step_type="warmup",
+                    repeat_count=None,
+                    duration_sec=600,
+                    distance_m=None,
+                    target_hr_min=None,
+                    target_hr_max=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    target_notes="suave",
+                ),
+                SimpleNamespace(
+                    id=2,
+                    step_order=2,
+                    step_type="work",
+                    repeat_count=4,
+                    duration_sec=None,
+                    distance_m=2000,
+                    target_hr_min=None,
+                    target_hr_max=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    target_notes="Z4",
+                ),
+                SimpleNamespace(
+                    id=3,
+                    step_order=3,
+                    step_type="recovery",
+                    repeat_count=4,
+                    duration_sec=90,
+                    distance_m=None,
+                    target_hr_min=None,
+                    target_hr_max=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    target_notes="suave",
+                ),
+            ],
+        )
+
+        summary = describe_session_structure_short(session)
+
+        self.assertEqual(summary, "10min suave + 4x(2km+1:30) Z4")
 
 
 if __name__ == "__main__":

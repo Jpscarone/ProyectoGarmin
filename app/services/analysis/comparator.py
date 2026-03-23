@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
+from types import SimpleNamespace
 from typing import Any
 
 from app.db.models.activity_weather import ActivityWeather
@@ -10,6 +11,7 @@ from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
+from app.services.planning.presentation import SessionDisplayRepeatBlock, SessionDisplaySimpleStep, build_session_display_blocks
 from app.services.analysis.scoring import (
     aggregate_scores,
     compare_range,
@@ -107,11 +109,11 @@ def _build_global_rows(
             "item_order": order,
             "item_type": "segment",
             "reference_label": "Deporte",
-            "planned_value_text": planned_session.sport_type or "-",
-            "actual_value_text": activity.sport_type or "-",
+            "planned_value_text": _planned_sport_text(planned_session),
+            "actual_value_text": _actual_sport_text(activity),
             "item_score": sport_score,
             "item_status": item_status_from_score(sport_score),
-            "comment_text": "Deporte coincidente." if sport_ok else "El deporte real no coincide con la sesion planificada.",
+            "comment_text": "Motivo del score: deporte coincidente." if sport_ok else "Motivo del score: el deporte real no coincide con la sesion planificada.",
         }
     )
     facts.append("deporte correcto" if sport_ok else "deporte distinto al plan")
@@ -131,7 +133,7 @@ def _build_global_rows(
                 "actual_value_text": f"{round((activity.duration_sec or 0) / 60.0, 1)} min" if activity.duration_sec else "-",
                 "item_score": duration_result["score"],
                 "item_status": item_status_from_score(duration_result["score"], force_review=duration_result["status"] == "review"),
-                "comment_text": _generic_metric_comment("duracion", duration_result),
+                "comment_text": _global_metric_comment("duracion", duration_result),
             }
         )
         facts.append(_status_fact("duracion", duration_result["status"]))
@@ -151,7 +153,7 @@ def _build_global_rows(
                 "actual_value_text": f"{round((activity.distance_m or 0) / 1000.0, 2)} km" if activity.distance_m else "-",
                 "item_score": distance_result["score"],
                 "item_status": item_status_from_score(distance_result["score"], force_review=distance_result["status"] == "review"),
-                "comment_text": _generic_metric_comment("distancia", distance_result),
+                "comment_text": _global_metric_comment("distancia", distance_result),
             }
         )
         facts.append(_status_fact("distancia", distance_result["status"]))
@@ -168,7 +170,7 @@ def _build_global_rows(
                 "actual_value_text": f"{round(activity.elevation_gain_m, 1)} m+" if activity.elevation_gain_m is not None else "-",
                 "item_score": elev_result["score"],
                 "item_status": item_status_from_score(elev_result["score"], force_review=elev_result["status"] == "review"),
-                "comment_text": _generic_metric_comment("elevacion", elev_result),
+                "comment_text": _global_metric_comment("elevacion", elev_result),
             }
         )
         facts.append(_status_fact("elevacion", elev_result["status"]))
@@ -190,7 +192,7 @@ def _build_global_rows(
 
 
 def _build_item_rows(planned_session: PlannedSession, activity: GarminActivity) -> list[dict[str, Any]]:
-    steps = list(planned_session.planned_session_steps)
+    steps = _expand_steps_for_analysis(list(planned_session.planned_session_steps))
     laps = list(activity.laps)
 
     if steps and laps:
@@ -206,7 +208,7 @@ def _build_item_rows(planned_session: PlannedSession, activity: GarminActivity) 
                 "actual_value_text": "Sin laps disponibles",
                 "item_score": None,
                 "item_status": "review",
-                "comment_text": "La sesion tiene steps, pero la actividad no tiene laps suficientes para compararlos.",
+                "comment_text": "Motivo del score: la sesion tiene steps, pero la actividad no tiene laps suficientes para compararlos.",
             }
             for index, step in enumerate(steps, start=1)
         ]
@@ -228,7 +230,7 @@ def _build_item_rows(planned_session: PlannedSession, activity: GarminActivity) 
                 "actual_value_text": _activity_actual_text(activity),
                 "item_score": score,
                 "item_status": item_status_from_score(score, force_review=score is None),
-                "comment_text": "Sesion simple comparada a nivel global.",
+                "comment_text": _simple_session_comment(planned_session, activity),
             }
         ]
 
@@ -244,6 +246,48 @@ def _build_item_rows(planned_session: PlannedSession, activity: GarminActivity) 
             "comment_text": "No hubo estructura suficiente para un analisis por bloques.",
         }
     ]
+
+
+def _expand_steps_for_analysis(steps: list[PlannedSessionStep]) -> list[Any]:
+    if not steps:
+        return []
+
+    expanded: list[Any] = []
+    next_step_order = 1
+    blocks = build_session_display_blocks(steps)
+
+    for block in blocks:
+        if isinstance(block, SessionDisplayRepeatBlock):
+            for _ in range(block.repeat_count):
+                for child in block.steps:
+                    expanded.append(_display_step_to_analysis_step(child, next_step_order))
+                    next_step_order += 1
+            continue
+
+        expanded.append(_display_step_to_analysis_step(block, next_step_order))
+        next_step_order += 1
+
+    return expanded
+
+
+def _display_step_to_analysis_step(step: SessionDisplaySimpleStep, step_order: int) -> Any:
+    return SimpleNamespace(
+        id=step.source_step_id,
+        step_order=step_order,
+        step_type=step.step_type,
+        repeat_count=None,
+        duration_sec=step.duration_sec,
+        distance_m=step.distance_m,
+        target_hr_min=step.target_hr_min,
+        target_hr_max=step.target_hr_max,
+        target_power_min=step.target_power_min,
+        target_power_max=step.target_power_max,
+        target_pace_min_sec_km=step.target_pace_min_sec_km,
+        target_pace_max_sec_km=step.target_pace_max_sec_km,
+        target_cadence_min=step.target_cadence_min,
+        target_cadence_max=step.target_cadence_max,
+        target_notes=step.target_notes,
+    )
 
 
 def _compare_steps_to_laps(steps: list[PlannedSessionStep], laps: list[GarminActivityLap], *, offset: int) -> list[dict[str, Any]]:
@@ -489,6 +533,10 @@ def _build_context_payload(
         "lap_count": len(activity.laps) if activity else 0,
         "health_metric_id": health_metric.id if health_metric else None,
         "weather_id": weather.id if weather else None,
+        "planned_vs_actual": {
+            "planned": _session_expectation_text(planned_session),
+            "actual": _activity_actual_text(activity) if activity else None,
+        },
     }
 
 
@@ -502,15 +550,22 @@ def _status_fact(label: str, status: str | None) -> str:
     return mapping.get(status or "review", f"{label} con revision pendiente")
 
 
-def _generic_metric_comment(label: str, result: dict[str, Any]) -> str:
+def _global_metric_comment(label: str, result: dict[str, Any]) -> str:
     status = result["status"]
+    fulfillment_pct = result.get("fulfillment_pct")
     if status == "correct":
-        return f"{label.capitalize()} correcta."
+        if fulfillment_pct is not None:
+            return f"Motivo del score: {label} cumplida al {round(fulfillment_pct)}%."
+        return f"Motivo del score: {label} correcta."
     if status == "partial":
-        return f"{label.capitalize()} cerca del objetivo."
+        if fulfillment_pct is not None:
+            return f"Motivo del score: {label} con cumplimiento del {round(fulfillment_pct)}%."
+        return f"Motivo del score: {label} cerca del objetivo."
     if status == "failed":
-        return f"{label.capitalize()} fuera del margen esperado."
-    return f"No hubo datos suficientes para evaluar la {label}."
+        if fulfillment_pct is not None:
+            return f"Motivo del score: {label} con cumplimiento del {round(fulfillment_pct)}%, fuera del margen esperado."
+        return f"Motivo del score: {label} fuera del margen esperado."
+    return f"Motivo del score: no hubo datos suficientes para evaluar la {label}."
 
 
 def _step_comment(
@@ -523,6 +578,11 @@ def _step_comment(
     cadence_result: dict[str, Any],
 ) -> str:
     comments: list[str] = []
+    detail_reasons: list[str] = []
+    if step.duration_sec and duration_result["fulfillment_pct"] is not None:
+        detail_reasons.append(f"duracion {round(duration_result['fulfillment_pct'])}%")
+    if step.distance_m and distance_result["fulfillment_pct"] is not None:
+        detail_reasons.append(f"distancia {round(distance_result['fulfillment_pct'])}%")
     if step.duration_sec and duration_result["status"] == "failed":
         comments.append("duracion fuera del margen")
     if step.distance_m and distance_result["status"] == "failed":
@@ -536,16 +596,22 @@ def _step_comment(
     if (step.target_cadence_min or step.target_cadence_max) and cadence_result["status"] == "failed":
         comments.append("cadencia fuera del objetivo")
     if not comments:
-        return f"{step.step_type.capitalize()} evaluado correctamente o con desviaciones menores."
-    return "; ".join(comments).capitalize() + "."
+        if detail_reasons:
+            return f"Motivo del score: {', '.join(detail_reasons)}; bloque evaluado correctamente o con desvio menor."
+        return f"Motivo del score: {step.step_type.capitalize()} evaluado correctamente o con desviaciones menores."
+    summary = "; ".join(comments).capitalize() + "."
+    if detail_reasons:
+        return f"Motivo del score: {', '.join(detail_reasons)}. {summary}"
+    return f"Motivo del score: {summary}"
 
 
 def _planned_step_text(step: PlannedSessionStep) -> str:
     parts: list[str] = []
+    parts.append(step.step_type.capitalize())
     if step.duration_sec:
-        parts.append(f"{step.duration_sec}s")
+        parts.append(_format_duration_seconds(step.duration_sec))
     if step.distance_m:
-        parts.append(f"{step.distance_m}m")
+        parts.append(_format_distance_meters(step.distance_m))
     if step.repeat_count:
         parts.append(f"x{step.repeat_count}")
     if step.target_hr_min or step.target_hr_max:
@@ -553,53 +619,94 @@ def _planned_step_text(step: PlannedSessionStep) -> str:
     if step.target_power_min or step.target_power_max:
         parts.append(f"Power {step.target_power_min or '-'}-{step.target_power_max or '-'}")
     if step.target_pace_min_sec_km or step.target_pace_max_sec_km:
-        parts.append(f"Pace {step.target_pace_min_sec_km or '-'}-{step.target_pace_max_sec_km or '-'}")
+        parts.append(f"Ritmo {_format_pace_range(step.target_pace_min_sec_km, step.target_pace_max_sec_km)}")
     if step.target_cadence_min or step.target_cadence_max:
-        parts.append(f"Cadence {step.target_cadence_min or '-'}-{step.target_cadence_max or '-'}")
+        parts.append(f"Cadencia {step.target_cadence_min or '-'}-{step.target_cadence_max or '-'}")
+    if step.target_notes:
+        parts.append(step.target_notes)
     return " | ".join(parts) or "Sin objetivos cuantificables"
 
 
 def _actual_lap_text(lap: GarminActivityLap) -> str:
     parts: list[str] = []
     if lap.duration_sec:
-        parts.append(f"{lap.duration_sec}s")
+        parts.append(_format_duration_seconds(lap.duration_sec))
     if lap.distance_m:
-        parts.append(f"{round(lap.distance_m, 1)}m")
+        parts.append(_format_distance_meters(lap.distance_m))
     if lap.avg_hr:
-        parts.append(f"avgHR {lap.avg_hr}")
+        parts.append(f"avg HR {lap.avg_hr}")
     if lap.avg_power:
-        parts.append(f"avgPower {lap.avg_power}")
+        parts.append(f"avg power {lap.avg_power}")
     if lap.avg_pace_sec_km:
-        parts.append(f"pace {round(lap.avg_pace_sec_km, 1)}")
+        parts.append(f"pace {_format_pace_value(lap.avg_pace_sec_km)}")
     if lap.avg_cadence:
-        parts.append(f"cad {round(lap.avg_cadence, 1)}")
+        parts.append(f"cadencia {round(lap.avg_cadence, 1)}")
     return " | ".join(parts) or "Lap sin metricas relevantes"
 
 
 def _session_expectation_text(planned_session: PlannedSession) -> str:
     parts: list[str] = []
+    if planned_session.sport_type:
+        parts.append(str(planned_session.sport_type).replace("_", " ").title())
     if planned_session.expected_duration_min:
-        parts.append(f"{planned_session.expected_duration_min} min")
+        parts.append(_format_duration_minutes(planned_session.expected_duration_min))
     if planned_session.expected_distance_km:
         parts.append(f"{planned_session.expected_distance_km} km")
     if planned_session.target_hr_zone:
-        parts.append(f"HR zone {planned_session.target_hr_zone}")
+        parts.append(f"Zona FC {planned_session.target_hr_zone}")
     if planned_session.target_power_zone:
-        parts.append(f"Power zone {planned_session.target_power_zone}")
+        parts.append(f"Zona potencia {planned_session.target_power_zone}")
+    if planned_session.target_notes:
+        parts.append(planned_session.target_notes)
     return " | ".join(parts) or planned_session.name
 
 
 def _activity_actual_text(activity: GarminActivity) -> str:
     parts: list[str] = []
     if activity.duration_sec:
-        parts.append(f"{round(activity.duration_sec / 60.0, 1)} min")
+        parts.append(_format_duration_seconds(activity.duration_sec))
     if activity.distance_m:
         parts.append(f"{round(activity.distance_m / 1000.0, 2)} km")
     if activity.avg_hr:
-        parts.append(f"avgHR {activity.avg_hr}")
+        parts.append(f"avg HR {activity.avg_hr}")
     if activity.avg_power:
-        parts.append(f"avgPower {activity.avg_power}")
+        parts.append(f"avg power {activity.avg_power}")
+    if activity.avg_pace_sec_km:
+        parts.append(f"pace {_format_pace_value(activity.avg_pace_sec_km)}")
     return " | ".join(parts) or activity.activity_name or "Sin metricas globales"
+
+
+def _planned_sport_text(planned_session: PlannedSession) -> str:
+    parts = [str(planned_session.sport_type or "-").replace("_", " ").title()]
+    if planned_session.discipline_variant:
+        parts.append(str(planned_session.discipline_variant).replace("_", " "))
+    return " | ".join(parts)
+
+
+def _actual_sport_text(activity: GarminActivity) -> str:
+    parts = [str(activity.sport_type or "-").replace("_", " ").title()]
+    if activity.discipline_variant:
+        parts.append(str(activity.discipline_variant).replace("_", " "))
+    return " | ".join(parts)
+
+
+def _simple_session_comment(planned_session: PlannedSession, activity: GarminActivity) -> str:
+    duration_result = compare_relative(
+        planned_session.expected_duration_min,
+        (activity.duration_sec or 0) / 60.0 if activity.duration_sec and planned_session.expected_duration_min else None,
+    )
+    distance_result = compare_relative(
+        planned_session.expected_distance_km,
+        (activity.distance_m or 0) / 1000.0 if activity.distance_m and planned_session.expected_distance_km else None,
+    )
+    reasons: list[str] = []
+    if duration_result.get("fulfillment_pct") is not None:
+        reasons.append(f"duracion {round(duration_result['fulfillment_pct'])}%")
+    if distance_result.get("fulfillment_pct") is not None:
+        reasons.append(f"distancia {round(distance_result['fulfillment_pct'])}%")
+    if activity.avg_hr is not None:
+        reasons.append(f"avg HR {activity.avg_hr}")
+    return f"Motivo del score: {', '.join(reasons)}." if reasons else "Motivo del score: sesion simple comparada a nivel global."
 
 
 def _intensity_comment(metric_label: str, status: str, direction: str | None) -> str:
@@ -771,3 +878,48 @@ def _normalize_sport(value: str | None) -> str | None:
         "swim": "swim",
     }
     return aliases.get(normalized, normalized)
+
+
+def _format_duration_minutes(value: int | float | None) -> str:
+    if value is None:
+        return "-"
+    total = int(round(float(value)))
+    hours, minutes = divmod(total, 60)
+    if hours:
+        return f"{hours}h {minutes}min" if minutes else f"{hours}h"
+    return f"{minutes} min"
+
+
+def _format_duration_seconds(value: int | float | None) -> str:
+    if value is None:
+        return "-"
+    total = int(round(float(value)))
+    if total < 60:
+        return f"{total}s"
+    minutes, seconds = divmod(total, 60)
+    if minutes < 60:
+        if seconds == 0:
+            return f"{minutes} min"
+        return f"{minutes}:{seconds:02d}"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}min" if minutes else f"{hours}h"
+
+
+def _format_distance_meters(value: int | float | None) -> str:
+    if value is None:
+        return "-"
+    if value >= 1000:
+        return f"{round(float(value) / 1000.0, 2)} km"
+    return f"{round(float(value), 1)} m"
+
+
+def _format_pace_value(value: float | None) -> str:
+    if value is None:
+        return "-"
+    total_seconds = int(round(value))
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}:{seconds:02d}/km"
+
+
+def _format_pace_range(minimum: int | None, maximum: int | None) -> str:
+    return f"{_format_pace_value(minimum) if minimum is not None else '-'}-{_format_pace_value(maximum) if maximum is not None else '-'}"

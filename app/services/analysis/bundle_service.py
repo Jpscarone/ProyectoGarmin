@@ -238,6 +238,7 @@ def _serialize_report(report: AnalysisReport | None) -> dict[str, Any] | None:
         "summary_text": report.summary_text,
         "recommendation_text": report.recommendation_text,
         "final_conclusion_text": report.final_conclusion_text,
+        "analysis_context_json": report.analysis_context_json,
         "items": [
             {
                 "item_order": item.item_order,
