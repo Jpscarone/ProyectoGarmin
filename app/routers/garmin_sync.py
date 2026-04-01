@@ -11,7 +11,12 @@ from app.config import get_settings
 from app.db.session import get_db
 from app.services.activity_matching_service import match_recent_activities
 from app.services.garmin.activity_sync import GarminSyncResult, sync_recent_activities
-from app.services.garmin.auth import GarminMFARequired, GarminServiceError, has_pending_mfa
+from app.services.garmin.auth import (
+    GarminMFARequired,
+    GarminServiceError,
+    get_garmin_auth_diagnostics,
+    has_pending_mfa,
+)
 from app.services.garmin.health_sync import GarminHealthSyncResult, sync_recent_health
 from app.services.weather.weather_service import BatchWeatherSyncResult, sync_weather_for_recent_activities
 from app.web.templates import build_templates
@@ -41,6 +46,7 @@ def sync_garmin_activities_page(request: Request) -> HTMLResponse:
             "sync_all_result": None,
             "error": None,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )
 
@@ -69,6 +75,7 @@ def sync_garmin_activities(request: Request, db: Session = Depends(get_db)) -> H
             "sync_all_result": None,
             "error": error,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )
 
@@ -101,6 +108,7 @@ def sync_garmin_activities_mfa(
             "sync_all_result": None,
             "error": error,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )
 
@@ -141,5 +149,6 @@ def sync_everything(request: Request, db: Session = Depends(get_db)) -> HTMLResp
             "sync_all_result": sync_all_result,
             "error": error,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )

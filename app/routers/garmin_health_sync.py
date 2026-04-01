@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.session import get_db
-from app.services.garmin.auth import GarminMFARequired, GarminServiceError, has_pending_mfa
+from app.services.garmin.auth import (
+    GarminMFARequired,
+    GarminServiceError,
+    get_garmin_auth_diagnostics,
+    has_pending_mfa,
+)
 from app.services.garmin.health_sync import GarminHealthSyncResult, sync_recent_health
 from app.web.templates import build_templates
 
@@ -28,6 +33,7 @@ def sync_garmin_health_page(request: Request) -> HTMLResponse:
             "result": None,
             "error": None,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )
 
@@ -55,6 +61,7 @@ def sync_garmin_health(request: Request, db: Session = Depends(get_db)) -> HTMLR
             "result": result,
             "error": error,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )
 
@@ -86,5 +93,6 @@ def sync_garmin_health_mfa(
             "result": result,
             "error": error,
             "needs_mfa": has_pending_mfa(settings),
+            "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
     )

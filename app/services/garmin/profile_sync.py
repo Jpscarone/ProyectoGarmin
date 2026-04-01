@@ -39,6 +39,7 @@ def build_athlete_garmin_comparison(athlete: Athlete) -> dict[str, Any]:
     snapshot = load_athlete_garmin_snapshot(athlete)
     local_hr_zones = load_zone_payload(athlete.hr_zones_json)
     local_power_zones = load_zone_payload(athlete.power_zones_json)
+    local_pace_zones = load_zone_payload(athlete.pace_zones_json)
 
     if not snapshot:
         return {
@@ -46,18 +47,22 @@ def build_athlete_garmin_comparison(athlete: Athlete) -> dict[str, Any]:
             "general_rows": [],
             "hr_zone_rows": [],
             "power_zone_rows": [],
+            "pace_zone_rows": [],
             "has_differences": False,
             "has_general_differences": False,
             "has_hr_zone_differences": False,
             "has_power_zone_differences": False,
+            "has_pace_zone_differences": False,
             "garmin_summary": {},
             "local_hr_zones": local_hr_zones,
             "local_power_zones": local_power_zones,
+            "local_pace_zones": local_pace_zones,
         }
 
     garmin_general = snapshot.get("general", {}) if isinstance(snapshot.get("general"), dict) else {}
     garmin_hr_zones = snapshot.get("hr_zones", {}) if isinstance(snapshot.get("hr_zones"), dict) else {}
     garmin_power_zones = snapshot.get("power_zones", {}) if isinstance(snapshot.get("power_zones"), dict) else {}
+    garmin_pace_zones = snapshot.get("pace_zones", {}) if isinstance(snapshot.get("pace_zones"), dict) else {}
 
     general_rows: list[dict[str, Any]] = []
     for field_name, label in GENERAL_FIELD_LABELS.items():
@@ -79,30 +84,37 @@ def build_athlete_garmin_comparison(athlete: Athlete) -> dict[str, Any]:
 
     hr_zone_rows = _build_zone_rows(local_hr_zones, garmin_hr_zones)
     power_zone_rows = _build_zone_rows(local_power_zones, garmin_power_zones)
+    pace_zone_rows = _build_zone_rows(local_pace_zones, garmin_pace_zones, formatter=format_pace_zone_label)
 
     has_general_differences = any(row["is_different"] for row in general_rows)
     has_hr_zone_differences = any(row["is_different"] for row in hr_zone_rows)
     has_power_zone_differences = any(row["is_different"] for row in power_zone_rows)
+    has_pace_zone_differences = any(row["is_different"] for row in pace_zone_rows)
 
     return {
         "has_snapshot": True,
         "general_rows": general_rows,
         "hr_zone_rows": hr_zone_rows,
         "power_zone_rows": power_zone_rows,
-        "has_differences": has_general_differences or has_hr_zone_differences or has_power_zone_differences,
+        "pace_zone_rows": pace_zone_rows,
+        "has_differences": has_general_differences or has_hr_zone_differences or has_power_zone_differences or has_pace_zone_differences,
         "has_general_differences": has_general_differences,
         "has_hr_zone_differences": has_hr_zone_differences,
         "has_power_zone_differences": has_power_zone_differences,
+        "has_pace_zone_differences": has_pace_zone_differences,
         "garmin_summary": {
             "available_fields": [GENERAL_FIELD_LABELS[field] for field, value in garmin_general.items() if value is not None and field in GENERAL_FIELD_LABELS],
             "has_hr_zones": bool(garmin_hr_zones),
             "has_power_zones": bool(garmin_power_zones),
+            "has_pace_zones": bool(garmin_pace_zones),
             "source_keys": list(snapshot.get("source_payload_keys", [])),
         },
         "local_hr_zones": local_hr_zones,
         "local_power_zones": local_power_zones,
+        "local_pace_zones": local_pace_zones,
         "garmin_hr_zones": garmin_hr_zones,
         "garmin_power_zones": garmin_power_zones,
+        "garmin_pace_zones": garmin_pace_zones,
     }
 
 
@@ -112,7 +124,7 @@ def apply_garmin_changes(db: Session, athlete: Athlete, scope: str) -> list[str]
         raise ValueError("Primero tenes que comparar el atleta con Garmin.")
 
     normalized_scope = (scope or "all").strip().lower()
-    valid_scopes = {"all", "general", "hr_zones", "power_zones"}
+    valid_scopes = {"all", "general", "hr_zones", "power_zones", "pace_zones"}
     if normalized_scope not in valid_scopes:
         raise ValueError("El bloque seleccionado no es valido.")
 
@@ -142,6 +154,13 @@ def apply_garmin_changes(db: Session, athlete: Athlete, scope: str) -> list[str]
             athlete.power_zones_json = json.dumps(power_zones, ensure_ascii=True)
             athlete.source_power_zones = "garmin"
             applied_blocks.append("zonas de potencia")
+
+    if normalized_scope in {"all", "pace_zones"}:
+        pace_zones = snapshot.get("pace_zones")
+        if pace_zones:
+            athlete.pace_zones_json = json.dumps(pace_zones, ensure_ascii=True)
+            athlete.source_pace_zones = "garmin"
+            applied_blocks.append("zonas de ritmo")
 
     if not applied_blocks:
         raise ValueError("No habia datos de Garmin disponibles para aplicar en ese bloque.")
@@ -192,6 +211,7 @@ def fetch_garmin_profile_snapshot(settings: Settings) -> dict[str, Any]:
 
     hr_zones = _extract_zone_block(payloads, ("hr_zones", "heartRateZones", "heartRateZone", "runningHeartRateZones", "cyclingHeartRateZones"))
     power_zones = _extract_zone_block(payloads, ("power_zones", "powerZones", "cyclingPowerZones", "runningPowerZones"))
+    pace_zones = _extract_zone_block(payloads, ("pace_zones", "paceZones", "runningPaceZones", "thresholdPaceZones"))
 
     running_threshold_speed = _first_value(
         user_data.get("lactateThresholdSpeed"),
@@ -214,6 +234,7 @@ def fetch_garmin_profile_snapshot(settings: Settings) -> dict[str, Any]:
         },
         "hr_zones": hr_zones,
         "power_zones": power_zones,
+        "pace_zones": pace_zones,
         "source_payload_keys": sorted(payloads.keys()),
         "fetched_at": datetime.now(timezone.utc).isoformat(),
         "raw_payloads": payloads,
@@ -251,9 +272,25 @@ def format_zone_label(zone: Mapping[str, Any] | None) -> str:
     return f"{minimum} - {maximum}"
 
 
+def format_pace_zone_label(zone: Mapping[str, Any] | None) -> str:
+    if not zone:
+        return "-"
+    minimum = zone.get("min")
+    maximum = zone.get("max")
+    if minimum is None and maximum is None:
+        return "-"
+    if minimum is None:
+        return f"hasta {_pace_label(maximum)}"
+    if maximum is None:
+        return f"{_pace_label(minimum)}+"
+    return f"{_pace_label(minimum)} - {_pace_label(maximum)} /km"
+
+
 def _build_zone_rows(
     local_zones: dict[str, list[dict[str, Any]]],
     garmin_zones: dict[str, list[dict[str, Any]]],
+    *,
+    formatter=format_zone_label,
 ) -> list[dict[str, Any]]:
     sport_keys = sorted(set(local_zones.keys()) | set(garmin_zones.keys()))
     rows: list[dict[str, Any]] = []
@@ -275,8 +312,8 @@ def _build_zone_rows(
                 {
                     "sport": sport_key,
                     "zone_name": zone_name,
-                    "local_value": format_zone_label(local_zone),
-                    "garmin_value": format_zone_label(garmin_zone),
+                    "local_value": formatter(local_zone),
+                    "garmin_value": formatter(garmin_zone),
                     "is_different": is_different,
                     "suggested_action": "revisar" if is_different and garmin_zone is not None else "sin cambios",
                 }
@@ -338,9 +375,18 @@ def _normalize_zone_rows(value: Any) -> list[dict[str, Any]]:
                 "name": str(zone_name),
                 "min": minimum,
                 "max": maximum,
+                "label": row.get("label"),
             }
         )
     return normalized_rows
+
+
+def _pace_label(value: Any) -> str:
+    parsed = _first_int(value)
+    if parsed is None:
+        return "-"
+    minutes, seconds = divmod(parsed, 60)
+    return f"{minutes}:{seconds:02d}"
 
 
 def _first_value(*values: Any) -> Any:

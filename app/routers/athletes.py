@@ -24,7 +24,7 @@ from app.services.athlete_zone_service import (
     use_garmin_zones,
     zone_source_label,
 )
-from app.services.garmin.auth import GarminServiceError
+from app.services.garmin.auth import GarminServiceError, get_garmin_auth_diagnostics
 from app.services.garmin.profile_sync import apply_garmin_changes, build_athlete_garmin_comparison, load_zone_payload, compare_athlete_with_garmin
 from app.web.templates import build_templates
 
@@ -42,10 +42,14 @@ def _wants_html(request: Request) -> bool:
 def list_athletes(request: Request, db: Session = Depends(get_db)):
     athletes = get_athletes(db)
     if _wants_html(request):
+        settings = get_settings()
         return templates.TemplateResponse(
             request=request,
             name="athletes/list.html",
-            context={"athletes": athletes},
+            context={
+                "athletes": athletes,
+                "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
+            },
         )
     return athletes
 
@@ -73,10 +77,15 @@ def read_athlete(request: Request, athlete_id: int, db: Session = Depends(get_db
                 "comparison": build_athlete_garmin_comparison(athlete),
                 "hr_zones": load_zone_payload(athlete.hr_zones_json),
                 "power_zones": load_zone_payload(athlete.power_zones_json),
+                "pace_zones": load_zone_payload(athlete.pace_zones_json),
+                "rpe_zones": load_zone_payload(athlete.rpe_zones_json),
                 "source_hr_zones_label": zone_source_label(athlete.source_hr_zones),
                 "source_power_zones_label": zone_source_label(athlete.source_power_zones),
+                "source_pace_zones_label": zone_source_label(athlete.source_pace_zones),
+                "source_rpe_zones_label": zone_source_label(athlete.source_rpe_zones),
                 "status_message": request.query_params.get("status_message"),
                 "error_message": request.query_params.get("error"),
+                "garmin_auth_diagnostics": get_garmin_auth_diagnostics(get_settings()),
             },
         )
     return athlete
@@ -109,6 +118,8 @@ def edit_athlete_zones_page(athlete_id: int, request: Request, db: Session = Dep
             "athlete": athlete,
             "hr_rows": zone_rows["hr_rows"],
             "power_rows": zone_rows["power_rows"],
+            "pace_rows": zone_rows["pace_rows"],
+            "rpe_rows": zone_rows["rpe_rows"],
             "status_message": request.query_params.get("status_message"),
             "error_message": request.query_params.get("error"),
         },
@@ -124,8 +135,10 @@ async def edit_athlete_zones_endpoint(athlete_id: int, request: Request, db: Ses
     form = await request.form()
     hr_rows = _zone_rows_from_form(form, "hr")
     power_rows = _zone_rows_from_form(form, "power")
+    pace_rows = _pace_zone_rows_from_form(form, "pace")
+    rpe_rows = _rpe_zone_rows_from_form(form, "rpe")
     try:
-        updated = update_athlete_zones_manual(db, athlete, hr_rows, power_rows)
+        updated = update_athlete_zones_manual(db, athlete, hr_rows, power_rows, pace_rows, rpe_rows)
         message = "Se actualizaron " + ", ".join(updated) + "."
         return RedirectResponse(url=f"/athletes/{athlete_id}?status_message={quote(message)}", status_code=303)
     except ValueError as exc:
@@ -230,6 +243,22 @@ def _zone_rows_from_form(form, prefix: str) -> list[dict[str, int | None]]:
     return rows
 
 
+def _pace_zone_rows_from_form(form, prefix: str) -> list[dict[str, int | None]]:
+    rows: list[dict[str, int | None]] = []
+    for index in range(1, 6):
+        minimum = _pace_to_seconds(form.get(f"{prefix}_z{index}_min"))
+        maximum = _pace_to_seconds(form.get(f"{prefix}_z{index}_max"))
+        rows.append({"min": minimum, "max": maximum})
+    return rows
+
+
+def _rpe_zone_rows_from_form(form, prefix: str) -> list[dict[str, str | None]]:
+    rows: list[dict[str, str | None]] = []
+    for index in range(1, 6):
+        rows.append({"label": _optional_text(form.get(f"{prefix}_z{index}_label"))})
+    return rows
+
+
 def _optional_int(value: object) -> int | None:
     if value is None:
         return None
@@ -240,3 +269,27 @@ def _optional_int(value: object) -> int | None:
         return int(float(text))
     except ValueError:
         return None
+
+
+def _optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _pace_to_seconds(value: object) -> int | None:
+    text = _optional_text(value)
+    if text is None:
+        return None
+    parts = text.split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        minutes = int(parts[0])
+        seconds = int(parts[1])
+    except ValueError:
+        return None
+    if minutes < 0 or seconds < 0 or seconds > 59:
+        return None
+    return minutes * 60 + seconds

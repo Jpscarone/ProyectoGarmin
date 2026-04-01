@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime, time
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+
+SUPPORTED_TARGET_TYPES = {
+    "hr",
+    "pace",
+    "power",
+    "rpe",
+}
 
 
 class PlannedSessionBase(BaseModel):
@@ -19,10 +27,23 @@ class PlannedSessionBase(BaseModel):
     expected_duration_min: int | None = None
     expected_distance_km: float | None = None
     expected_elevation_gain_m: float | None = None
+    target_type: str | None = None
     target_hr_zone: str | None = None
+    target_pace_zone: str | None = None
     target_power_zone: str | None = None
+    target_rpe_zone: str | None = None
     target_notes: str | None = None
     is_key_session: bool = False
+
+    @field_validator("target_type")
+    @classmethod
+    def validate_target_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_TARGET_TYPES:
+            raise ValueError(f"Unsupported target_type: {value}")
+        return normalized
 
 
 class PlannedSessionCreate(PlannedSessionBase):
@@ -43,10 +64,23 @@ class PlannedSessionUpdate(BaseModel):
     expected_duration_min: int | None = None
     expected_distance_km: float | None = None
     expected_elevation_gain_m: float | None = None
+    target_type: str | None = None
     target_hr_zone: str | None = None
+    target_pace_zone: str | None = None
     target_power_zone: str | None = None
+    target_rpe_zone: str | None = None
     target_notes: str | None = None
     is_key_session: bool | None = None
+
+    @field_validator("target_type")
+    @classmethod
+    def validate_target_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        normalized = value.strip().lower()
+        if normalized not in SUPPORTED_TARGET_TYPES:
+            raise ValueError(f"Unsupported target_type: {value}")
+        return normalized
 
 
 class PlannedSessionRead(PlannedSessionBase):

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}Crear sesion | training_app{% endblock %}
+{% block title %}{% if editing_session %}Editar sesion{% else %}Crear sesion{% endif %} | training_app{% endblock %}
 
 {% block content %}
 <section class="panel">
     <div class="section-heading">
         <div>
             <p class="eyebrow">Sesiones</p>
-            <h1>Crear sesion</h1>
+            <h1>{% if editing_session %}Editar sesion{% else %}Crear sesion{% endif %}</h1>
             <p class="text-muted">
                 {% if training_day %}
                 Dia: {{ training_day.day_date }} | Plan: {{ training_day.training_plan.name }}
@@ -23,7 +23,16 @@
     <div class="alert alert-error">{{ error }}</div>
     {% endif %}
 
+    {% set target_athlete = training_day.training_plan.athlete if training_day else training_plan.athlete %}
+    {% set hr_target_options = athlete_target_zone_options(target_athlete, 'hr') %}
+    {% set pace_target_options = athlete_target_zone_options(target_athlete, 'pace') %}
+    {% set power_target_options = athlete_target_zone_options(target_athlete, 'power') %}
+    {% set rpe_target_options = athlete_target_zone_options(target_athlete, 'rpe') %}
+    {% set hr_target_map = athlete_target_zone_map(target_athlete, 'hr') %}
+    {% set pace_target_map = athlete_target_zone_map(target_athlete, 'pace') %}
+
     <form method="post" action="/planned_sessions/quick" id="unified-session-form">
+        <input type="hidden" name="planned_session_id" value="{{ editing_session.id if editing_session else '' }}">
         {% if training_day %}
         <input type="hidden" name="training_day_id" value="{{ training_day.id }}">
         {% endif %}
@@ -33,6 +42,7 @@
         <input type="hidden" name="return_selected_date" value="{{ return_selected_date or selected_day_date }}">
         <input type="hidden" name="mode" id="quick-mode-input" value="{{ initial_mode }}">
         <input type="hidden" name="builder_raw_text" id="builder-raw-text">
+        <input type="hidden" name="builder_blocks_json" id="builder-blocks-json">
 
         {% if not training_day %}
         <div class="panel panel-subtle">
@@ -102,21 +112,54 @@
                             </div>
                         </div>
 
+                    </div>
+
+                    <div class="field field-full quick-intensity-inline-grid">
                         <label class="field">
-                            <span>Zona FC objetivo</span>
-                            <select name="simple_target_hr_zone">
-                                <option value="">Sin zona</option>
-                                {% for option in zone_options %}
+                            <span>Criterio de intensidad</span>
+                            <select name="simple_target_type" id="simple-target-type">
+                                <option value="">Sin criterio</option>
+                                {% for option in intensity_target_options %}
                                 <option value="{{ option.value }}">{{ option.label }}</option>
                                 {% endfor %}
                             </select>
                         </label>
 
-                        <label class="field">
+                        <label class="field intensity-target-group" data-target-scope="simple" data-target-type="hr">
+                            <span>Zona FC objetivo</span>
+                            <select name="simple_target_hr_zone">
+                                <option value="">Sin zona</option>
+                                {% for option in hr_target_options %}
+                                <option value="{{ option.value }}">{{ option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+
+                        <label class="field intensity-target-group" data-target-scope="simple" data-target-type="pace">
+                            <span>Zona de ritmo objetivo</span>
+                            <select name="simple_target_pace_zone">
+                                <option value="">Sin zona</option>
+                                {% for option in pace_target_options %}
+                                <option value="{{ option.value }}">{{ option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+
+                        <label class="field intensity-target-group" data-target-scope="simple" data-target-type="power">
                             <span>Zona potencia objetivo</span>
                             <select name="simple_target_power_zone">
                                 <option value="">Sin zona</option>
-                                {% for option in zone_options %}
+                                {% for option in power_target_options %}
+                                <option value="{{ option.value }}">{{ option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+
+                        <label class="field intensity-target-group" data-target-scope="simple" data-target-type="rpe">
+                            <span>Zona de esfuerzo percibido</span>
+                            <select name="simple_target_rpe_zone">
+                                <option value="">Sin zona</option>
+                                {% for option in rpe_target_options %}
                                 <option value="{{ option.value }}">{{ option.label }}</option>
                                 {% endfor %}
                             </select>
@@ -261,15 +304,22 @@
                 </div>
 
                 <div class="form-grid">
-                    <label class="field">
-                        <span>Deporte</span>
-                        <select name="builder_sport_type_override" id="builder-sport" onchange="refreshBuilderPreview(); syncAdvancedSport(this.value)">
-                            <option value="">Detectar si es posible</option>
-                            {% for option in sport_options %}
-                            <option value="{{ option.value }}">{{ option.label }}</option>
-                            {% endfor %}
-                        </select>
-                    </label>
+                    <div class="field field-full builder-top-grid">
+                        <label class="field">
+                            <span>Deporte</span>
+                            <select name="builder_sport_type_override" id="builder-sport" onchange="refreshBuilderPreview(); syncAdvancedSport(this.value)">
+                                <option value="running" selected>Running</option>
+                                {% for option in sport_options if option.value != 'running' %}
+                                <option value="{{ option.value }}">{{ option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+
+                        <label class="field">
+                            <span>Vista previa del formato</span>
+                            <input id="builder-preview" type="text" readonly placeholder="Aca vas a ver el formato estandar generado.">
+                        </label>
+                    </div>
 
                     <div class="field field-full">
                         <span>Bloques</span>
@@ -280,81 +330,105 @@
                         <button class="button button-secondary" type="button" onclick="addSimpleBlock()">Agregar bloque simple</button>
                         <button class="button button-secondary" type="button" onclick="addRepeatBlock()">Agregar bloque repetido</button>
                     </div>
-
-                    <div class="field field-full">
-                        <span>Vista previa del formato</span>
-                        <textarea id="builder-preview" rows="5" readonly placeholder="Aca vas a ver el formato estandar generado."></textarea>
-                    </div>
                 </div>
             </section>
         </div>
 
-        <details class="advanced-panel field-full quick-advanced-panel" id="quick-advanced-panel">
-            <summary>Datos avanzados</summary>
+        <div class="advanced-panel field-full quick-advanced-panel" id="quick-advanced-panel">
             <div class="form-grid">
                 <section class="quick-advanced-group field-full">
-                    <div class="quick-advanced-group-header">
-                        <h3>Datos avanzados</h3>
-                        <p class="text-muted">Solo completalos si queres corregir o complementar lo que surge del texto.</p>
-                    </div>
                     <div class="form-grid">
                         <label class="field field-full">
                             <span>Nombre</span>
                             <input name="advanced_name" type="text" placeholder="Opcional. Si lo completas, se usa como nombre visible de la sesion.">
                         </label>
 
-                        <div class="field field-full quick-text-advanced-grid">
+                        <input type="hidden" name="advanced_expected_distance_unit" value="km">
+
+                        <div class="field field-full quick-builder-advanced-grid">
                             <label class="field">
                                 <span>Duracion esperada</span>
                                 <input name="advanced_expected_duration_hhmm" type="text" placeholder="Ej: 1:15">
                             </label>
 
-                            <div class="field distance-field">
+                            <label class="field">
                                 <span>Distancia esperada</span>
-                                <div class="inline-fields">
-                                    <input name="advanced_expected_distance_value" type="number" min="0" step="0.1" placeholder="Ej: 10">
-                                    <select name="advanced_expected_distance_unit">
-                                        <option value="m">m</option>
-                                        <option value="km" selected>km</option>
-                                    </select>
-                                </div>
-                            </div>
+                                <input name="advanced_expected_distance_value" type="text" placeholder="Ej: 10">
+                            </label>
 
                             <label class="field">
-                                <span>Zona FC objetivo</span>
-                                <select name="advanced_target_hr_zone">
-                                    <option value="">Sin zona</option>
-                                    {% for option in zone_options %}
+                                <span>Notas objetivo</span>
+                                <input name="advanced_target_notes" type="text" placeholder="Ej: base, suave, controlado, tempo">
+                            </label>
+
+                        </div>
+
+                        <div class="field field-full quick-intensity-inline-grid quick-intensity-inline-grid-advanced" id="advanced-intensity-grid"{% if initial_mode == 'builder' %} hidden{% endif %}>
+                            <label class="field">
+                                <span>Criterio de intensidad</span>
+                                <select name="advanced_target_type" id="advanced-target-type">
+                                    <option value="">Sin criterio</option>
+                                    {% for option in intensity_target_options %}
                                     <option value="{{ option.value }}">{{ option.label }}</option>
                                     {% endfor %}
                                 </select>
                             </label>
 
-                            <label class="field">
+                            <label class="field intensity-target-group" data-target-scope="advanced" data-target-type="hr">
+                                <span>Zona FC objetivo</span>
+                                <select name="advanced_target_hr_zone">
+                                    <option value="">Sin zona</option>
+                                    {% for option in hr_target_options %}
+                                    <option value="{{ option.value }}">{{ option.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+
+                            <label class="field intensity-target-group" data-target-scope="advanced" data-target-type="pace">
+                                <span>Zona de ritmo objetivo</span>
+                                <select name="advanced_target_pace_zone">
+                                    <option value="">Sin zona</option>
+                                    {% for option in pace_target_options %}
+                                    <option value="{{ option.value }}">{{ option.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+
+                            <label class="field intensity-target-group" data-target-scope="advanced" data-target-type="power">
                                 <span>Zona potencia objetivo</span>
                                 <select name="advanced_target_power_zone">
                                     <option value="">Sin zona</option>
-                                    {% for option in zone_options %}
+                                    {% for option in power_target_options %}
+                                    <option value="{{ option.value }}">{{ option.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+
+                            <label class="field intensity-target-group" data-target-scope="advanced" data-target-type="rpe">
+                                <span>Zona de esfuerzo percibido</span>
+                                <select name="advanced_target_rpe_zone">
+                                    <option value="">Sin zona</option>
+                                    {% for option in rpe_target_options %}
                                     <option value="{{ option.value }}">{{ option.label }}</option>
                                     {% endfor %}
                                 </select>
                             </label>
                         </div>
 
-                        <label class="field field-full">
-                            <span>Notas objetivo</span>
-                            <input name="advanced_target_notes" type="text" placeholder="Ej: base, suave, controlado, tempo">
-                        </label>
                     </div>
                 </section>
             </div>
-        </details>
+        </div>
 
         <div id="quick-inline-warnings" class="quick-warning-stack"></div>
 
         <div class="quick-submit-bar">
             <p class="text-muted">La estructura de la sesion es la fuente principal. Los datos avanzados completan metadata sin romper la coherencia de pasos, duracion y distancia derivadas.</p>
             <div class="actions-inline quick-submit-actions">
+                {% if editing_session %}
+                <button class="button" type="submit">Guardar cambios</button>
+                <a class="button button-nav" href="/planned_sessions/{{ editing_session.id }}">Volver a la sesion</a>
+                {% else %}
                 <button class="button" type="submit">Crear sesion</button>
                 {% if return_to == 'calendar' %}
                 <a class="button button-nav" href="/training_plans/{{ (training_day.training_plan.id if training_day else training_plan.id) }}/calendar?month={{ return_month or (selected_day_date or '')[:7] }}&selected_date={{ return_selected_date or selected_day_date }}">Volver al calendario</a>
@@ -365,6 +439,7 @@
                 {% else %}
                 <a class="button button-nav" href="/training_plans/{{ training_plan.id }}">Volver al plan</a>
                 {% endif %}
+                {% endif %}
             </div>
         </div>
     </form>
@@ -374,13 +449,8 @@
     <article class="advanced-panel builder-card" data-kind="simple">
         <div class="builder-card-header">
             <strong>Bloque simple</strong>
-            <div class="actions-inline">
-                <button class="button button-secondary" type="button" onclick="moveBlock(this, -1)">Subir</button>
-                <button class="button button-secondary" type="button" onclick="moveBlock(this, 1)">Bajar</button>
-                <button class="button button-danger" type="button" onclick="removeBlock(this)">Eliminar</button>
-            </div>
         </div>
-        <div class="form-grid">
+        <div class="form-grid builder-simple-grid">
             <label class="field">
                 <span>Valor</span>
                 <input type="number" step="0.1" min="0" data-field="value" placeholder="10">
@@ -395,27 +465,34 @@
                     <option value="h">h</option>
                 </select>
             </label>
-            <label class="field field-full">
-                <span>Etiqueta / intensidad</span>
-                <select data-field="label">
-                    <option value="">Sin etiqueta</option>
-                    <option value="suave">Suave</option>
-                    <option value="base">Base</option>
-                    <option value="tempo">Tempo</option>
-                    <option value="fuerte">Fuerte</option>
-                    <option value="recuperacion">Recuperacion</option>
-                    <option value="enfriar">Enfriar</option>
-                    <option value="afloje">Afloje</option>
-                    <option value="umbral">Umbral</option>
-                    <option value="ritmo 5k">Ritmo 5k</option>
-                    <option value="ritmo 10k">Ritmo 10k</option>
-                    <option value="Z1">Z1</option>
-                    <option value="Z2">Z2</option>
-                    <option value="Z3">Z3</option>
-                    <option value="Z4">Z4</option>
-                    <option value="Z5">Z5</option>
+            <label class="field">
+                <span>Criterio de intensidad</span>
+                <select data-field="target_type" onchange="syncBuilderBlockIntensity(this.closest('.builder-card')); refreshBuilderPreview();">
+                    <option value="">Sin criterio</option>
+                    {% for option in intensity_target_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
                 </select>
             </label>
+            <label class="field">
+                <span>Zona objetivo</span>
+                <select data-field="target_zone" onchange="syncBuilderBlockCustomFields(this.closest('.builder-card')); refreshBuilderPreview();" disabled>
+                    <option value="">Sin zona</option>
+                </select>
+            </label>
+            <label class="field builder-custom-target-field" data-custom-field="min" hidden>
+                <span>Min</span>
+                <input type="text" data-field="custom_min" placeholder="">
+            </label>
+            <label class="field builder-custom-target-field" data-custom-field="max" hidden>
+                <span>Max</span>
+                <input type="text" data-field="custom_max" placeholder="">
+            </label>
+            <div class="builder-inline-actions" aria-label="Acciones del bloque">
+                <button class="button button-secondary button-icon" type="button" onclick="moveBlock(this, -1)" title="Subir bloque" aria-label="Subir bloque">&uarr;</button>
+                <button class="button button-secondary button-icon" type="button" onclick="moveBlock(this, 1)" title="Bajar bloque" aria-label="Bajar bloque">&darr;</button>
+                <button class="button button-danger button-icon" type="button" onclick="removeBlock(this)" title="Eliminar bloque" aria-label="Eliminar bloque">&times;</button>
+            </div>
         </div>
     </article>
 </template>
@@ -447,8 +524,20 @@
 const builderBlocks = document.getElementById("builder-blocks");
 const builderPreview = document.getElementById("builder-preview");
 const builderRawText = document.getElementById("builder-raw-text");
+const builderBlocksJson = document.getElementById("builder-blocks-json");
 const quickModeInput = document.getElementById("quick-mode-input");
 const quickInlineWarnings = document.getElementById("quick-inline-warnings");
+const initialQuickData = {{ initial_quick_data | tojson if initial_quick_data else "null" }};
+const builderZoneOptions = {
+    hr: {{ hr_target_options | tojson }},
+    pace: {{ pace_target_options | tojson }},
+    power: {{ power_target_options | tojson }},
+    rpe: {{ rpe_target_options | tojson }},
+};
+const builderZoneMaps = {
+    hr: {{ hr_target_map | tojson }},
+    pace: {{ pace_target_map | tojson }},
+};
 
 function switchQuickMode(mode) {
     document.querySelectorAll(".quick-mode-tab").forEach((tab) => {
@@ -461,12 +550,15 @@ function switchQuickMode(mode) {
 
     quickModeInput.value = mode;
     const advancedPanel = document.getElementById("quick-advanced-panel");
+    const advancedIntensityGrid = document.getElementById("advanced-intensity-grid");
     if (advancedPanel) {
         advancedPanel.hidden = mode === "simple";
-        if (mode === "simple") {
-            advancedPanel.open = false;
-        }
     }
+    if (advancedIntensityGrid) {
+        advancedIntensityGrid.hidden = mode === "builder";
+        advancedIntensityGrid.classList.toggle("is-hidden", mode === "builder");
+    }
+    syncBuilderAdvancedMode(mode);
     window.history.replaceState({}, "", `#${mode}`);
     updateCreationWarnings();
 }
@@ -513,26 +605,47 @@ function toggleQuickInlineGroupFields(value) {
     return;
 }
 
-function addSimpleBlock() {
+function syncTargetTypeUi(scope) {
+    const selector = document.getElementById(`${scope}-target-type`);
+    const activeType = selector?.value || "";
+    document.querySelectorAll(`.intensity-target-group[data-target-scope="${scope}"]`).forEach((group) => {
+        const isActive = group.dataset.targetType === activeType;
+        group.hidden = !isActive;
+        group.classList.toggle("is-active", isActive);
+        group.querySelectorAll("input, select, textarea").forEach((field) => {
+            field.disabled = !isActive;
+        });
+    });
+}
+
+function addSimpleBlock(initialData = null) {
     const template = document.getElementById("builder-simple-template");
-    builderBlocks.appendChild(template.content.firstElementChild.cloneNode(true));
+    const block = template.content.firstElementChild.cloneNode(true);
+    builderBlocks.appendChild(block);
+    applyBuilderBlockData(block, initialData);
+    syncBuilderBlockIntensity(block);
     refreshBuilderPreview();
 }
 
-function addRepeatBlock() {
+function addRepeatBlock(initialData = null) {
     const template = document.getElementById("builder-repeat-template");
     const block = template.content.firstElementChild.cloneNode(true);
     builderBlocks.appendChild(block);
     const nestedContainer = block.querySelector('[data-field="nested-steps"]');
-    nestedContainer.appendChild(createNestedSimpleBlock());
-    nestedContainer.appendChild(createNestedSimpleBlock());
+    if (initialData?.repeatCount) {
+        block.querySelector('[data-field="repeat_count"]').value = initialData.repeatCount;
+    }
+    const nestedSteps = initialData?.steps?.length ? initialData.steps : [null, null];
+    nestedSteps.forEach((stepData) => nestedContainer.appendChild(createNestedSimpleBlock(stepData)));
     refreshBuilderPreview();
 }
 
-function createNestedSimpleBlock() {
+function createNestedSimpleBlock(initialData = null) {
     const template = document.getElementById("builder-simple-template");
     const block = template.content.firstElementChild.cloneNode(true);
     block.classList.add("builder-nested-card");
+    applyBuilderBlockData(block, initialData);
+    syncBuilderBlockIntensity(block);
     return block;
 }
 
@@ -560,10 +673,53 @@ function moveBlock(button, direction) {
     refreshBuilderPreview();
 }
 
+function applyBuilderBlockData(block, data) {
+    if (!block || !data) return;
+    block.dataset.stepType = data.stepType || "";
+    const valueField = block.querySelector('[data-field="value"]');
+    const unitField = block.querySelector('[data-field="unit"]');
+    const targetTypeField = block.querySelector('[data-field="target_type"]');
+    const targetZoneField = block.querySelector('[data-field="target_zone"]');
+    const customMinField = block.querySelector('[data-field="custom_min"]');
+    const customMaxField = block.querySelector('[data-field="custom_max"]');
+    if (valueField) valueField.value = data.value || "";
+    if (unitField && data.unit) unitField.value = data.unit;
+    if (targetTypeField) targetTypeField.value = data.targetType || "";
+    if (targetZoneField) targetZoneField.dataset.initialValue = data.targetZone || "";
+    if (customMinField) customMinField.value = data.customMin || "";
+    if (customMaxField) customMaxField.value = data.customMax || "";
+}
+
+function serializeBuilderBlocksData() {
+    return Array.from(builderBlocks.children).map((block) => {
+        if (block.dataset.kind === "repeat") {
+            return {
+                kind: "repeat",
+                repeatCount: block.querySelector('[data-field="repeat_count"]').value.trim(),
+                steps: Array.from(block.querySelectorAll(':scope [data-field="nested-steps"] > .builder-card')).map((nested) => serializeBuilderSimpleBlockData(nested)),
+            };
+        }
+        return serializeBuilderSimpleBlockData(block);
+    }).filter(Boolean);
+}
+
+function serializeBuilderSimpleBlockData(block) {
+    return {
+        kind: "simple",
+        value: block.querySelector('[data-field="value"]')?.value.trim() || "",
+        unit: block.querySelector('[data-field="unit"]')?.value || "min",
+        targetType: block.querySelector('[data-field="target_type"]')?.value || "",
+        targetZone: block.querySelector('[data-field="target_zone"]')?.value || "",
+        customMin: block.querySelector('[data-field="custom_min"]')?.value.trim() || "",
+        customMax: block.querySelector('[data-field="custom_max"]')?.value.trim() || "",
+        stepType: block.dataset.stepType || "",
+    };
+}
+
 function serializeSimpleBlock(block) {
     const value = block.querySelector('[data-field="value"]').value.trim();
     const unit = block.querySelector('[data-field="unit"]').value;
-    const label = block.querySelector('[data-field="label"]').value;
+    const label = builderBlockTargetLabel(block);
     if (!value) return "";
     return [value + unit, label].filter(Boolean).join(" ").trim();
 }
@@ -591,7 +747,124 @@ function refreshBuilderPreview() {
     const result = prefix.concat(blocks).join(" + ");
     builderPreview.value = result;
     builderRawText.value = result;
+    syncBuilderDerivedAdvancedFields();
     updateCreationWarnings();
+}
+
+function builderBlockTargetLabel(block) {
+    const targetType = block.querySelector('[data-field="target_type"]')?.value || "";
+    const targetZone = block.querySelector('[data-field="target_zone"]')?.value || "";
+    if (!targetZone) return "";
+    if (targetZone === "__custom__") {
+        return builderBlockCustomLabel(block, targetType);
+    }
+    if (!targetType) return targetZone;
+    const typeLabels = {
+        hr: "FC",
+        pace: "ritmo",
+        power: "potencia",
+        rpe: "RPE",
+    };
+    return `${typeLabels[targetType] || ""} ${targetZone}`.trim();
+}
+
+function builderBlockCustomLabel(block, targetType) {
+    const customMin = block.querySelector('[data-field="custom_min"]')?.value.trim() || "";
+    const customMax = block.querySelector('[data-field="custom_max"]')?.value.trim() || "";
+    const typeLabels = {
+        hr: "FC",
+        pace: "ritmo",
+        power: "potencia",
+        rpe: "RPE",
+    };
+    if (!customMin && !customMax) {
+        return typeLabels[targetType] || "Personalizada";
+    }
+    const suffix = targetType === "hr" ? " bpm" : targetType === "power" ? " w" : targetType === "pace" ? "/km" : "";
+    if (customMin && customMax) {
+        return `${typeLabels[targetType] || ""} ${customMin}-${customMax}${suffix}`.trim();
+    }
+    if (customMin) {
+        return `${typeLabels[targetType] || ""} desde ${customMin}${suffix}`.trim();
+    }
+    return `${typeLabels[targetType] || ""} hasta ${customMax}${suffix}`.trim();
+}
+
+function syncBuilderBlockIntensity(block) {
+    if (!block) return;
+    const targetTypeField = block.querySelector('[data-field="target_type"]');
+    const targetZoneField = block.querySelector('[data-field="target_zone"]');
+    if (!targetTypeField || !targetZoneField) return;
+
+    const targetType = targetTypeField.value || "";
+    const options = [...(builderZoneOptions[targetType] || [])];
+    if (["hr", "pace", "power"].includes(targetType)) {
+        options.push({ value: "__custom__", label: "Personalizada" });
+    }
+    const previousValue = targetZoneField.value || targetZoneField.dataset.initialValue || "";
+    targetZoneField.innerHTML = '<option value="">Sin zona</option>';
+    options.forEach((option) => {
+        const element = document.createElement('option');
+        element.value = option.value;
+        element.textContent = option.label;
+        if (option.value === previousValue) {
+            element.selected = true;
+        }
+        targetZoneField.appendChild(element);
+    });
+    targetZoneField.disabled = !targetType;
+    if (targetType && previousValue && !options.some((option) => option.value === previousValue)) {
+        targetZoneField.value = "";
+    }
+    targetZoneField.dataset.initialValue = "";
+    syncBuilderBlockCustomFields(block);
+}
+
+function syncBuilderBlockCustomFields(block) {
+    if (!block) return;
+    const targetType = block.querySelector('[data-field="target_type"]')?.value || "";
+    const targetZone = block.querySelector('[data-field="target_zone"]')?.value || "";
+    const isCustom = targetZone === "__custom__" && ["hr", "pace", "power"].includes(targetType);
+    const minField = block.querySelector('[data-custom-field="min"]');
+    const maxField = block.querySelector('[data-custom-field="max"]');
+    const minInput = block.querySelector('[data-field="custom_min"]');
+    const maxInput = block.querySelector('[data-field="custom_max"]');
+    if (!minField || !maxField || !minInput || !maxInput) return;
+
+    minField.hidden = !isCustom;
+    maxField.hidden = !isCustom;
+    minField.classList.toggle("is-active", isCustom);
+    maxField.classList.toggle("is-active", isCustom);
+    minInput.disabled = !isCustom;
+    maxInput.disabled = !isCustom;
+
+    if (!isCustom) {
+        minInput.value = "";
+        maxInput.value = "";
+    }
+
+    if (targetType === "pace") {
+        minField.querySelector("span").textContent = "Ritmo min";
+        maxField.querySelector("span").textContent = "Ritmo max";
+        minInput.type = "text";
+        maxInput.type = "text";
+        minInput.placeholder = "4:30";
+        maxInput.placeholder = "5:15";
+    } else if (targetType === "power") {
+        minField.querySelector("span").textContent = "Potencia min";
+        maxField.querySelector("span").textContent = "Potencia max";
+        minInput.type = "number";
+        maxInput.type = "number";
+        minInput.placeholder = "220";
+        maxInput.placeholder = "260";
+    } else {
+        minField.querySelector("span").textContent = "FC min";
+        maxField.querySelector("span").textContent = "FC max";
+        minInput.type = "number";
+        maxInput.type = "number";
+        minInput.placeholder = "145";
+        maxInput.placeholder = "155";
+    }
 }
 
 function updateCreationWarnings() {
@@ -610,22 +883,39 @@ function updateCreationWarnings() {
         }
     }
 
-    if (mode === "builder") {
-        const builderSummary = summarizeBuilderBlocks();
-        if (builderSummary.duration && advancedDuration) {
-            warnings.push("La duracion final se toma de la estructura de bloques.");
-        }
-        if (builderSummary.distance && advancedDistanceValue) {
-            warnings.push("La distancia final se toma de la estructura de bloques.");
-        }
-    }
     quickInlineWarnings.innerHTML = warnings.map((warning) => `<div class="quick-soft-warning">${warning}</div>`).join("");
+}
+
+function syncBuilderAdvancedMode(mode) {
+    const durationField = document.querySelector('[name="advanced_expected_duration_hhmm"]');
+    const distanceField = document.querySelector('[name="advanced_expected_distance_value"]');
+    if (!durationField || !distanceField) return;
+    const isBuilder = mode === "builder";
+    durationField.readOnly = isBuilder;
+    distanceField.readOnly = isBuilder;
+    durationField.classList.toggle("is-readonly", isBuilder);
+    distanceField.classList.toggle("is-readonly", isBuilder);
+    if (isBuilder) {
+        syncBuilderDerivedAdvancedFields();
+    }
+}
+
+function syncBuilderDerivedAdvancedFields() {
+    if (quickModeInput.value !== "builder") return;
+    const durationField = document.querySelector('[name="advanced_expected_duration_hhmm"]');
+    const distanceField = document.querySelector('[name="advanced_expected_distance_value"]');
+    if (!durationField || !distanceField) return;
+    const summary = summarizeBuilderBlocks();
+    durationField.dataset.machineValue = summary.durationHhmm || "";
+    distanceField.dataset.machineValue = summary.distanceKmValue || "";
+    durationField.value = summary.durationDisplay || "";
+    distanceField.value = summary.distanceDisplay || "";
 }
 
 function summarizeBuilderBlocks() {
     const blocks = Array.from(builderBlocks.children);
     if (blocks.length === 0) {
-        return { name: "", duration: "", distance: "", steps: "-", notes: "" };
+        return { name: "", duration: "", distance: "", durationHhmm: "", distanceKmValue: "", steps: "-", notes: "" };
     }
 
     let totalSeconds = 0;
@@ -642,16 +932,16 @@ function summarizeBuilderBlocks() {
             const nestedBlocks = Array.from(block.querySelectorAll(':scope [data-field="nested-steps"] > .builder-card'));
             visibleSteps += nestedBlocks.length;
             if (!mainRepeat && repeatCount && nestedBlocks.length) {
-                const primary = nestedBlocks.find((item) => item.querySelector('[data-field="label"]').value === "fuerte") || nestedBlocks[0];
+                const primary = nestedBlocks.find((item) => builderBlockTargetLabel(item).includes("Z4") || builderBlockTargetLabel(item).includes("Z5")) || nestedBlocks[0];
                 mainRepeat = {
                     repeatCount,
                     value: primary.querySelector('[data-field="value"]').value.trim(),
                     unit: primary.querySelector('[data-field="unit"]').value,
-                    label: primary.querySelector('[data-field="label"]').value,
+                    label: builderBlockTargetLabel(primary),
                 };
             }
             nestedBlocks.forEach((nestedBlock) => {
-                const parsed = parseMeasurement(nestedBlock.querySelector('[data-field="value"]').value.trim(), nestedBlock.querySelector('[data-field="unit"]').value);
+                const parsed = resolveBuilderBlockMetrics(nestedBlock);
                 if (parsed.seconds !== null) {
                     totalSeconds += parsed.seconds * repeatCount;
                     hasDuration = true;
@@ -660,15 +950,13 @@ function summarizeBuilderBlocks() {
                     totalDistanceMeters += parsed.distanceMeters * repeatCount;
                     hasDistance = true;
                 }
-                if (!notes) {
-                    notes = nestedBlock.querySelector('[data-field="label"]').value;
-                }
+                if (!notes) notes = builderBlockTargetLabel(nestedBlock);
             });
             return;
         }
 
         visibleSteps += 1;
-        const parsed = parseMeasurement(block.querySelector('[data-field="value"]').value.trim(), block.querySelector('[data-field="unit"]').value);
+        const parsed = resolveBuilderBlockMetrics(block);
         if (parsed.seconds !== null) {
             totalSeconds += parsed.seconds;
             hasDuration = true;
@@ -677,18 +965,133 @@ function summarizeBuilderBlocks() {
             totalDistanceMeters += parsed.distanceMeters;
             hasDistance = true;
         }
-        if (!notes) {
-            notes = block.querySelector('[data-field="label"]').value;
-        }
+        if (!notes) notes = builderBlockTargetLabel(block);
     });
 
     return {
         name: mainRepeat ? `${selectLabel('builder-sport') || 'Sesion'} ${mainRepeat.repeatCount}x${mainRepeat.value}${mainRepeat.unit}${mainRepeat.label ? ` ${mainRepeat.label}` : ""}` : "",
         duration: hasDuration ? formatSecondsHuman(totalSeconds) : "",
         distance: hasDistance ? formatDistanceMeters(totalDistanceMeters) : "",
+        durationHhmm: hasDuration ? formatSecondsAsHhmm(totalSeconds) : "",
+        distanceKmValue: hasDistance ? formatDistanceAsKmValue(totalDistanceMeters) : "",
+        durationDisplay: hasDuration ? formatBuilderDurationDisplay(totalSeconds) : "",
+        distanceDisplay: hasDistance ? formatBuilderDistanceDisplay(totalDistanceMeters) : "",
         steps: visibleSteps ? `${visibleSteps} bloques` : "-",
         notes,
     };
+}
+
+function resolveBuilderBlockMetrics(block) {
+    const value = block.querySelector('[data-field="value"]')?.value.trim() || "";
+    const unit = block.querySelector('[data-field="unit"]')?.value || "";
+    const targetType = block.querySelector('[data-field="target_type"]')?.value || "";
+    const targetZone = block.querySelector('[data-field="target_zone"]')?.value || "";
+    const parsed = parseMeasurement(value, unit);
+
+    const averagePaceSeconds = resolveBuilderReferencePaceSecondsPerKm(block, targetType, targetZone);
+    if (!averagePaceSeconds) {
+        return parsed;
+    }
+
+    if (parsed.seconds !== null && parsed.distanceMeters === null) {
+        return {
+            seconds: parsed.seconds,
+            distanceMeters: (parsed.seconds / averagePaceSeconds) * 1000,
+        };
+    }
+
+    if (parsed.distanceMeters !== null && parsed.seconds === null) {
+        return {
+            seconds: (parsed.distanceMeters / 1000) * averagePaceSeconds,
+            distanceMeters: parsed.distanceMeters,
+        };
+    }
+
+    return parsed;
+}
+
+function resolveBuilderReferencePaceSecondsPerKm(block, targetType, targetZone) {
+    if (!targetZone) return null;
+
+    if (targetType === "pace" && targetZone === "__custom__") {
+        const customMin = parsePaceToSeconds(block.querySelector('[data-field="custom_min"]')?.value || "");
+        const customMax = parsePaceToSeconds(block.querySelector('[data-field="custom_max"]')?.value || "");
+        return averageDefinedNumbers(customMin, customMax);
+    }
+
+    if (targetType === "hr" && targetZone === "__custom__") {
+        const customMin = parseNumberOrNull(block.querySelector('[data-field="custom_min"]')?.value || "");
+        const customMax = parseNumberOrNull(block.querySelector('[data-field="custom_max"]')?.value || "");
+        const matchedZoneName = findZoneByLowerBound(builderZoneMaps.hr, customMin, customMax);
+        if (!matchedZoneName) return null;
+        const matchedPaceZone = builderZoneMaps.pace?.[matchedZoneName];
+        if (!matchedPaceZone) return null;
+        return averageDefinedNumbers(matchedPaceZone.min, matchedPaceZone.max);
+    }
+
+    if (targetZone === "__custom__") {
+        return null;
+    }
+
+    const paceZone = builderZoneMaps.pace?.[targetZone];
+    if (!paceZone) return null;
+    return averageDefinedNumbers(paceZone.min, paceZone.max);
+}
+
+function averageDefinedNumbers(...values) {
+    const usable = values.filter((value) => typeof value === "number" && !Number.isNaN(value));
+    if (!usable.length) return null;
+    return usable.reduce((sum, value) => sum + value, 0) / usable.length;
+}
+
+function parsePaceToSeconds(rawValue) {
+    const value = String(rawValue || "").trim();
+    if (!value) return null;
+    const match = value.match(/^(\d{1,2}):(\d{1,2})$/);
+    if (!match) return null;
+    const minutes = Number(match[1]);
+    const seconds = Number(match[2]);
+    if (Number.isNaN(minutes) || Number.isNaN(seconds) || seconds >= 60) return null;
+    return minutes * 60 + seconds;
+}
+
+function parseNumberOrNull(rawValue) {
+    const value = Number(String(rawValue || "").trim());
+    return Number.isNaN(value) ? null : value;
+}
+
+function findZoneByLowerBound(zoneMap, lowerBound, upperBound) {
+    if (!zoneMap) return null;
+    const entries = Object.entries(zoneMap);
+    if (!entries.length) return null;
+
+    if (typeof lowerBound === "number") {
+        const containingLower = entries.find(([, zone]) => zoneContainsValue(zone, lowerBound));
+        if (containingLower) return containingLower[0];
+    }
+
+    if (typeof upperBound === "number") {
+        const containingUpper = entries.find(([, zone]) => zoneContainsValue(zone, upperBound));
+        if (containingUpper) return containingUpper[0];
+    }
+
+    return null;
+}
+
+function zoneContainsValue(zone, value) {
+    if (!zone || typeof value !== "number") return false;
+    const min = typeof zone.min === "number" ? zone.min : null;
+    const max = typeof zone.max === "number" ? zone.max : null;
+    if (min !== null && max !== null) {
+        return value >= min && value <= max;
+    }
+    if (min !== null) {
+        return value >= min;
+    }
+    if (max !== null) {
+        return value <= max;
+    }
+    return false;
 }
 
 function parseMeasurement(value, unit) {
@@ -726,6 +1129,37 @@ function formatDistanceMeters(totalMeters) {
         return Number.isInteger(km) ? `${km}km` : `${km.toFixed(1)}km`;
     }
     return `${Math.round(totalMeters)}m`;
+}
+
+function formatSecondsAsHhmm(totalSeconds) {
+    if (!totalSeconds) return "";
+    const totalMinutes = Math.round(totalSeconds / 60);
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}:${String(minutes).padStart(2, "0")}`;
+}
+
+function formatDistanceAsKmValue(totalMeters) {
+    if (!totalMeters) return "";
+    const km = totalMeters / 1000;
+    return km >= 1 ? Number(km.toFixed(2)).toString() : Number(km.toFixed(3)).toString();
+}
+
+function formatBuilderDurationDisplay(totalSeconds) {
+    if (!totalSeconds) return "";
+    const totalMinutes = Math.round(totalSeconds / 60);
+    if (totalMinutes < 60) {
+        return `${totalMinutes} Minutos`;
+    }
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}:${String(minutes).padStart(2, "0")} Horas`;
+}
+
+function formatBuilderDistanceDisplay(totalMeters) {
+    if (!totalMeters) return "";
+    const km = totalMeters / 1000;
+    return `${Number(km.toFixed(km >= 10 ? 1 : 2)).toString()} Kilometros`;
 }
 
 function normalizeDurationInputValue(rawValue) {
@@ -824,10 +1258,21 @@ document.getElementById("unified-session-form").addEventListener("submit", (even
     const mode = quickModeInput.value;
     if (mode === "builder") {
         refreshBuilderPreview();
+        if (builderBlocksJson) {
+            builderBlocksJson.value = JSON.stringify(serializeBuilderBlocksData());
+        }
         if (!builderRawText.value.trim()) {
             event.preventDefault();
             window.alert("Agrega al menos un bloque valido antes de crear la sesion.");
             return;
+        }
+        const durationField = document.querySelector('[name="advanced_expected_duration_hhmm"]');
+        const distanceField = document.querySelector('[name="advanced_expected_distance_value"]');
+        if (durationField) {
+            durationField.value = durationField.dataset.machineValue || "";
+        }
+        if (distanceField) {
+            distanceField.value = distanceField.dataset.machineValue || "";
         }
     }
 
@@ -851,16 +1296,34 @@ document.getElementById("unified-session-form").addEventListener("submit", (even
     }
 });
 
-addSimpleBlock();
-
 window.addEventListener("load", () => {
     const initialMode = window.location.hash.replace("#", "") || "{{ initial_mode }}";
+    if (initialQuickData) {
+        applyQuickInitialData(initialQuickData);
+    }
+    if (initialQuickData?.builder?.blocks?.length) {
+        builderBlocks.innerHTML = "";
+        initialQuickData.builder.blocks.forEach((block) => {
+            if (block.kind === "repeat") {
+                addRepeatBlock(block);
+            } else {
+                addSimpleBlock(block);
+            }
+        });
+    } else {
+        addSimpleBlock();
+    }
     if (["simple", "text", "builder"].includes(initialMode)) {
         switchQuickMode(initialMode);
     }
     toggleSimpleInlineGroupFields(document.getElementById("simple-group-mode")?.value || "existing");
     toggleTextInlineGroupFields(document.getElementById("text-group-mode")?.value || "existing");
+    document.getElementById("simple-target-type")?.addEventListener("change", () => syncTargetTypeUi("simple"));
+    document.getElementById("advanced-target-type")?.addEventListener("change", () => syncTargetTypeUi("advanced"));
+    syncTargetTypeUi("simple");
+    syncTargetTypeUi("advanced");
     updateCreationWarnings();
+    syncBuilderAdvancedMode(initialMode);
 
     document.querySelectorAll('[name="simple_expected_duration_min"], [name="advanced_expected_duration_hhmm"]').forEach((field) => {
         field.addEventListener("blur", () => validateDurationFieldOnBlur(field));
@@ -882,5 +1345,49 @@ window.addEventListener("load", () => {
         syncLibraryLink();
     }
 });
+
+function applyQuickInitialData(data) {
+    setFieldValue('simple_sport_type', data.simple?.sportType);
+    setFieldValue('simple_name', data.simple?.name);
+    setFieldValue('simple_expected_duration_min', data.simple?.expectedDuration);
+    setFieldValue('simple_expected_distance_km', data.simple?.expectedDistance);
+    setFieldValue('simple_target_type', data.simple?.targetType);
+    setFieldValue('simple_target_hr_zone', data.simple?.targetHrZone);
+    setFieldValue('simple_target_pace_zone', data.simple?.targetPaceZone);
+    setFieldValue('simple_target_power_zone', data.simple?.targetPowerZone);
+    setFieldValue('simple_target_rpe_zone', data.simple?.targetRpeZone);
+    setFieldValue('simple_target_notes', data.simple?.targetNotes);
+    setFieldValue('simple_session_group_id', data.simple?.sessionGroupId);
+
+    setFieldValue('raw_text', data.text?.rawText);
+    setFieldValue('text_sport_type_override', data.text?.sportType);
+    setFieldValue('text_session_group_id', data.text?.sessionGroupId);
+
+    setFieldValue('advanced_name', data.advanced?.name);
+    setFieldValue('advanced_expected_duration_hhmm', data.advanced?.expectedDuration);
+    setFieldValue('advanced_expected_distance_value', data.advanced?.expectedDistance);
+    setFieldValue('advanced_target_type', data.advanced?.targetType);
+    setFieldValue('advanced_target_hr_zone', data.advanced?.targetHrZone);
+    setFieldValue('advanced_target_pace_zone', data.advanced?.targetPaceZone);
+    setFieldValue('advanced_target_power_zone', data.advanced?.targetPowerZone);
+    setFieldValue('advanced_target_rpe_zone', data.advanced?.targetRpeZone);
+    setFieldValue('advanced_target_notes', data.advanced?.targetNotes);
+
+    if (data.advanced?.isKeySession) {
+        const keyField = document.querySelector('[name="advanced_is_key_session"]');
+        if (keyField) keyField.checked = true;
+    }
+
+    setFieldValue('builder_sport_type_override', data.builder?.sportType || 'running');
+    if (builderRawText && data.builder?.rawText) {
+        builderRawText.value = data.builder.rawText;
+    }
+}
+
+function setFieldValue(name, value) {
+    const field = document.querySelector(`[name="${name}"]`);
+    if (!field || value === undefined || value === null || value === "") return;
+    field.value = value;
+}
 </script>
 {% endblock %}

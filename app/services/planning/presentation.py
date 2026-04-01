@@ -12,12 +12,17 @@ class SessionDisplaySimpleStep:
     repeat_count: int | None
     duration_sec: int | None
     distance_m: int | None
+    target_type: str | None
+    target_hr_zone: str | None
     target_hr_min: int | None
     target_hr_max: int | None
+    target_power_zone: str | None
     target_power_min: int | None
     target_power_max: int | None
+    target_pace_zone: str | None
     target_pace_min_sec_km: int | None
     target_pace_max_sec_km: int | None
+    target_rpe_zone: str | None
     target_cadence_min: int | None
     target_cadence_max: int | None
     target_notes: str | None
@@ -57,12 +62,17 @@ def build_session_display_blocks(planned_session_steps: list[object]) -> list[Se
             repeat_count=raw_step.repeat_count,
             duration_sec=raw_step.duration_sec,
             distance_m=raw_step.distance_m,
+            target_type=getattr(raw_step, "target_type", None),
+            target_hr_zone=getattr(raw_step, "target_hr_zone", None),
             target_hr_min=raw_step.target_hr_min,
             target_hr_max=raw_step.target_hr_max,
+            target_power_zone=getattr(raw_step, "target_power_zone", None),
             target_power_min=raw_step.target_power_min,
             target_power_max=raw_step.target_power_max,
+            target_pace_zone=getattr(raw_step, "target_pace_zone", None),
             target_pace_min_sec_km=raw_step.target_pace_min_sec_km,
             target_pace_max_sec_km=raw_step.target_pace_max_sec_km,
+            target_rpe_zone=getattr(raw_step, "target_rpe_zone", None),
             target_cadence_min=raw_step.target_cadence_min,
             target_cadence_max=raw_step.target_cadence_max,
             target_notes=raw_step.target_notes,
@@ -105,12 +115,17 @@ def build_session_display_blocks_for_session(planned_session: object) -> list[Se
             repeat_count=None,
             duration_sec=duration_sec * 60 if duration_sec is not None else None,
             distance_m=int(round(distance_km * 1000)) if distance_km is not None else None,
+            target_type=getattr(planned_session, "target_type", None),
+            target_hr_zone=getattr(planned_session, "target_hr_zone", None),
             target_hr_min=None,
             target_hr_max=None,
+            target_power_zone=getattr(planned_session, "target_power_zone", None),
             target_power_min=None,
             target_power_max=None,
+            target_pace_zone=getattr(planned_session, "target_pace_zone", None),
             target_pace_min_sec_km=None,
             target_pace_max_sec_km=None,
+            target_rpe_zone=getattr(planned_session, "target_rpe_zone", None),
             target_cadence_min=None,
             target_cadence_max=None,
             target_notes=getattr(planned_session, "target_notes", None),
@@ -273,19 +288,14 @@ def _display_blocks_title(planned_session: object, blocks: list[SessionDisplayBl
         "multisport": "Multideporte",
     }.get(sport, "")
 
-    repeat_blocks = [block for block in blocks if isinstance(block, SessionDisplayRepeatBlock)]
-    if repeat_blocks:
-        repeat_block = repeat_blocks[0]
-        repeat_fragment = _display_repeat_fragment_short(repeat_block)
-        intensity = _display_repeat_intensity(repeat_block)
-        return " ".join(part for part in (sport_label, repeat_fragment, intensity) if part).strip()
-
-    if blocks:
-        simple_block = blocks[0]
-        if isinstance(simple_block, SessionDisplaySimpleStep):
-            fragment = _display_step_measurement(simple_block)
-            intensity = simple_block.target_notes or ""
-            return " ".join(part for part in (sport_label, fragment, intensity) if part).strip()
+    title_fragments = [_display_block_title_fragment(block) for block in blocks]
+    title_fragments = [fragment for fragment in title_fragments if fragment]
+    if title_fragments:
+        visible_fragments = title_fragments[:3]
+        title = " + ".join(visible_fragments)
+        if len(title_fragments) > 3:
+            title += " + ..."
+        return " ".join(part for part in (sport_label, title) if part).strip()
 
     return getattr(planned_session, "name", None)
 
@@ -293,11 +303,26 @@ def _display_blocks_title(planned_session: object, blocks: list[SessionDisplayBl
 def _display_step_measurement(step: SessionDisplaySimpleStep) -> str:
     if step.distance_m is not None:
         if step.distance_m >= 1000 and step.distance_m % 1000 == 0:
-            return f"{int(step.distance_m / 1000)}km"
+            return f"{int(step.distance_m / 1000)} km"
         if step.distance_m >= 1000:
-            return f"{step.distance_m / 1000:.1f}km"
-        return f"{step.distance_m}m"
-    return format_duration_human_from_seconds(step.duration_sec)
+            return f"{step.distance_m / 1000:.1f} km"
+        return f"{step.distance_m} m"
+
+    if step.duration_sec is None:
+        return ""
+    if step.duration_sec < 60:
+        return f"{int(step.duration_sec)} s"
+    if step.duration_sec < 3600:
+        if step.duration_sec % 60 == 0:
+            return f"{int(step.duration_sec // 60)} min"
+        minutes = step.duration_sec // 60
+        seconds = step.duration_sec % 60
+        return f"{int(minutes)}:{int(seconds):02d}"
+    hours = step.duration_sec // 3600
+    minutes = (step.duration_sec % 3600) // 60
+    if minutes == 0:
+        return f"{int(hours)} h"
+    return f"{int(hours)} h {int(minutes)} min"
 
 
 def _display_repeat_fragment(block: SessionDisplayRepeatBlock) -> str:
@@ -340,7 +365,18 @@ def _display_repeat_fragment_short(block: SessionDisplayRepeatBlock) -> str:
 
 def _display_repeat_intensity(block: SessionDisplayRepeatBlock) -> str:
     work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
-    return (work_step.target_notes or "").strip()
+    return _display_step_intensity(work_step)
+
+
+def _display_block_title_fragment(block: SessionDisplayBlock) -> str:
+    if isinstance(block, SessionDisplayRepeatBlock):
+        repeat_fragment = _display_repeat_fragment_short(block)
+        intensity = _display_repeat_intensity(block)
+        return " ".join(part for part in (repeat_fragment, intensity) if part).strip()
+
+    measurement = _display_step_measurement(block)
+    intensity = _display_step_intensity(block)
+    return " ".join(part for part in (measurement, intensity) if part).strip()
 
 
 def _describe_display_block(block: SessionDisplayBlock) -> str:
@@ -378,10 +414,19 @@ def _describe_display_block_short(block: SessionDisplayBlock) -> str:
 
 def _describe_simple_step(step: SessionDisplaySimpleStep) -> str:
     measurement = _display_step_measurement(step)
-    label = (step.target_notes or "").strip()
+    label = _display_step_intensity(step)
     if measurement and label:
         return f"{measurement} {label}"
     return measurement or label
+
+
+def _display_step_intensity(step: SessionDisplaySimpleStep) -> str:
+    if (step.target_notes or "").strip():
+        return (step.target_notes or "").strip()
+    for zone in (step.target_pace_zone, step.target_hr_zone, step.target_power_zone, step.target_rpe_zone):
+        if zone:
+            return str(zone).strip()
+    return ""
 
 
 def _session_type_to_default_step_type(session_type: str | None) -> str:

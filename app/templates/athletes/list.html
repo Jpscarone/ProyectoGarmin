@@ -12,6 +12,10 @@
         <a class="button" href="/athletes/create">Nuevo atleta</a>
     </div>
 
+    {% if garmin_auth_diagnostics.rate_limit_active %}
+    <p class="status-note">Garmin esta limitando temporalmente el acceso. Disponible de nuevo a las {{ garmin_auth_diagnostics.rate_limit_until_local[-8:-3] }}.</p>
+    {% endif %}
+
     {% if athletes %}
     <div class="athlete-list">
         {% for athlete in athletes %}
@@ -40,7 +44,7 @@
                     <a class="button button-nav" href="/athletes/{{ athlete.id }}">Ver detalle</a>
                     <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar</a>
                     <form method="post" action="/athletes/{{ athlete.id }}/compare-garmin">
-                        <button class="button button-utility" type="submit">Comparar con Garmin</button>
+                        <button class="button button-utility" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Comparar con Garmin</button>
                     </form>
                     <button class="button button-danger" type="button" onclick='deleteAthlete({{ athlete.id }}, {{ athlete.name | tojson }})'>Eliminar</button>
                 </div>

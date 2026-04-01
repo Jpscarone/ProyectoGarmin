@@ -35,8 +35,12 @@ class Athlete(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     hr_zones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     power_zones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pace_zones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rpe_zones_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_hr_zones: Mapped[str | None] = mapped_column(String(50), nullable=True)
     source_power_zones: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_pace_zones: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_rpe_zones: Mapped[str | None] = mapped_column(String(50), nullable=True)
     garmin_profile_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     garmin_profile_last_synced_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),

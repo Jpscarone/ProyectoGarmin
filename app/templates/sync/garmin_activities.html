@@ -19,12 +19,12 @@
     <div class="actions-inline">
         <form method="post" action="/sync/garmin/activities">
             <div class="form-actions">
-                <button class="button" type="submit">Sincronizar actividades recientes</button>
+                <button class="button" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar actividades recientes</button>
             </div>
         </form>
         <form method="post" action="/sync/garmin/all">
             <div class="form-actions">
-                <button class="button button-secondary" type="submit">Sincronizar todo</button>
+                <button class="button button-secondary" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar todo</button>
             </div>
         </form>
     </div>
@@ -57,6 +57,33 @@
     {% if error %}
     <div class="alert alert-error">{{ error }}</div>
     {% endif %}
+    {% if garmin_auth_diagnostics.rate_limit_active %}
+    <p class="status-note">Garmin esta limitando temporalmente el acceso. Disponible de nuevo a las {{ garmin_auth_diagnostics.rate_limit_until_local[-8:-3] }}.</p>
+    {% endif %}
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Diagnostico Garmin</p>
+                <h2>Estado de autenticacion</h2>
+            </div>
+        </div>
+        <div class="detail-grid sync-summary">
+            <div class="detail-item"><strong>Directorio de tokens:</strong> {{ garmin_auth_diagnostics.token_dir }}</div>
+            <div class="detail-item"><strong>OAuth1:</strong> {{ 'Disponible' if garmin_auth_diagnostics.oauth1_exists else 'No encontrado' }}</div>
+            <div class="detail-item"><strong>OAuth2:</strong> {{ 'Disponible' if garmin_auth_diagnostics.oauth2_exists else 'No encontrado' }}</div>
+            <div class="detail-item"><strong>Sesion reutilizable:</strong> {{ 'Si' if garmin_auth_diagnostics.tokens_usable else 'No' }}</div>
+            <div class="detail-item"><strong>MFA pendiente:</strong> {{ 'Si' if garmin_auth_diagnostics.needs_mfa else 'No' }}</div>
+            <div class="detail-item">
+                <strong>Rate limit activo:</strong>
+                {% if garmin_auth_diagnostics.rate_limit_active %}
+                Si, hasta {{ garmin_auth_diagnostics.rate_limit_until_local }}
+                {% else %}
+                No
+                {% endif %}
+            </div>
+        </div>
+    </section>
 
     {% if result %}
     <div class="detail-grid sync-summary">

@@ -38,33 +38,58 @@
 </div>
 
 <label class="field">
-    <span>FC minima</span>
-    <input name="target_hr_min" type="number" min="1" value="{{ step.target_hr_min if step and step.target_hr_min is not none else '' }}" placeholder="Ej: 140">
+    <span>Criterio de intensidad</span>
+    {% set current_step_target_type = step.target_type if step and step.target_type else ('power' if step and (step.target_power_zone or step.target_power_min or step.target_power_max) else 'pace' if step and (step.target_pace_zone or step.target_pace_min_sec_km or step.target_pace_max_sec_km) else 'hr' if step and (step.target_hr_zone or step.target_hr_min or step.target_hr_max) else 'rpe' if step and step.target_rpe_zone else '') %}
+    <select name="target_type" id="step-target-type">
+        <option value="">Sin criterio</option>
+        {% for option in intensity_target_options %}
+        <option value="{{ option.value }}" {% if current_step_target_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
 </label>
 
-<label class="field">
-    <span>FC maxima</span>
-    <input name="target_hr_max" type="number" min="1" value="{{ step.target_hr_max if step and step.target_hr_max is not none else '' }}" placeholder="Ej: 155">
+<label class="field intensity-target-group" data-target-scope="step" data-target-type="hr">
+    <span>Zona FC objetivo</span>
+    <select name="target_hr_zone">
+        <option value="">Sin zona</option>
+        {% set current_step_hr_zone = step.target_hr_zone if step and step.target_hr_zone else '' %}
+        {% for option in zone_options %}
+        <option value="{{ option.value }}" {% if current_step_hr_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
 </label>
 
-<label class="field">
-    <span>Potencia minima</span>
-    <input name="target_power_min" type="number" min="1" value="{{ step.target_power_min if step and step.target_power_min is not none else '' }}" placeholder="Ej: 220">
+<label class="field intensity-target-group" data-target-scope="step" data-target-type="pace">
+    <span>Zona de ritmo objetivo</span>
+    <select name="target_pace_zone">
+        <option value="">Sin zona</option>
+        {% set current_step_pace_zone = step.target_pace_zone if step and step.target_pace_zone else '' %}
+        {% for option in zone_options %}
+        <option value="{{ option.value }}" {% if current_step_pace_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
 </label>
 
-<label class="field">
-    <span>Potencia maxima</span>
-    <input name="target_power_max" type="number" min="1" value="{{ step.target_power_max if step and step.target_power_max is not none else '' }}" placeholder="Ej: 250">
+<label class="field intensity-target-group" data-target-scope="step" data-target-type="power">
+    <span>Zona potencia objetivo</span>
+    <select name="target_power_zone">
+        <option value="">Sin zona</option>
+        {% set current_step_power_zone = step.target_power_zone if step and step.target_power_zone else '' %}
+        {% for option in zone_options %}
+        <option value="{{ option.value }}" {% if current_step_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
 </label>
 
-<label class="field">
-    <span>Ritmo minimo</span>
-    <input name="target_pace_min_formatted" type="text" value="{{ pace_mmss(step.target_pace_min_sec_km) if step else '' }}" placeholder="Ej: 4:30">
-</label>
-
-<label class="field">
-    <span>Ritmo maximo</span>
-    <input name="target_pace_max_formatted" type="text" value="{{ pace_mmss(step.target_pace_max_sec_km) if step else '' }}" placeholder="Ej: 5:10">
+<label class="field intensity-target-group" data-target-scope="step" data-target-type="rpe">
+    <span>Zona de esfuerzo percibido</span>
+    <select name="target_rpe_zone">
+        <option value="">Sin zona</option>
+        {% set current_step_rpe_zone = step.target_rpe_zone if step and step.target_rpe_zone else '' %}
+        {% for option in rpe_zone_options %}
+        <option value="{{ option.value }}" {% if current_step_rpe_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+    </select>
 </label>
 
 <label class="field">

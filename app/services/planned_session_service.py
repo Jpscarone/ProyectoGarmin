@@ -10,6 +10,7 @@ from app.db.models.planned_session_step import PlannedSessionStep
 from app.db.models.session_group import SessionGroup
 from app.db.models.training_day import TrainingDay
 from app.schemas.planned_session import PlannedSessionCreate, PlannedSessionUpdate
+from app.services.intensity_target_service import normalize_session_target_fields
 
 
 def get_planned_sessions(db: Session) -> list[PlannedSession]:
@@ -45,6 +46,7 @@ def create_planned_session(db: Session, planned_session_in: PlannedSessionCreate
             raise ValueError("Selected session group does not belong to the selected training day")
 
     data["athlete_id"] = training_day.athlete_id
+    data = normalize_session_target_fields(data)
 
     planned_session = PlannedSession(**data)
     db.add(planned_session)
@@ -71,6 +73,7 @@ def update_planned_session(
             raise ValueError("Selected session group does not belong to the selected training day")
 
     data["athlete_id"] = training_day.athlete_id
+    data = normalize_session_target_fields(data)
 
     for field, value in data.items():
         setattr(planned_session, field, value)

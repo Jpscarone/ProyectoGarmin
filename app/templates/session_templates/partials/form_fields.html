@@ -43,6 +43,15 @@
             <input name="expected_elevation_gain_m" type="number" step="1" min="0" value="{{ template_input.expected_elevation_gain_m if template_input.expected_elevation_gain_m is not none else '' }}" placeholder="Ej: 800">
         </label>
         <label class="field">
+            <span>Criterio de intensidad</span>
+            <select name="target_type">
+                <option value="">Sin criterio</option>
+                {% for option in intensity_target_options %}
+                <option value="{{ option.value }}" {% if template_input.target_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
             <span>Zona FC objetivo</span>
             <select name="target_hr_zone">
                 <option value="">Sin zona</option>
@@ -52,11 +61,29 @@
             </select>
         </label>
         <label class="field">
+            <span>Zona de ritmo objetivo</span>
+            <select name="target_pace_zone">
+                <option value="">Sin zona</option>
+                {% for option in zone_options %}
+                <option value="{{ option.value }}" {% if template_input.target_pace_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
             <span>Zona potencia objetivo</span>
             <select name="target_power_zone">
                 <option value="">Sin zona</option>
                 {% for option in zone_options %}
                 <option value="{{ option.value }}" {% if template_input.target_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Zona de esfuerzo percibido</span>
+            <select name="target_rpe_zone">
+                <option value="">Sin zona</option>
+                {% for option in rpe_zone_options %}
+                <option value="{{ option.value }}" {% if template_input.target_rpe_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
                 {% endfor %}
             </select>
         </label>
@@ -116,6 +143,24 @@
                     <input name="distance_m[]" type="number" min="0" step="1" value="{{ step.distance_m if step.distance_m is not none else '' }}" placeholder="Ej: 400">
                 </label>
                 <label class="field">
+                    <span>Criterio</span>
+                    <select name="step_target_type[]">
+                        <option value="">Sin criterio</option>
+                        {% for option in intensity_target_options %}
+                        <option value="{{ option.value }}" {% if step.target_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Zona FC</span>
+                    <select name="step_target_hr_zone[]">
+                        <option value="">Sin zona</option>
+                        {% for option in zone_options %}
+                        <option value="{{ option.value }}" {% if step.target_hr_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
                     <span>HR min</span>
                     <input name="target_hr_min[]" type="number" min="0" step="1" value="{{ step.target_hr_min if step.target_hr_min is not none else '' }}">
                 </label>
@@ -128,8 +173,26 @@
                     <input name="target_power_min[]" type="number" min="0" step="1" value="{{ step.target_power_min if step.target_power_min is not none else '' }}">
                 </label>
                 <label class="field">
+                    <span>Zona potencia</span>
+                    <select name="step_target_power_zone[]">
+                        <option value="">Sin zona</option>
+                        {% for option in zone_options %}
+                        <option value="{{ option.value }}" {% if step.target_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
                     <span>Potencia max</span>
                     <input name="target_power_max[]" type="number" min="0" step="1" value="{{ step.target_power_max if step.target_power_max is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Zona ritmo</span>
+                    <select name="step_target_pace_zone[]">
+                        <option value="">Sin zona</option>
+                        {% for option in zone_options %}
+                        <option value="{{ option.value }}" {% if step.target_pace_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
                 </label>
                 <label class="field">
                     <span>Ritmo min (seg/km)</span>
@@ -138,6 +201,15 @@
                 <label class="field">
                     <span>Ritmo max (seg/km)</span>
                     <input name="target_pace_max_sec_km[]" type="number" min="0" step="1" value="{{ step.target_pace_max_sec_km if step.target_pace_max_sec_km is not none else '' }}">
+                </label>
+                <label class="field">
+                    <span>Zona RPE</span>
+                    <select name="step_target_rpe_zone[]">
+                        <option value="">Sin zona</option>
+                        {% for option in rpe_zone_options %}
+                        <option value="{{ option.value }}" {% if step.target_rpe_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
                 </label>
                 <label class="field">
                     <span>Cadencia min</span>
@@ -189,6 +261,24 @@
                 <input name="distance_m[]" type="number" min="0" step="1" value="" placeholder="Ej: 400">
             </label>
             <label class="field">
+                <span>Criterio</span>
+                <select name="step_target_type[]">
+                    <option value="">Sin criterio</option>
+                    {% for option in intensity_target_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
+                <span>Zona FC</span>
+                <select name="step_target_hr_zone[]">
+                    <option value="">Sin zona</option>
+                    {% for option in zone_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
                 <span>HR min</span>
                 <input name="target_hr_min[]" type="number" min="0" step="1" value="">
             </label>
@@ -201,8 +291,26 @@
                 <input name="target_power_min[]" type="number" min="0" step="1" value="">
             </label>
             <label class="field">
+                <span>Zona potencia</span>
+                <select name="step_target_power_zone[]">
+                    <option value="">Sin zona</option>
+                    {% for option in zone_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field">
                 <span>Potencia max</span>
                 <input name="target_power_max[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Zona ritmo</span>
+                <select name="step_target_pace_zone[]">
+                    <option value="">Sin zona</option>
+                    {% for option in zone_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                </select>
             </label>
             <label class="field">
                 <span>Ritmo min (seg/km)</span>
@@ -211,6 +319,15 @@
             <label class="field">
                 <span>Ritmo max (seg/km)</span>
                 <input name="target_pace_max_sec_km[]" type="number" min="0" step="1" value="">
+            </label>
+            <label class="field">
+                <span>Zona RPE</span>
+                <select name="step_target_rpe_zone[]">
+                    <option value="">Sin zona</option>
+                    {% for option in rpe_zone_options %}
+                    <option value="{{ option.value }}">{{ option.label }}</option>
+                    {% endfor %}
+                </select>
             </label>
             <label class="field">
                 <span>Cadencia min</span>

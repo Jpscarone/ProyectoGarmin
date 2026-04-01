@@ -146,6 +146,36 @@ ZONE_OPTIONS = [
     Option("Z5", "Z5"),
 ]
 
+INTENSITY_TARGET_OPTIONS = [
+    Option("hr", "Frecuencia cardiaca"),
+    Option("pace", "Ritmo"),
+    Option("power", "Potencia"),
+    Option("rpe", "Esfuerzo percibido"),
+]
+
+INTENSITY_TARGET_LABELS = {
+    "hr": "Frecuencia cardiaca",
+    "pace": "Ritmo",
+    "power": "Potencia",
+    "rpe": "Esfuerzo percibido",
+}
+
+RPE_ZONE_OPTIONS = [
+    Option("Z1", "Z1 Muy suave"),
+    Option("Z2", "Z2 Suave"),
+    Option("Z3", "Z3 Moderado"),
+    Option("Z4", "Z4 Fuerte"),
+    Option("Z5", "Z5 Maximo"),
+]
+
+RPE_ZONE_LABELS = {
+    "Z1": "Z1 Muy suave",
+    "Z2": "Z2 Suave",
+    "Z3": "Z3 Moderado",
+    "Z4": "Z4 Fuerte",
+    "Z5": "Z5 Maximo",
+}
+
 MATCH_METHOD_LABELS = {
     "exact_time": "Horario exacto",
     "same_day_sport": "Mismo dia y deporte",

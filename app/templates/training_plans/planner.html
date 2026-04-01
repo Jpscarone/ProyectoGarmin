@@ -1,0 +1,336 @@
+{% extends "base.html" %}
+
+{% block title %}Planner | {{ training_plan.name }} | training_app{% endblock %}
+
+{% block content %}
+<section class="panel planner-shell">
+    <div class="section-heading planner-page-heading">
+        <div>
+            <p class="eyebrow">Planner</p>
+            <h1>{{ training_plan.name }}</h1>
+            <p class="text-muted">
+                Atleta: {{ training_plan.athlete.name }}
+                {% if training_plan.goal %}| Objetivo principal: {{ training_plan.goal.name }}{% endif %}
+            </p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-nav" href="/training_plans/{{ training_plan.id }}">Volver al plan</a>
+            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ visible_month }}&selected_date={{ selected_day_date.isoformat() }}">Ver calendario clasico</a>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <div class="planner-layout">
+        <aside class="planner-column planner-column-left">
+            <div class="planner-column-card">
+                <div class="section-heading planner-subheading">
+                    <div>
+                        <p class="eyebrow">Mes</p>
+                        <h2>{{ planner_month_label }}</h2>
+                    </div>
+                    <div class="actions-inline">
+                        <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/planner?month={{ previous_month }}&selected_date={{ selected_day_date.isoformat() }}">Anterior</a>
+                        <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/planner?month={{ next_month }}&selected_date={{ selected_day_date.isoformat() }}">Siguiente</a>
+                    </div>
+                </div>
+
+                <div class="planner-calendar-grid">
+                    <div class="planner-weekday">Lun</div>
+                    <div class="planner-weekday">Mar</div>
+                    <div class="planner-weekday">Mie</div>
+                    <div class="planner-weekday">Jue</div>
+                    <div class="planner-weekday">Vie</div>
+                    <div class="planner-weekday">Sab</div>
+                    <div class="planner-weekday">Dom</div>
+
+                    {% for week in planner_calendar_weeks %}
+                        {% for cell in week %}
+                        <article
+                            class="planner-day-card{% if not cell.is_current_month %} planner-day-card-muted{% endif %}{% if cell.is_today %} planner-day-card-today{% endif %}{% if cell.is_selected %} planner-day-card-selected{% endif %} planner-day-card-status-{{ cell.day_status }}"
+                            onclick="window.location.href='/training_plans/{{ training_plan.id }}/planner?month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}'"
+                        >
+                            <div class="planner-day-card-header">
+                                <span class="planner-day-number">{{ cell.date.day }}</span>
+                                {% if cell.training_day %}
+                                <span class="planner-mini-pill">Dia</span>
+                                {% else %}
+                                <span class="planner-mini-pill planner-mini-pill-empty">Libre</span>
+                                {% endif %}
+                            </div>
+
+                            {% if cell.training_day %}
+                            <div class="planner-day-badges">
+                                <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
+                                {% if cell.matched_count %}
+                                <span class="planner-flag">Actividad</span>
+                                {% endif %}
+                                {% if cell.analyzed_count %}
+                                <span class="planner-flag">Analisis</span>
+                                {% endif %}
+                            </div>
+                            {% endif %}
+
+                            {% for goal in cell.primary_goals %}
+                            <div class="planner-goal-chip planner-goal-primary">Principal: {{ goal.name }}</div>
+                            {% endfor %}
+                            {% for goal in cell.secondary_goals %}
+                            <div class="planner-goal-chip planner-goal-secondary">Secundario: {{ goal.name }}</div>
+                            {% endfor %}
+
+                            {% for summary in cell.session_summaries %}
+                            <a
+                                class="planner-session-line planner-session-link"
+                                href="/planned_sessions/{{ summary.id }}"
+                                onclick="event.stopPropagation()"
+                            >
+                                {{ summary.compact_label }}
+                            </a>
+                            {% endfor %}
+
+                            {% if cell.overflow_count %}
+                            <div class="planner-overflow">+{{ cell.overflow_count }} mas</div>
+                            {% endif %}
+
+                            {% if not cell.training_day %}
+                            <a
+                                class="planner-create-row"
+                                href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&day_date={{ cell.date.isoformat() }}&return_to=planner&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}#simple"
+                                onclick="event.stopPropagation()"
+                            >
+                                <span class="planner-create-hint">Crear sesion</span>
+                                <span class="planner-create-plus">+</span>
+                            </a>
+                            {% endif %}
+                        </article>
+                        {% endfor %}
+                    {% endfor %}
+                </div>
+            </div>
+        </aside>
+
+        <main class="planner-column planner-column-center">
+            <div class="planner-column-card">
+                <div class="section-heading planner-subheading">
+                    <div>
+                        <p class="eyebrow">Dia seleccionado</p>
+                        <h2>{{ selected_day_date.strftime('%d/%m/%Y') }}</h2>
+                        {% if selected_training_day %}
+                        <p class="text-muted">
+                            {{ day_type_label(selected_training_day.day_type) }}
+                            {% if selected_training_day.day_notes %}| {{ selected_training_day.day_notes }}{% endif %}
+                        </p>
+                        {% else %}
+                        <p class="text-muted">Todavia no hay un dia creado para esta fecha.</p>
+                        {% endif %}
+                    </div>
+                    <div class="planner-day-status">
+                        <span class="calendar-state-badge calendar-state-badge-{{ planner_summary.status_key }}">{{ planner_summary.status_label }}</span>
+                    </div>
+                </div>
+
+                {% if selected_day_goals.primary or selected_day_goals.secondary %}
+                <div class="planner-section-block">
+                    <h3>Objetivos del dia</h3>
+                    <div class="planner-goal-stack">
+                        {% for goal in selected_day_goals.primary %}
+                        <div class="planner-goal-row planner-goal-row-primary">
+                            <strong>Objetivo principal</strong>
+                            <span>{{ goal.name }}</span>
+                        </div>
+                        {% endfor %}
+                        {% for goal in selected_day_goals.secondary %}
+                        <div class="planner-goal-row planner-goal-row-secondary">
+                            <strong>Objetivo secundario</strong>
+                            <span>{{ goal.name }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="planner-section-block">
+                    <div class="section-heading planner-block-heading">
+                        <div>
+                            <h3>Sesiones planificadas</h3>
+                        </div>
+                        <div class="actions-inline planner-day-actions">
+                            <a class="button" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&training_day_id={{ selected_training_day.id if selected_training_day else '' }}&day_date={{ selected_day_date.isoformat() }}&return_to=planner&month={{ visible_month }}&selected_date={{ selected_day_date.isoformat() }}#simple">Crear sesion</a>
+                            <a class="button button-utility" href="/planned_sessions/quick?training_plan_id={{ training_plan.id }}&training_day_id={{ selected_training_day.id if selected_training_day else '' }}&day_date={{ selected_day_date.isoformat() }}&mode=builder&return_to=planner&month={{ visible_month }}&selected_date={{ selected_day_date.isoformat() }}#builder">Crear por bloques</a>
+                            <a class="button button-utility" href="/session_templates?training_day_id={{ selected_training_day.id if selected_training_day else '' }}&training_plan_id={{ training_plan.id }}&planned_day_date={{ selected_day_date.isoformat() }}&return_to=planner&month={{ visible_month }}">Agregar desde biblioteca</a>
+                            {% if selected_training_day %}
+                            <a class="button button-utility" href="/session_groups/create?training_day_id={{ selected_training_day.id }}">Crear grupo</a>
+                            <form method="post" action="/analysis/day/{{ selected_training_day.id }}">
+                                <button class="button button-utility" type="submit">Analizar dia</button>
+                            </form>
+                            <form method="post" action="/match/day/{{ selected_training_day.id }}">
+                                <button class="button button-utility" type="submit">Sincronizar todo</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if selected_day_sessions %}
+                    <div class="planner-card-stack">
+                        {% for session_row in selected_day_sessions %}
+                        {% set planned_session = session_row.planned_session %}
+                        {% set latest_report = session_row.latest_report %}
+                        {% set metrics = session_row.metrics %}
+                        <article class="planner-session-card">
+                            <div class="planner-card-main">
+                                <div class="planner-card-title-row">
+                                    <strong>{{ planned_session.name }}</strong>
+                                    <div class="planner-chip-row">
+                                        <span class="planner-info-chip">{{ sport_label(planned_session.sport_type) }}</span>
+                                        {% if metrics.duration_sec %}
+                                        <span class="planner-info-chip">{{ duration_seconds_human(metrics.duration_sec) }}</span>
+                                        {% endif %}
+                                        {% if metrics.distance_m %}
+                                        <span class="planner-info-chip">{{ distance_label_meters(metrics.distance_m) }}</span>
+                                        {% endif %}
+                                        {% if planned_session.session_group %}
+                                        <span class="planner-info-chip">Grupo: {{ planned_session.session_group.name }}</span>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                                <div class="planner-chip-row">
+                                    <span class="calendar-state-badge">{% if session_row.has_match %}Actividad vinculada{% else %}Sin actividad{% endif %}</span>
+                                    <span class="calendar-state-badge">{% if latest_report %}{{ analysis_status_label(latest_report.overall_status) }}{% else %}Sin analisis{% endif %}</span>
+                                </div>
+                                <p class="text-muted">{{ planned_session.description_text or planned_session.target_notes or (session_structure_summary_short(planned_session) or "Sin descripcion.") }}</p>
+                            </div>
+                            <div class="actions-inline planner-card-actions">
+                                <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver detalle</a>
+                                <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
+                                <form method="post" action="/analysis/session/{{ planned_session.id }}">
+                                    <button class="button button-utility" type="submit">Analizar</button>
+                                </form>
+                                <a class="button button-utility" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="planner-empty-state">
+                        <p>No hay sesiones cargadas para este dia.</p>
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="planner-section-block">
+                    <h3>Actividades reales del dia</h3>
+                    {% if selected_day_activities %}
+                    <div class="planner-card-stack">
+                        {% for activity_row in selected_day_activities %}
+                        {% set activity = activity_row.activity %}
+                        <article class="planner-session-card planner-activity-card">
+                            <div class="planner-card-main">
+                                <div class="planner-card-title-row">
+                                    <strong>{{ activity.activity_name or ("Actividad " ~ activity.id) }}</strong>
+                                    <div class="planner-chip-row">
+                                        <span class="planner-info-chip">{{ sport_label(activity.sport_type) }}</span>
+                                        {% if activity.duration_sec %}<span class="planner-info-chip">{{ duration_seconds_human(activity.duration_sec) }}</span>{% endif %}
+                                        {% if activity.distance_m is not none %}<span class="planner-info-chip">{{ distance_label_meters(activity.distance_m) }}</span>{% endif %}
+                                    </div>
+                                </div>
+                                <div class="planner-chip-row">
+                                    <span class="calendar-state-badge">{{ activity_row.match_label }}</span>
+                                    <span class="calendar-state-badge">{% if activity_row.latest_report %}{{ analysis_status_label(activity_row.latest_report.overall_status) }}{% else %}Sin analisis{% endif %}</span>
+                                </div>
+                                <p class="text-muted">
+                                    {% if activity.activity_match and activity.activity_match.planned_session %}
+                                    Vinculada con {{ activity.activity_match.planned_session.name }}
+                                    {% else %}
+                                    Sin sesion vinculada
+                                    {% endif %}
+                                </p>
+                            </div>
+                            <div class="actions-inline planner-card-actions">
+                                <a class="button button-nav" href="/activities/{{ activity.id }}">Ver detalle</a>
+                                <form method="post" action="/analysis/activity/{{ activity.id }}">
+                                    <button class="button button-utility" type="submit">Analizar</button>
+                                </form>
+                            </div>
+                        </article>
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <div class="planner-empty-state">
+                        <p>No hay actividades registradas para este dia.</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </main>
+
+        <aside class="planner-column planner-column-right">
+            <div class="planner-column-card planner-sidebar-stack">
+                <section class="planner-sidebar-section">
+                    <p class="eyebrow">Resumen</p>
+                    <div class="planner-metric-grid">
+                        <div class="detail-item"><strong>Sesiones:</strong> {{ planner_summary.session_count }}</div>
+                        <div class="detail-item"><strong>Actividades:</strong> {{ planner_summary.activity_count }}</div>
+                        <div class="detail-item"><strong>Estado:</strong> {{ planner_summary.status_label }}</div>
+                        <div class="detail-item"><strong>Score:</strong> {{ planner_summary.score if planner_summary.score is not none else "-" }}</div>
+                    </div>
+                </section>
+
+                <section class="planner-sidebar-section">
+                    <p class="eyebrow">Salud diaria</p>
+                    {% if selected_health %}
+                    <div class="planner-sidebar-list">
+                        <div class="detail-item"><strong>Sueno:</strong> {{ selected_health.sleep_hours or "-" }} h</div>
+                        <div class="detail-item"><strong>Stress:</strong> {{ selected_health.stress_avg or "-" }}</div>
+                        <div class="detail-item"><strong>Body battery:</strong> {{ selected_health.body_battery_start or "-" }}</div>
+                        <div class="detail-item"><strong>HRV:</strong> {{ selected_health.hrv_avg_ms or "-" }}</div>
+                        <div class="detail-item"><strong>FC reposo:</strong> {{ selected_health.resting_hr or "-" }}</div>
+                    </div>
+                    {% else %}
+                    <p class="empty-state">No hay datos de salud para este dia.</p>
+                    {% endif %}
+                </section>
+
+                <section class="planner-sidebar-section">
+                    <p class="eyebrow">Clima</p>
+                    {% if selected_weather %}
+                    <div class="planner-sidebar-list">
+                        <div class="detail-item"><strong>Temperatura:</strong> {{ selected_weather.temperature_start_c or "-" }} C</div>
+                        <div class="detail-item"><strong>Humedad:</strong> {{ selected_weather.humidity_start_pct or "-" }} %</div>
+                        <div class="detail-item"><strong>Viento:</strong> {{ selected_weather.wind_speed_start_kmh or "-" }} km/h</div>
+                        <div class="detail-item"><strong>Precipitacion:</strong> {{ selected_weather.precipitation_total_mm or selected_weather.precipitation_start_mm or "-" }} mm</div>
+                    </div>
+                    {% else %}
+                    <p class="empty-state">No hay clima sincronizado para este dia.</p>
+                    {% endif %}
+                </section>
+
+                <section class="planner-sidebar-section">
+                    <p class="eyebrow">Objetivos</p>
+                    <div class="planner-sidebar-list">
+                        <div class="detail-item">
+                            <strong>Plan:</strong>
+                            {% if training_plan.goal %}
+                            {{ training_plan.goal.name }}{% if training_plan.goal.event_date %} | {{ training_plan.goal.event_date }}{% endif %}
+                            {% else %}
+                            Sin objetivo principal
+                            {% endif %}
+                        </div>
+                        {% if selected_day_goals.primary or selected_day_goals.secondary %}
+                            {% for goal in selected_day_goals.primary %}
+                            <div class="detail-item"><strong>Principal del dia:</strong> {{ goal.name }}</div>
+                            {% endfor %}
+                            {% for goal in selected_day_goals.secondary %}
+                            <div class="detail-item"><strong>Secundario del dia:</strong> {{ goal.name }}</div>
+                            {% endfor %}
+                        {% else %}
+                        <div class="detail-item"><strong>Dia:</strong> Sin objetivos para esta fecha</div>
+                        {% endif %}
+                    </div>
+                </section>
+            </div>
+        </aside>
+    </div>
+</section>
+{% endblock %}

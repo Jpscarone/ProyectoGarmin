@@ -69,6 +69,50 @@
             </div>
         </section>
 
+        <section class="form-section field-full">
+            <div class="form-section-header">
+                <div>
+                    <h2>Zonas de ritmo</h2>
+                    <p>Carga rangos Z1 a Z5 en formato min/km.</p>
+                </div>
+            </div>
+            <div class="zones-form-grid">
+                {% for row in pace_rows %}
+                <div class="zone-input-card">
+                    <h3>{{ row.name }}</h3>
+                    <label class="field">
+                        <span>Min</span>
+                        <input type="text" name="pace_z{{ loop.index }}_min" value="{{ pace_mmss(row.min) if row.min is not none else '' }}" placeholder="Ej: 6:00">
+                    </label>
+                    <label class="field">
+                        <span>Max</span>
+                        <input type="text" name="pace_z{{ loop.index }}_max" value="{{ pace_mmss(row.max) if row.max is not none else '' }}" placeholder="Ej: 5:30">
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="form-section field-full">
+            <div class="form-section-header">
+                <div>
+                    <h2>Zonas de esfuerzo percibido</h2>
+                    <p>Describe cada zona de forma simple y reutilizable.</p>
+                </div>
+            </div>
+            <div class="zones-form-grid">
+                {% for row in rpe_rows %}
+                <div class="zone-input-card">
+                    <h3>{{ row.name }}</h3>
+                    <label class="field">
+                        <span>Descripcion</span>
+                        <input type="text" name="rpe_z{{ loop.index }}_label" value="{{ row.label }}" placeholder="Ej: Muy suave">
+                    </label>
+                </div>
+                {% endfor %}
+            </div>
+        </section>
+
         <div class="form-actions">
             <button class="button" type="submit">Guardar zonas</button>
         </div>

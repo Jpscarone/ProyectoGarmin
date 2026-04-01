@@ -10,12 +10,26 @@ from app.services.garmin.profile_sync import load_athlete_garmin_snapshot, load_
 
 
 ZONE_NAMES = ["Z1", "Z2", "Z3", "Z4", "Z5"]
+DEFAULT_RPE_LABELS = {
+    "Z1": "Muy suave",
+    "Z2": "Suave",
+    "Z3": "Moderado",
+    "Z4": "Fuerte",
+    "Z5": "Maximo",
+}
 
 
 def build_zone_form_rows(athlete: Athlete) -> dict[str, list[dict[str, Any]]]:
     hr_rows = _rows_for_form(load_zone_payload(athlete.hr_zones_json).get("general"))
     power_rows = _rows_for_form(load_zone_payload(athlete.power_zones_json).get("general"))
-    return {"hr_rows": hr_rows, "power_rows": power_rows}
+    pace_rows = _rows_for_form(load_zone_payload(athlete.pace_zones_json).get("general"))
+    rpe_rows = _rpe_rows_for_form(load_zone_payload(athlete.rpe_zones_json).get("general"))
+    return {
+        "hr_rows": hr_rows,
+        "power_rows": power_rows,
+        "pace_rows": pace_rows,
+        "rpe_rows": rpe_rows,
+    }
 
 
 def update_athlete_zones_manual(
@@ -23,11 +37,15 @@ def update_athlete_zones_manual(
     athlete: Athlete,
     hr_rows: list[dict[str, int | None]],
     power_rows: list[dict[str, int | None]],
+    pace_rows: list[dict[str, int | None]],
+    rpe_rows: list[dict[str, str | None]],
 ) -> list[str]:
     updated_blocks: list[str] = []
 
     normalized_hr = _normalize_rows(hr_rows)
     normalized_power = _normalize_rows(power_rows)
+    normalized_pace = _normalize_rows(pace_rows)
+    normalized_rpe = _normalize_rpe_rows(rpe_rows)
 
     if normalized_hr:
         athlete.hr_zones_json = json.dumps({"general": normalized_hr}, ensure_ascii=True)
@@ -38,6 +56,16 @@ def update_athlete_zones_manual(
         athlete.power_zones_json = json.dumps({"general": normalized_power}, ensure_ascii=True)
         athlete.source_power_zones = "manual"
         updated_blocks.append("zonas de potencia")
+
+    if normalized_pace:
+        athlete.pace_zones_json = json.dumps({"general": normalized_pace}, ensure_ascii=True)
+        athlete.source_pace_zones = "manual"
+        updated_blocks.append("zonas de ritmo")
+
+    if normalized_rpe:
+        athlete.rpe_zones_json = json.dumps({"general": normalized_rpe}, ensure_ascii=True)
+        athlete.source_rpe_zones = "manual"
+        updated_blocks.append("zonas de esfuerzo percibido")
 
     if not updated_blocks:
         raise ValueError("Carga al menos una zona valida para guardar.")
@@ -66,6 +94,12 @@ def use_garmin_zones(db: Session, athlete: Athlete) -> list[str]:
         athlete.power_zones_json = json.dumps(power_zones, ensure_ascii=True)
         athlete.source_power_zones = "garmin"
         updated_blocks.append("zonas de potencia")
+
+    pace_zones = snapshot.get("pace_zones")
+    if pace_zones:
+        athlete.pace_zones_json = json.dumps(pace_zones, ensure_ascii=True)
+        athlete.source_pace_zones = "garmin"
+        updated_blocks.append("zonas de ritmo")
 
     if not updated_blocks:
         raise ValueError("No hay zonas disponibles en el snapshot Garmin.")
@@ -124,6 +158,20 @@ def _rows_for_form(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
     return output
 
 
+def _rpe_rows_for_form(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    normalized = rows or []
+    output: list[dict[str, Any]] = []
+    for index, zone_name in enumerate(ZONE_NAMES):
+        row = normalized[index] if index < len(normalized) else {}
+        output.append(
+            {
+                "name": zone_name,
+                "label": row.get("label") or DEFAULT_RPE_LABELS[zone_name],
+            }
+        )
+    return output
+
+
 def _normalize_rows(rows: list[dict[str, int | None]]) -> list[dict[str, int | None]]:
     normalized: list[dict[str, int | None]] = []
     for index, zone_name in enumerate(ZONE_NAMES):
@@ -133,6 +181,17 @@ def _normalize_rows(rows: list[dict[str, int | None]]) -> list[dict[str, int | N
         if minimum is None and maximum is None:
             continue
         normalized.append({"name": zone_name, "min": minimum, "max": maximum})
+    return normalized
+
+
+def _normalize_rpe_rows(rows: list[dict[str, str | None]]) -> list[dict[str, str]]:
+    normalized: list[dict[str, str]] = []
+    for index, zone_name in enumerate(ZONE_NAMES):
+        row = rows[index] if index < len(rows) else {}
+        label = str(row.get("label") or "").strip()
+        if not label:
+            label = DEFAULT_RPE_LABELS[zone_name]
+        normalized.append({"name": zone_name, "label": label})
     return normalized
 
 

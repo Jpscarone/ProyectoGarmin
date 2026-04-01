@@ -53,8 +53,11 @@
         <div class="detail-item"><strong>Distancia esperada:</strong> {{ distance_label_km(session_template.expected_distance_km) if session_template.expected_distance_km is not none else "-" }}</div>
         <div class="detail-item"><strong>Desnivel esperado:</strong> {{ session_template.expected_elevation_gain_m if session_template.expected_elevation_gain_m is not none else "-" }}</div>
         <div class="detail-item"><strong>Activa:</strong> {{ "Si" if session_template.is_active else "No" }}</div>
+        <div class="detail-item"><strong>Criterio:</strong> {{ intensity_target_label(session_template.target_type) }}</div>
         <div class="detail-item"><strong>Zona FC:</strong> {{ session_template.target_hr_zone or "-" }}</div>
+        <div class="detail-item"><strong>Zona ritmo:</strong> {{ session_template.target_pace_zone or "-" }}</div>
         <div class="detail-item"><strong>Zona potencia:</strong> {{ session_template.target_power_zone or "-" }}</div>
+        <div class="detail-item"><strong>Zona RPE:</strong> {{ session_template.target_rpe_zone or "-" }}</div>
         <div class="detail-item detail-item-full"><strong>Descripcion:</strong> {{ session_template.description_text or "-" }}</div>
         <div class="detail-item detail-item-full"><strong>Notas objetivo:</strong> {{ session_template.target_notes or "-" }}</div>
     </div>

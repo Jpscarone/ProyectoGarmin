@@ -58,8 +58,11 @@ function serializePlannedSession(form) {
         expected_duration_min: hhmmToMinutes(formData.get("expected_duration_hhmm")),
         expected_distance_km: distanceToKm(formData.get("expected_distance_value"), formData.get("expected_distance_unit")),
         expected_elevation_gain_m: emptyToNull(formData.get("expected_elevation_gain_m")),
+        target_type: emptyToNull(formData.get("target_type")),
         target_hr_zone: emptyToNull(formData.get("target_hr_zone")),
+        target_pace_zone: emptyToNull(formData.get("target_pace_zone")),
         target_power_zone: emptyToNull(formData.get("target_power_zone")),
+        target_rpe_zone: emptyToNull(formData.get("target_rpe_zone")),
         target_notes: emptyToNull(formData.get("target_notes")),
         description_text: emptyToNull(formData.get("description_text")),
         is_key_session: formData.get("is_key_session") === "on",
@@ -123,6 +126,19 @@ function distanceToKm(value, unit) {
     return unit === "m" ? numeric / 1000 : numeric;
 }
 
+function syncSessionTargetTypeUi() {
+    const selector = document.getElementById("planned-session-target-type");
+    const activeType = selector?.value || "";
+    document.querySelectorAll('.intensity-target-group').forEach((group) => {
+        const isActive = group.dataset.targetType === activeType;
+        group.hidden = !isActive;
+        group.querySelectorAll("input, select, textarea").forEach((field) => {
+            if (field.name === "target_type") return;
+            field.disabled = !isActive;
+        });
+    });
+}
+
 async function safeError(response) {
     try {
         const data = await response.json();
@@ -161,5 +177,8 @@ if (distanceField) {
         distanceField.value = normalized;
     });
 }
+
+document.getElementById("planned-session-target-type")?.addEventListener("change", syncSessionTargetTypeUi);
+syncSessionTargetTypeUi();
 </script>
 {% endblock %}

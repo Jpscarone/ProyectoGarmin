@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
 from app.schemas.planned_session_step import PlannedSessionStepCreate, PlannedSessionStepUpdate
+from app.services.intensity_target_service import normalize_step_target_fields
 
 
 def get_steps_for_session(db: Session, planned_session_id: int) -> list[PlannedSessionStep]:
@@ -26,7 +27,8 @@ def create_step(db: Session, step_in: PlannedSessionStepCreate) -> PlannedSessio
     if planned_session is None:
         raise ValueError("Planned session not found")
 
-    step = PlannedSessionStep(**step_in.model_dump())
+    data = normalize_step_target_fields(step_in.model_dump(), planned_session.athlete)
+    step = PlannedSessionStep(**data)
     db.add(step)
     db.commit()
     db.refresh(step)
@@ -41,6 +43,8 @@ def update_step(db: Session, step: PlannedSessionStep, step_in: PlannedSessionSt
     if planned_session is None:
         raise ValueError("Planned session not found")
 
+    data = normalize_step_target_fields(data, planned_session.athlete)
+
     for field, value in data.items():
         setattr(step, field, value)
 
@@ -53,3 +57,27 @@ def update_step(db: Session, step: PlannedSessionStep, step_in: PlannedSessionSt
 def delete_step(db: Session, step: PlannedSessionStep) -> None:
     db.delete(step)
     db.commit()
+
+
+def replace_steps_for_session(
+    db: Session,
+    planned_session: PlannedSession,
+    steps_in: list[PlannedSessionStepCreate],
+) -> list[PlannedSessionStep]:
+    existing_steps = get_steps_for_session(db, planned_session.id)
+    for existing_step in existing_steps:
+        db.delete(existing_step)
+
+    created_steps: list[PlannedSessionStep] = []
+    for step_in in steps_in:
+        data = normalize_step_target_fields(step_in.model_dump(), planned_session.athlete)
+        step = PlannedSessionStep(**data)
+        db.add(step)
+        created_steps.append(step)
+
+    db.commit()
+
+    for step in created_steps:
+        db.refresh(step)
+
+    return created_steps

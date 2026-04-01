@@ -5,6 +5,8 @@
 {% block content %}
 {% set session_metrics = derive_session_metrics(planned_session) %}
 {% set linked_activity = planned_session.activity_match.garmin_activity if planned_session.activity_match and planned_session.activity_match.garmin_activity else none %}
+{% set objective_duration_sec = planned_session.expected_duration_min * 60 if planned_session.expected_duration_min is not none else session_metrics.duration_sec %}
+{% set objective_distance_m = (planned_session.expected_distance_km * 1000) | round | int if planned_session.expected_distance_km is not none else session_metrics.distance_m %}
 <section class="panel">
     <div class="section-heading planned-session-header">
         <div>
@@ -22,7 +24,6 @@
                 <button class="button button-utility" type="submit">Vincular actividad</button>
             </form>
             <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar sesion</a>
-            <a class="button" href="/planned_session_steps/create?planned_session_id={{ planned_session.id }}">Agregar paso</a>
             <a class="button button-nav" href="/training_days/{{ training_day.id }}">Volver al dia</a>
         </div>
     </div>
@@ -41,9 +42,8 @@
         <div class="detail-item detail-item-full planned-session-inline-card">
             <div class="planned-session-inline-list">
                 <span class="planned-session-inline-pill"><strong>Deporte:</strong> {{ sport_label(planned_session.sport_type) }}</span>
-                <span class="planned-session-inline-pill"><strong>Duracion objetivo:</strong> {{ duration_seconds_human(session_metrics.duration_sec) or "-" }}{% if session_metrics.duration_is_estimated %} (estimada){% endif %}</span>
-                <span class="planned-session-inline-pill"><strong>Distancia objetivo:</strong> {{ distance_label_meters(session_metrics.distance_m) if session_metrics.distance_m is not none else "-" }}{% if session_metrics.distance_is_estimated %} (estimada){% endif %}</span>
-                <span class="planned-session-inline-pill"><strong>Zona objetivo:</strong> {{ planned_session.target_hr_zone or planned_session.target_power_zone or planned_session.target_notes or "-" }}</span>
+                <span class="planned-session-inline-pill"><strong>Duracion objetivo:</strong> {{ duration_seconds_human(objective_duration_sec) or "-" }}</span>
+                <span class="planned-session-inline-pill"><strong>Distancia objetivo:</strong> {{ distance_label_meters(objective_distance_m) if objective_distance_m is not none else "-" }}</span>
             </div>
         </div>
 
@@ -77,29 +77,6 @@
         </div>
         {% endif %}
     </div>
-    <details class="advanced-panel planned-session-tech-panel">
-        <summary>Ver detalles tecnicos</summary>
-        <div class="detail-grid planned-session-tech-grid">
-            <div class="detail-item"><strong>Orden:</strong> {{ planned_session.session_order }}</div>
-            {% if planned_session.session_type %}
-            <div class="detail-item"><strong>Tipo:</strong> {{ session_type_label(planned_session.session_type) }}</div>
-            {% endif %}
-            {% if planned_session.planned_start_time %}
-            <div class="detail-item"><strong>Hora:</strong> {{ planned_session.planned_start_time.strftime('%H:%M') }}</div>
-            {% endif %}
-            <div class="detail-item"><strong>Zona HR:</strong> {{ planned_session.target_hr_zone or "-" }}</div>
-            <div class="detail-item"><strong>Zona potencia:</strong> {{ planned_session.target_power_zone or "-" }}</div>
-            <div class="detail-item"><strong>Actividad vinculada:</strong>
-                {% if linked_activity %}
-                <a href="/activities/{{ linked_activity.id }}">{{ linked_activity.activity_name or ('Actividad ' ~ linked_activity.id) }}</a>
-                {% else %}
-                Sin actividad vinculada
-                {% endif %}
-            </div>
-            <div class="detail-item"><strong>Metodo:</strong> {{ planned_session.activity_match.match_method if planned_session.activity_match else "-" }}</div>
-            <div class="detail-item detail-item-full"><strong>Notas del matching:</strong> {{ planned_session.activity_match.match_notes if planned_session.activity_match and planned_session.activity_match.match_notes else "-" }}</div>
-        </div>
-    </details>
 </section>
 
 <section class="panel planned-session-steps-panel">
@@ -117,7 +94,8 @@
             {% if block.kind == "repeat" %}
             <article class="session-card repeat-card planned-session-step-card">
                 <div>
-                    <strong>#{{ block.step_order }} Repetir {{ block.repeat_count }} veces</strong>
+                    <strong>{{ loop.index }}º Bloque</strong>
+                    <p class="text-muted">Repetir {{ block.repeat_count }} veces</p>
                     <div class="repeat-step-list">
                         {% for step in block.steps %}
                         <div class="repeat-step-row">
@@ -127,20 +105,18 @@
                                     {% if step.duration_sec and step.distance_m %} | {% endif %}
                                     {% if step.distance_m %}{{ distance_label_meters(step.distance_m) }}{% endif %}
                                 </p>
-                                <p><strong>{{ step.target_notes or step_type_label(step.step_type) }}</strong></p>
                                 <p>
-                                    {% if step.target_hr_min or step.target_hr_max %}HR {{ step.target_hr_min or "-" }}-{{ step.target_hr_max or "-" }} {% endif %}
+                                    {% if step.target_type %}{{ intensity_target_label(step.target_type) }} {% endif %}
+                                    {% if step.target_hr_zone %}| Zona {{ step.target_hr_zone }} {% endif %}
+                                    {% if step.target_pace_zone %}| Zona {{ step.target_pace_zone }} {% endif %}
+                                    {% if step.target_power_zone %}| Zona {{ step.target_power_zone }} {% endif %}
+                                    {% if step.target_rpe_zone %}| Zona {{ step.target_rpe_zone }} {% endif %}
+                                    {% if step.target_hr_min or step.target_hr_max %}| HR {{ step.target_hr_min or "-" }}-{{ step.target_hr_max or "-" }} {% endif %}
                                     {% if step.target_power_min or step.target_power_max %}| Potencia {{ step.target_power_min or "-" }}-{{ step.target_power_max or "-" }} {% endif %}
                                     {% if step.target_pace_min_sec_km or step.target_pace_max_sec_km %}| Ritmo {{ pace_mmss(step.target_pace_min_sec_km) or "-" }}-{{ pace_mmss(step.target_pace_max_sec_km) or "-" }} min/km {% endif %}
                                     {% if step.target_cadence_min or step.target_cadence_max %}| Cadencia {{ step.target_cadence_min or "-" }}-{{ step.target_cadence_max or "-" }}{% endif %}
                                 </p>
                             </div>
-                            {% if step.source_step_id %}
-                            <div class="actions-inline repeat-step-actions">
-                                <a class="button button-secondary" href="/planned_session_steps/{{ step.source_step_id }}/edit">Editar subpaso {{ loop.index }}</a>
-                                <button class="button button-danger" type="button" onclick="deleteStep({{ step.source_step_id }}, {{ planned_session.id }})">Eliminar subpaso {{ loop.index }}</button>
-                            </div>
-                            {% endif %}
                         </div>
                         {% endfor %}
                     </div>
@@ -149,25 +125,23 @@
             {% else %}
             <article class="session-card planned-session-step-card">
                 <div>
-                    <strong>#{{ block.step_order }} Bloque</strong>
+                    <strong>{{ loop.index }}º Bloque</strong>
                     <p class="text-muted">
                         {% if block.duration_sec %}{{ duration_seconds_human(block.duration_sec) }}{% endif %}
                         {% if block.duration_sec and block.distance_m %} | {% endif %}
                         {% if block.distance_m %}{{ distance_label_meters(block.distance_m) }}{% endif %}
                     </p>
                     <p>
-                        {% if block.target_hr_min or block.target_hr_max %}HR {{ block.target_hr_min or "-" }}-{{ block.target_hr_max or "-" }} {% endif %}
+                        {% if block.target_type %}{{ intensity_target_label(block.target_type) }} {% endif %}
+                        {% if block.target_hr_zone %}| Zona {{ block.target_hr_zone }} {% endif %}
+                        {% if block.target_pace_zone %}| Zona {{ block.target_pace_zone }} {% endif %}
+                        {% if block.target_power_zone %}| Zona {{ block.target_power_zone }} {% endif %}
+                        {% if block.target_rpe_zone %}| Zona {{ block.target_rpe_zone }} {% endif %}
+                        {% if block.target_hr_min or block.target_hr_max %}| HR {{ block.target_hr_min or "-" }}-{{ block.target_hr_max or "-" }} {% endif %}
                         {% if block.target_power_min or block.target_power_max %}| Potencia {{ block.target_power_min or "-" }}-{{ block.target_power_max or "-" }} {% endif %}
                         {% if block.target_pace_min_sec_km or block.target_pace_max_sec_km %}| Ritmo {{ pace_mmss(block.target_pace_min_sec_km) or "-" }}-{{ pace_mmss(block.target_pace_max_sec_km) or "-" }} min/km {% endif %}
                         {% if block.target_cadence_min or block.target_cadence_max %}| Cadencia {{ block.target_cadence_min or "-" }}-{{ block.target_cadence_max or "-" }}{% endif %}
                     </p>
-                    <p>{{ block.target_notes or step_type_label(block.step_type) }}</p>
-                </div>
-                <div class="actions-inline">
-                    {% if block.source_step_id %}
-                    <a class="button button-secondary" href="/planned_session_steps/{{ block.source_step_id }}/edit">Editar</a>
-                    <button class="button button-danger" type="button" onclick="deleteStep({{ block.source_step_id }}, {{ planned_session.id }})">Eliminar</button>
-                    {% endif %}
                 </div>
             </article>
             {% endif %}
@@ -201,18 +175,4 @@
     {% endif %}
 </section>
 
-<script>
-async function deleteStep(stepId, plannedSessionId) {
-    const confirmed = window.confirm("Eliminar este paso?");
-    if (!confirmed) return;
-
-    const response = await fetch(`/planned_session_steps/${stepId}`, { method: "DELETE", headers: { "Accept": "application/json" } });
-    if (!response.ok) {
-        window.alert("No se pudo eliminar el paso.");
-        return;
-    }
-
-    window.location.href = `/planned_sessions/${plannedSessionId}`;
-}
-</script>
 {% endblock %}

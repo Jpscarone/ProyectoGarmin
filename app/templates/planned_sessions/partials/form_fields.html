@@ -5,7 +5,7 @@
         <h2>Descripcion de la sesion</h2>
         <p class="text-muted">Resumen general para entender rapido el objetivo de la sesion.</p>
     </div>
-    <div class="form-grid planned-session-edit-description-panel">
+    <div class="form-grid">
         <label class="field field-full">
             <span>Descripcion</span>
             <textarea name="description_text" rows="4" placeholder="Detalles libres de la sesion.">{{ planned_session.description_text if planned_session and planned_session.description_text else '' }}</textarea>
@@ -144,6 +144,17 @@
         </label>
 
         <label class="field">
+            <span>Criterio de intensidad</span>
+            {% set current_target_type = planned_session.target_type if planned_session and planned_session.target_type else ('power' if planned_session and planned_session.target_power_zone else 'pace' if planned_session and planned_session.target_pace_zone else 'rpe' if planned_session and planned_session.target_rpe_zone else 'hr' if planned_session and planned_session.target_hr_zone else '') %}
+            <select name="target_type" id="planned-session-target-type">
+                <option value="">Sin criterio</option>
+                {% for option in intensity_target_options %}
+                <option value="{{ option.value }}" {% if current_target_type == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field intensity-target-group" data-target-type="hr">
             <span>Zona FC objetivo</span>
             <select name="target_hr_zone">
                 <option value="">Sin zona</option>
@@ -154,13 +165,35 @@
             </select>
         </label>
 
-        <label class="field">
+        <label class="field intensity-target-group" data-target-type="pace">
+            <span>Zona de ritmo objetivo</span>
+            <select name="target_pace_zone">
+                <option value="">Sin zona</option>
+                {% set current_pace_zone = planned_session.target_pace_zone if planned_session and planned_session.target_pace_zone else '' %}
+                {% for option in zone_options %}
+                <option value="{{ option.value }}" {% if current_pace_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field intensity-target-group" data-target-type="power">
             <span>Zona potencia objetivo</span>
             <select name="target_power_zone">
                 <option value="">Sin zona</option>
                 {% set current_power_zone = planned_session.target_power_zone if planned_session and planned_session.target_power_zone else '' %}
                 {% for option in zone_options %}
                 <option value="{{ option.value }}" {% if current_power_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field intensity-target-group" data-target-type="rpe">
+            <span>Zona de esfuerzo percibido</span>
+            <select name="target_rpe_zone">
+                <option value="">Sin zona</option>
+                {% set current_rpe_zone = planned_session.target_rpe_zone if planned_session and planned_session.target_rpe_zone else '' %}
+                {% for option in rpe_zone_options %}
+                <option value="{{ option.value }}" {% if current_rpe_zone == option.value %}selected{% endif %}>{{ option.label }}</option>
                 {% endfor %}
             </select>
         </label>
