@@ -184,8 +184,8 @@
             </div>
             <div class="detail-grid sync-summary">
                 <div class="detail-pill detail-pill-full"><strong>Directorio de tokens:</strong> {{ garmin_auth_diagnostics.token_dir }}</div>
-                <div class="detail-pill"><strong>OAuth1:</strong> {{ 'Disponible' if garmin_auth_diagnostics.oauth1_exists else 'No encontrado' }}</div>
-                <div class="detail-pill"><strong>OAuth2:</strong> {{ 'Disponible' if garmin_auth_diagnostics.oauth2_exists else 'No encontrado' }}</div>
+                <div class="detail-pill"><strong>Archivo de tokens:</strong> {{ 'Disponible' if garmin_auth_diagnostics.token_file_exists else 'No encontrado' }}</div>
+                <div class="detail-pill"><strong>Ruta tokens:</strong> {{ garmin_auth_diagnostics.token_file }}</div>
                 <div class="detail-pill"><strong>Sesion reutilizable:</strong> {{ 'Si' if garmin_auth_diagnostics.tokens_usable else 'No' }}</div>
                 <div class="detail-pill"><strong>MFA pendiente:</strong> {{ 'Si' if garmin_auth_diagnostics.needs_mfa else 'No' }}</div>
                 <div class="detail-pill">
@@ -196,6 +196,9 @@
                     No
                     {% endif %}
                 </div>
+                {% if garmin_auth_diagnostics.last_auth_error %}
+                <div class="detail-pill detail-pill-full"><strong>Ultimo error Garmin:</strong> {{ garmin_auth_diagnostics.last_auth_error }}</div>
+                {% endif %}
             </div>
         </section>
 
