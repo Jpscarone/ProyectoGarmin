@@ -28,14 +28,81 @@
     <div class="alert alert-info">{{ status_message }}</div>
     {% endif %}
 
+    {% if report_view.conclusion %}
+    <div class="analysis-ai-highlight">
+        <p class="eyebrow">Analisis de Inteligencia Artificial</p>
+        <h2>Lectura principal</h2>
+        <p class="analysis-ai-highlight-text">{{ report_view.conclusion }}</p>
+    </div>
+    {% endif %}
+
     <div class="detail-grid">
         <div class="detail-item"><strong>Score general:</strong> {{ report.overall_score if report.overall_score is not none else '-' }}</div>
         <div class="detail-item"><strong>Estado general:</strong> {{ analysis_status_label(report.overall_status) }}</div>
         <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ report.summary_text or '-' }}</div>
         <div class="detail-item detail-item-full"><strong>Recomendacion:</strong> {{ report.recommendation_text or '-' }}</div>
+        {% if report_view.highlights %}
+        <div class="detail-item detail-item-full">
+            <strong>Diferencias principales</strong>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Metricas</th>
+                        <th>Planificado</th>
+                        <th>Real</th>
+                        <th>Diferencia</th>
+                        <th>Diferencia %</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report_view.highlights %}
+                    <tr>
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.planned }}</td>
+                        <td>{{ row.actual }}</td>
+                        <td>{{ row.difference }}</td>
+                        <td>{{ row.difference_pct }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+        {% if report_view.blocks.rows %}
+        <div class="detail-item detail-item-full">
+            <strong>Bloques y laps</strong>
+            <p class="text-muted">
+                Emparejados: {{ report_view.blocks.matched_count }} |
+                Bloques sin lap: {{ report_view.blocks.missing_planned_steps }} |
+                Laps extra: {{ report_view.blocks.extra_laps }}
+            </p>
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Referencia</th>
+                        <th>Planificado</th>
+                        <th>Real</th>
+                        <th>Estado</th>
+                        <th>Score</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in report_view.blocks.rows %}
+                    <tr>
+                        <td>{{ row.label }}</td>
+                        <td>{{ row.planned or '-' }}</td>
+                        <td>{{ row.actual or '-' }}</td>
+                        <td>{{ analysis_status_label(row.status) }}</td>
+                        <td>{{ row.score if row.score is not none else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
         <details class="detail-item detail-item-full">
             <summary><strong>Contexto y score</strong></summary>
-            <pre class="raw-json">{{ report.analysis_context_json or '-' }}</pre>
+            <pre class="raw-json">{{ report_view.context_pretty }}</pre>
         </details>
     </div>
 </section>

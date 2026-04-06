@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from app.db.models.garmin_activity import GarminActivity
     from app.db.models.goal import Goal
     from app.db.models.planned_session import PlannedSession
+    from app.db.models.session_analysis import SessionAnalysis
+    from app.db.models.weekly_analysis import WeeklyAnalysis
     from app.db.models.training_day import TrainingDay
     from app.db.models.training_plan import TrainingPlan
 
@@ -86,4 +88,13 @@ class Athlete(Base):
     analysis_reports: Mapped[list["AnalysisReport"]] = relationship(
         back_populates="athlete",
         cascade="all, delete-orphan",
+    )
+    session_analyses: Mapped[list["SessionAnalysis"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+    )
+    weekly_analyses: Mapped[list["WeeklyAnalysis"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+        order_by="WeeklyAnalysis.week_start_date.desc()",
     )

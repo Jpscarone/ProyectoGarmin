@@ -12,10 +12,12 @@ from app.db.models.goal import Goal
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
 from app.db.models.session_group import SessionGroup
+from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.session_template import SessionTemplate
 from app.db.models.session_template_step import SessionTemplateStep
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
+from app.db.models.weekly_analysis import WeeklyAnalysis
 
 __all__ = [
     "ActivitySessionMatch",
@@ -32,6 +34,8 @@ __all__ = [
     "PlannedSession",
     "PlannedSessionStep",
     "SessionGroup",
+    "SessionAnalysis",
     "SessionTemplate",
     "SessionTemplateStep",
+    "WeeklyAnalysis",
 ]

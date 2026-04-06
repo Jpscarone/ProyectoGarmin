@@ -11,14 +11,13 @@
             <p class="text-muted">{{ sport_label(activity.sport_type) }} | {{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</p>
         </div>
         <div class="actions-inline">
-            <form method="post" action="/match/activity/{{ activity.id }}">
-                <button class="button button-utility" type="submit">Recalcular vinculacion</button>
+            <form method="post" action="/activities/{{ activity.id }}/auto-match">
+                <button class="button button-utility" type="submit">Auto-match</button>
             </form>
             <form method="post" action="/analysis/activity/{{ activity.id }}">
                 <button class="button button-utility" type="submit">Analizar actividad</button>
             </form>
             <a class="button button-utility" href="/analysis/bundle/activity/{{ activity.id }}">Generar bundle</a>
-            <a class="button button-utility" href="/analysis/bundle/activity/{{ activity.id }}#chatgpt">Ver resumen para ChatGPT</a>
             <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
             <a class="button button-nav" href="/activities">Volver a actividades</a>
         </div>
@@ -33,6 +32,71 @@
     {% if analysis_status %}
     <div class="alert alert-info">{{ analysis_status }}</div>
     {% endif %}
+
+    <div class="detail-item detail-item-full activity-match-hero">
+        <div class="activity-match-hero-main">
+            <div>
+                <p class="eyebrow">Matching</p>
+                <h2 class="activity-match-hero-title">
+                    {% if activity.activity_match and activity.activity_match.planned_session %}
+                    <a href="/planned_sessions/{{ activity.activity_match.planned_session.id }}">{{ activity.activity_match.planned_session.name }}</a>
+                    {% elif match_preview.candidate_sessions %}
+                    {{ match_preview.candidate_sessions[0].session_name }}
+                    {% else %}
+                    Sin sesion candidata confiable
+                    {% endif %}
+                </h2>
+                <p class="text-muted">
+                    {% if activity.activity_match and activity.activity_match.planned_session %}
+                    Vinculacion {{ match_method_label(activity.activity_match.match_method) }}.
+                    {% elif match_preview.status == 'ambiguous' %}
+                    Hay varias candidatas fuertes y conviene decidir manualmente.
+                    {% elif match_preview.status == 'candidate' %}
+                    Hay una candidata razonable, pero no se auto-confirmo.
+                    {% else %}
+                    Todavia no hay una vinculacion confirmada para esta actividad.
+                    {% endif %}
+                </p>
+            </div>
+            <div class="activity-match-hero-side">
+                <span class="status-badge {{ 'status-badge-active' if match_preview.status == 'matched' else 'status-badge-manual' if match_preview.status in ['candidate', 'ambiguous'] else 'status-badge-empty' }}">
+                    {{ match_preview_status_label }}
+                </span>
+                <span class="planned-session-inline-pill"><strong>Score:</strong> {{ match_preview.score if match_preview.score is not none else '-' }}</span>
+                <span class="planned-session-inline-pill"><strong>Confianza:</strong> {% if match_preview.confidence is not none %}{{ (match_preview.confidence * 100)|round|int }}%{% else %}-{% endif %}</span>
+            </div>
+        </div>
+        {% if match_preview.explanations %}
+        <p class="activity-match-summary">{{ match_preview.explanations | join(' ') }}</p>
+        {% endif %}
+        {% if match_preview.candidate_sessions and match_preview.status != 'matched' %}
+        <div class="activity-match-candidate-list">
+            {% for candidate in match_preview.candidate_sessions %}
+            <article class="activity-match-candidate-card">
+                <div class="activity-match-candidate-head">
+                    <strong><a href="/planned_sessions/{{ candidate.planned_session_id }}">{{ candidate.session_name }}</a></strong>
+                    <span class="status-badge status-badge-empty">score {{ candidate.score }}</span>
+                </div>
+                <p class="text-muted">{{ candidate.session_date }} | {{ sport_label(candidate.sport_type) }}</p>
+                <p class="activity-match-candidate-reasons">{{ candidate.reasons | join(', ') }}</p>
+            </article>
+            {% endfor %}
+        </div>
+        <div class="activity-match-manual-row">
+            <strong>Elegir manualmente:</strong>
+            <form method="post" action="/activities/{{ activity.id }}/manual-match" class="activity-match-manual-form">
+                <select name="planned_session_id">
+                    {% for candidate in match_preview.candidate_sessions %}
+                    <option value="{{ candidate.planned_session_id }}">
+                        {{ candidate.session_date }} | {{ candidate.session_name }} | score {{ candidate.score }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button class="button button-secondary" type="submit">Confirmar</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
 
     <div class="detail-grid">
         <div class="detail-item"><strong>Garmin ID:</strong> {{ activity.garmin_activity_id }}</div>

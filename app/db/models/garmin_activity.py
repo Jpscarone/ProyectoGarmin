@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.db.models.analysis_report import AnalysisReport
     from app.db.models.athlete import Athlete
     from app.db.models.garmin_activity_lap import GarminActivityLap
+    from app.db.models.session_analysis import SessionAnalysis
 
 
 class GarminActivity(Base):
@@ -81,5 +82,9 @@ class GarminActivity(Base):
     )
     analysis_reports: Mapped[list["AnalysisReport"]] = relationship(
         back_populates="garmin_activity",
+        cascade="all, delete-orphan",
+    )
+    session_analyses: Mapped[list["SessionAnalysis"]] = relationship(
+        back_populates="activity",
         cascade="all, delete-orphan",
     )

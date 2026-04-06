@@ -1,0 +1,399 @@
+{% extends "base.html" %}
+
+{% block title %}Analisis semanal V2 | {{ athlete.name }}{% endblock %}
+
+{% block content %}
+<section class="panel analysis-v2-page">
+    <div class="section-heading analysis-v2-header">
+        <div>
+            <p class="eyebrow">Analisis semanal V2</p>
+            <h1>{{ view_model.header.title }}</h1>
+            <p class="analysis-weekly-subtitle">{{ view_model.header.subtitle }}</p>
+            <div class="analysis-v2-meta">
+                <span>{{ view_model.header.week_range }}</span>
+                {% for item in view_model.header.totals %}
+                <span><strong>{{ item.label }}:</strong> {{ item.value }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="actions-inline">
+            <form method="post" action="/analysis/weekly/{{ athlete.id }}/{{ view_model.header.week_start_date }}/re-run">
+                <button class="button button-utility" type="submit">Reanalizar semana</button>
+            </form>
+            <a class="button button-nav" href="/athletes/{{ athlete.id }}">Ver atleta</a>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <div class="analysis-v2-status-row">
+        <span class="analysis-v2-status-pill {{ view_model.header.status_class }}">{{ view_model.header.status_label }}</span>
+        {% if view_model.week_type_detected != '-' %}
+        <span class="analysis-v2-status-pill analysis-status-neutral">Semana detectada: {{ view_model.week_type_detected }}</span>
+        {% endif %}
+        <span class="analysis-v2-status-pill analysis-status-neutral">
+            Cumplimiento: {{ view_model.compliance.completed or 0 }}/{{ view_model.compliance.planned or 0 }} ({{ view_model.compliance.ratio_pct }})
+        </span>
+    </div>
+
+    {% if view_model.state.message %}
+    <div class="alert {% if view_model.state.is_error %}alert-danger{% elif view_model.state.is_pending %}alert-info{% else %}alert-warning{% endif %}">
+        {{ view_model.state.message }}
+    </div>
+    {% endif %}
+</section>
+
+<section class="panel analysis-v2-hero">
+    <div class="analysis-v2-conclusion-card">
+        <p class="eyebrow">Conclusion semanal</p>
+        <h2>{{ view_model.conclusion }}</h2>
+        <p class="analysis-v2-summary-short">{{ view_model.summary_short }}</p>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Semaforo</p>
+            <h2>Lectura rapida</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-score-grid">
+        {% for score in view_model.scores %}
+        <article class="analysis-v2-score-card {{ score.class }}">
+            <span class="analysis-v2-score-label">{{ score.label }}</span>
+            <strong class="analysis-v2-score-value">{{ score.value }}</strong>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+
+{% if view_model.main_findings %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Resumen</p>
+            <h2>Hallazgos principales</h2>
+        </div>
+    </div>
+    <ul class="analysis-v2-list">
+        {% for item in view_model.main_findings %}
+        <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
+
+{% if view_model.charts.show_daily_load or view_model.charts.show_volume or view_model.charts.show_sports or view_model.charts.show_intensity %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Graficos</p>
+            <h2>Lectura visual de la semana</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-chart-grid analysis-weekly-chart-grid">
+        {% if view_model.charts.show_daily_load %}
+        <article class="analysis-v2-chart-card">
+            <h3>Carga diaria</h3>
+            <canvas id="weeklyDailyLoadChart"></canvas>
+        </article>
+        {% endif %}
+        {% if view_model.charts.show_volume %}
+        <article class="analysis-v2-chart-card">
+            <h3>Volumen semanal</h3>
+            <canvas id="weeklyVolumeChart"></canvas>
+        </article>
+        {% endif %}
+        {% if view_model.charts.show_sports %}
+        <article class="analysis-v2-chart-card">
+            <h3>Distribucion por deporte</h3>
+            <canvas id="weeklySportChart"></canvas>
+        </article>
+        {% endif %}
+        {% if view_model.charts.show_intensity %}
+        <article class="analysis-v2-chart-card">
+            <h3>Intensidad / zonas</h3>
+            <canvas id="weeklyIntensityChart"></canvas>
+        </article>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+{% if view_model.comparisons.rows %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Tendencia</p>
+            <h2>Comparacion con semanas previas</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-comparison-summary">
+        {% for item in view_model.comparisons.summary %}
+        <span><strong>{{ item.label }}:</strong> {{ item.value }}</span>
+        {% endfor %}
+    </div>
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Semana</th>
+                    <th>Duracion</th>
+                    <th>Distancia</th>
+                    <th>Desnivel</th>
+                    <th>Actividades</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in view_model.comparisons.rows %}
+                <tr>
+                    <td>{{ row.range }}</td>
+                    <td>{{ row.duration }}</td>
+                    <td>{{ row.distance }}</td>
+                    <td>{{ row.elevation }}</td>
+                    <td>{{ row.activities }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
+<section class="analysis-v2-two-column">
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Lectura positiva</p>
+                <h2>Que salio bien</h2>
+            </div>
+        </div>
+        {% if view_model.positives %}
+        <ul class="analysis-v2-list">
+            {% for item in view_model.positives %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">Todavia no hay puntos positivos destacados.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Alertas</p>
+                <h2>Que hay que vigilar</h2>
+            </div>
+        </div>
+        {% if view_model.risks %}
+        <ul class="analysis-v2-list analysis-v2-list-risk">
+            {% for item in view_model.risks %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">No hay alertas mayores marcadas para esta semana.</p>
+        {% endif %}
+    </section>
+</section>
+
+<section class="panel analysis-v2-recommendation-panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Proxima semana</p>
+            <h2>Recomendacion</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-recommendation-card">
+        {{ view_model.recommendation }}
+    </div>
+</section>
+
+<section class="panel">
+    <details class="analysis-v2-technical-details">
+        <summary>Ver detalle tecnico</summary>
+
+        <div class="analysis-v2-technical-grid">
+            <article class="analysis-v2-technical-card">
+                <h3>Actividades de la semana</h3>
+                {% if view_model.technical.activities %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Titulo</th>
+                                <th>Deporte</th>
+                                <th>Duracion</th>
+                                <th>Distancia</th>
+                                <th>FC media</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in view_model.technical.activities %}
+                            <tr>
+                                <td>{{ row.date }}</td>
+                                <td>{{ row.title }}</td>
+                                <td>{{ row.sport }}</td>
+                                <td>{{ row.duration }}</td>
+                                <td>{{ row.distance }}</td>
+                                <td>{{ row.avg_hr }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="empty-state">Sin actividades registradas.</p>
+                {% endif %}
+            </article>
+
+            <article class="analysis-v2-technical-card">
+                <h3>Sesiones planificadas</h3>
+                {% if view_model.technical.planned %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Sesion</th>
+                                <th>Deporte</th>
+                                <th>Duracion</th>
+                                <th>Distancia</th>
+                                <th>Cumplida</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in view_model.technical.planned %}
+                            <tr>
+                                <td>{{ row.date }}</td>
+                                <td>{{ row.title }}</td>
+                                <td>{{ row.sport }}</td>
+                                <td>{{ row.duration }}</td>
+                                <td>{{ row.distance }}</td>
+                                <td>{{ row.matched }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="empty-state">Sin sesiones planificadas.</p>
+                {% endif %}
+            </article>
+
+            <article class="analysis-v2-technical-card">
+                <h3>Salud semanal</h3>
+                {% if view_model.technical.health_days %}
+                <div class="table-wrap">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Fecha</th>
+                                <th>Sueno</th>
+                                <th>Stress</th>
+                                <th>Body Battery</th>
+                                <th>HRV</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in view_model.technical.health_days %}
+                            <tr>
+                                <td>{{ row.date }}</td>
+                                <td>{{ row.sleep }}</td>
+                                <td>{{ row.stress }}</td>
+                                <td>{{ row.body_battery }}</td>
+                                <td>{{ row.hrv }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="empty-state">Sin metricas de salud para esta semana.</p>
+                {% endif %}
+            </article>
+
+            <article class="analysis-v2-technical-card">
+                <h3>Metrics JSON</h3>
+                <pre class="raw-json">{{ view_model.technical.metrics_pretty }}</pre>
+            </article>
+
+            <article class="analysis-v2-technical-card">
+                <h3>LLM JSON</h3>
+                <pre class="raw-json">{{ view_model.technical.llm_pretty }}</pre>
+            </article>
+        </div>
+    </details>
+</section>
+
+{% if view_model.charts.show_daily_load or view_model.charts.show_volume or view_model.charts.show_sports or view_model.charts.show_intensity %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const weeklyCharts = {{ view_model.charts|tojson }};
+
+if (weeklyCharts.show_daily_load) {
+  new Chart(document.getElementById("weeklyDailyLoadChart"), {
+    type: "bar",
+    data: {
+      labels: weeklyCharts.daily_load.labels,
+      datasets: [{
+        label: "Horas por dia",
+        data: weeklyCharts.daily_load.values,
+        backgroundColor: "rgba(37, 99, 235, 0.72)"
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+
+if (weeklyCharts.show_volume) {
+  new Chart(document.getElementById("weeklyVolumeChart"), {
+    type: "bar",
+    data: {
+      labels: weeklyCharts.volume.labels,
+      datasets: [{
+        label: "Horas semanales",
+        data: weeklyCharts.volume.values,
+        backgroundColor: "rgba(245, 158, 11, 0.72)"
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+
+if (weeklyCharts.show_sports) {
+  new Chart(document.getElementById("weeklySportChart"), {
+    type: "pie",
+    data: {
+      labels: weeklyCharts.sports.labels,
+      datasets: [{
+        data: weeklyCharts.sports.values,
+        backgroundColor: ["#2563EB", "#3C5F83", "#2F7D5B", "#B58B21", "#B44D4D", "#8B5CF6"]
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+
+if (weeklyCharts.show_intensity) {
+  new Chart(document.getElementById("weeklyIntensityChart"), {
+    type: "bar",
+    data: {
+      labels: weeklyCharts.intensity.labels,
+      datasets: [{
+        label: "Distribucion",
+        data: weeklyCharts.intensity.values,
+        backgroundColor: ["#A7F3D0", "#93C5FD", "#FDE68A", "#FCA5A5", "#CBD5E1"]
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+</script>
+{% endif %}
+{% endblock %}

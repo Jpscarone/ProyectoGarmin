@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     garmin_email: str | None = None
     garmin_password: str | None = None
     garmin_token_dir: str = str(BASE_DIR / ".garmin_tokens")
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4.1-mini"
+    openai_timeout_sec: float = 30.0
+    openai_max_output_tokens_session: int = 800
+    openai_max_output_tokens_week: int = 1500
 
     @field_validator("debug", "garmin_enabled", mode="before")
     @classmethod

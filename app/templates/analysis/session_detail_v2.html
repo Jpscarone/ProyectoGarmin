@@ -1,0 +1,308 @@
+{% extends "base.html" %}
+
+{% block title %}Analisis V2 | {{ planned_session.name }}{% endblock %}
+
+{% block content %}
+<section class="panel analysis-v2-page">
+    <div class="section-heading analysis-v2-header">
+        <div>
+            <p class="eyebrow">Analisis V2</p>
+            <h1>{{ view_model.header.title }}</h1>
+            <div class="analysis-v2-meta">
+                <span>{{ view_model.header.date_label }}</span>
+                <span>{{ view_model.header.sport_label }}</span>
+                <span>{{ view_model.header.duration_label }}</span>
+                <span>{{ view_model.header.distance_label }}</span>
+            </div>
+        </div>
+        <div class="actions-inline">
+            <form method="post" action="/planned_sessions/{{ planned_session.id }}/analysis/re-run">
+                <button class="button button-utility" type="submit">Reanalizar sesion</button>
+            </form>
+            <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+            <a class="button button-secondary" href="/training_days/{{ training_day.id }}">Volver al dia</a>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+
+    <div class="analysis-v2-status-row">
+        <span class="analysis-v2-status-pill {{ view_model.header.status_class }}">{{ view_model.header.status_label }}</span>
+        {% if view_model.session_type_detected != '-' %}
+        <span class="analysis-v2-status-pill analysis-status-neutral">Tipo detectado: {{ view_model.session_type_detected }}</span>
+        {% endif %}
+        {% if view_model.overall_assessment != '-' %}
+        <span class="analysis-v2-status-pill analysis-status-neutral">Lectura general: {{ view_model.overall_assessment }}</span>
+        {% endif %}
+    </div>
+
+    {% if view_model.state.message %}
+    <div class="alert {% if view_model.state.is_error %}alert-danger{% elif view_model.state.is_pending %}alert-info{% else %}alert-warning{% endif %}">
+        {{ view_model.state.message }}
+    </div>
+    {% endif %}
+</section>
+
+<section class="panel analysis-v2-hero">
+    <div class="analysis-v2-conclusion-card">
+        <p class="eyebrow">Conclusion principal</p>
+        <h2>{{ view_model.conclusion.coach_conclusion }}</h2>
+        <p class="analysis-v2-summary-short">{{ view_model.conclusion.summary_short }}</p>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Semaforo</p>
+            <h2>Lectura rapida</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-score-grid">
+        {% for score in view_model.scores %}
+        <article class="analysis-v2-score-card {{ score.class }}">
+            <span class="analysis-v2-score-label">{{ score.label }}</span>
+            <strong class="analysis-v2-score-value">{{ score.value }}</strong>
+        </article>
+        {% endfor %}
+    </div>
+</section>
+
+<section class="analysis-v2-two-column">
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Lectura positiva</p>
+                <h2>Que salio bien</h2>
+            </div>
+        </div>
+        {% if view_model.positives %}
+        <ul class="analysis-v2-list">
+            {% for item in view_model.positives %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">Todavia no hay puntos positivos destacados.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Alertas</p>
+                <h2>Que hay que mejorar</h2>
+            </div>
+        </div>
+        {% if view_model.risks %}
+        <ul class="analysis-v2-list analysis-v2-list-risk">
+            {% for item in view_model.risks %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="empty-state">No hay alertas marcadas para esta sesion.</p>
+        {% endif %}
+    </section>
+</section>
+
+<section class="panel analysis-v2-recommendation-panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Siguiente paso</p>
+            <h2>Recomendacion</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-recommendation-card">
+        {{ view_model.recommendation }}
+    </div>
+</section>
+
+{% if view_model.charts.show_hr or view_model.charts.show_pace or view_model.charts.show_zones %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Graficos</p>
+            <h2>Tendencias simples</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-chart-grid">
+        {% if view_model.charts.show_hr %}
+        <article class="analysis-v2-chart-card">
+            <h3>FC por lap</h3>
+            <canvas id="analysisHrChart"></canvas>
+        </article>
+        {% endif %}
+        {% if view_model.charts.show_pace %}
+        <article class="analysis-v2-chart-card">
+            <h3>Ritmo por lap</h3>
+            <canvas id="analysisPaceChart"></canvas>
+        </article>
+        {% endif %}
+        {% if view_model.charts.show_zones %}
+        <article class="analysis-v2-chart-card">
+            <h3>Zonas estimadas</h3>
+            <canvas id="analysisZoneChart"></canvas>
+        </article>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+{% if view_model.recent_comparison %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Comparacion</p>
+            <h2>Sesiones recientes similares</h2>
+        </div>
+    </div>
+
+    <div class="analysis-v2-comparison-summary">
+        <span><strong>Duracion vs promedio:</strong> {{ view_model.recent_comparison.averages.duration_vs_avg_pct }}</span>
+        <span><strong>Distancia vs promedio:</strong> {{ view_model.recent_comparison.averages.distance_vs_avg_pct }}</span>
+        <span><strong>FC media vs promedio:</strong> {{ view_model.recent_comparison.averages.avg_hr_vs_avg }}</span>
+        <span><strong>Ritmo vs promedio:</strong> {{ view_model.recent_comparison.averages.avg_pace_vs_avg_sec_km }}</span>
+    </div>
+
+    <div class="table-wrap">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Fecha</th>
+                    <th>Sesion</th>
+                    <th>Duracion</th>
+                    <th>Distancia</th>
+                    <th>FC media</th>
+                    <th>Ritmo medio</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in view_model.recent_comparison.rows %}
+                <tr>
+                    <td>{{ row.date }}</td>
+                    <td>{{ row.title }}</td>
+                    <td>{{ row.duration }}</td>
+                    <td>{{ row.distance }}</td>
+                    <td>{{ row.avg_hr }}</td>
+                    <td>{{ row.avg_pace }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
+<section class="panel">
+    <details class="analysis-v2-technical-details">
+        <summary>Ver detalle tecnico</summary>
+
+        {% if view_model.technical.error_message %}
+        <div class="alert alert-warning">{{ view_model.technical.error_message }}</div>
+        {% endif %}
+
+        {% if view_model.technical.lap_rows %}
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Lap</th>
+                        <th>Duracion</th>
+                        <th>Distancia</th>
+                        <th>FC</th>
+                        <th>Ritmo</th>
+                        <th>Potencia</th>
+                        <th>Cadencia</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lap in view_model.technical.lap_rows %}
+                    <tr>
+                        <td>{{ lap.name }}</td>
+                        <td>{{ lap.duration }}</td>
+                        <td>{{ lap.distance }}</td>
+                        <td>{{ lap.avg_hr }}</td>
+                        <td>{{ lap.pace }}</td>
+                        <td>{{ lap.power }}</td>
+                        <td>{{ lap.cadence }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        <div class="analysis-v2-technical-grid">
+            <article class="analysis-v2-technical-card">
+                <h3>Metrics JSON</h3>
+                <pre class="raw-json">{{ view_model.technical.metrics_pretty }}</pre>
+            </article>
+            <article class="analysis-v2-technical-card">
+                <h3>LLM JSON</h3>
+                <pre class="raw-json">{{ view_model.technical.llm_pretty }}</pre>
+            </article>
+        </div>
+    </details>
+</section>
+
+{% if view_model.charts.show_hr or view_model.charts.show_pace or view_model.charts.show_zones %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+const chartData = {{ view_model.charts|tojson }};
+
+if (chartData.show_hr) {
+  new Chart(document.getElementById("analysisHrChart"), {
+    type: "line",
+    data: {
+      labels: chartData.hr.labels,
+      datasets: [{
+        label: "FC media",
+        data: chartData.hr.values,
+        borderColor: "#2563EB",
+        backgroundColor: "rgba(37, 99, 235, 0.18)",
+        tension: 0.25,
+        fill: true
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+
+if (chartData.show_pace) {
+  new Chart(document.getElementById("analysisPaceChart"), {
+    type: "line",
+    data: {
+      labels: chartData.pace.labels,
+      datasets: [{
+        label: "Ritmo medio (min/km)",
+        data: chartData.pace.values,
+        borderColor: "#F59E0B",
+        backgroundColor: "rgba(245, 158, 11, 0.18)",
+        tension: 0.25,
+        fill: true
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+
+if (chartData.show_zones) {
+  new Chart(document.getElementById("analysisZoneChart"), {
+    type: "bar",
+    data: {
+      labels: chartData.zones.labels,
+      datasets: [{
+        label: "% estimado",
+        data: chartData.zones.values,
+        backgroundColor: ["#93C5FD", "#60A5FA", "#3B82F6", "#2563EB", "#1D4ED8"]
+      }]
+    },
+    options: { responsive: true, maintainAspectRatio: false }
+  });
+}
+</script>
+{% endif %}
+{% endblock %}

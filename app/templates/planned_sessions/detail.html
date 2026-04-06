@@ -15,9 +15,7 @@
             <p class="text-muted">Fecha: {{ training_day.day_date.strftime('%d/%m/%Y') if training_day.day_date else '-' }} | Plan: {{ training_day.training_plan.name }}{% if planned_session.session_group %} | Grupo: {{ planned_session.session_group.name }}{% endif %}</p>
         </div>
         <div class="actions-inline">
-            <form method="post" action="/analysis/session/{{ planned_session.id }}">
-                <button class="button button-utility" type="submit">Analizar sesion</button>
-            </form>
+            <a class="button button-utility" href="/planned_sessions/{{ planned_session.id }}/analysis">Ver analisis V2</a>
             <a class="button button-utility" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
             <a class="button button-utility" href="/analysis/bundle/session/{{ planned_session.id }}">Generar bundle</a>
             <form method="post" action="/match/day/{{ training_day.id }}">
@@ -162,6 +160,13 @@
 
     {% if latest_report %}
     <div class="planned-session-analysis-grid">
+        {% if latest_report.final_conclusion_text %}
+        <div class="detail-item detail-item-full analysis-ai-highlight analysis-ai-highlight-compact">
+            <p class="eyebrow">Analisis de Inteligencia Artificial</p>
+            <h3>Lectura principal de la sesion</h3>
+            <p class="analysis-ai-highlight-text">{{ latest_report.final_conclusion_text }}</p>
+        </div>
+        {% endif %}
         <div class="detail-item"><strong>Estado:</strong> {{ analysis_status_label(latest_report.overall_status) }}</div>
         <div class="detail-item"><strong>Score:</strong> {{ latest_report.overall_score if latest_report.overall_score is not none else '-' }}</div>
         <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from app.db.models.analysis_report import AnalysisReport
     from app.db.models.athlete import Athlete
     from app.db.models.planned_session_step import PlannedSessionStep
+    from app.db.models.session_analysis import SessionAnalysis
     from app.db.models.session_group import SessionGroup
     from app.db.models.training_day import TrainingDay
 
@@ -64,6 +65,10 @@ class PlannedSession(Base):
         uselist=False,
     )
     analysis_reports: Mapped[list["AnalysisReport"]] = relationship(
+        back_populates="planned_session",
+        cascade="all, delete-orphan",
+    )
+    session_analyses: Mapped[list["SessionAnalysis"]] = relationship(
         back_populates="planned_session",
         cascade="all, delete-orphan",
     )

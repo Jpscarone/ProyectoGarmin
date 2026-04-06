@@ -5,15 +5,20 @@ import re
 from datetime import date, time
 from pathlib import Path
 from urllib.parse import quote
+from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import selectinload
 
+from app.db.models.session_analysis import SessionAnalysis
 from app.db.session import get_db
 from app.schemas.planned_session import PlannedSessionCreate, PlannedSessionRead, PlannedSessionUpdate
 from app.schemas.planned_session_step import PlannedSessionStepCreate
 from app.services.analysis.report_service import get_latest_session_report
+from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION, re_run_session_analysis
 from app.services.intensity_target_service import normalize_step_target_fields
 from app.services.planning.quick_session_service import (
     SessionAdvancedData,
@@ -33,6 +38,7 @@ from app.services.session_group_service import create_inline_group
 from app.services.training_day_service import create_training_day, get_training_day, get_training_day_by_plan_and_date
 from app.services.training_plan_service import get_training_plan
 from app.schemas.training_day import TrainingDayCreate
+from app.ui.catalogs import SPORT_LABELS
 from app.web.templates import build_templates
 
 
@@ -147,6 +153,391 @@ def read_planned_session(planned_session_id: int, request: Request, db: Session 
             },
         )
     return planned_session
+
+
+@router.get("/{planned_session_id}/analysis", response_class=HTMLResponse)
+def read_planned_session_analysis_v2(
+    planned_session_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+
+    linked_activity = (
+        planned_session.activity_match.garmin_activity
+        if planned_session.activity_match and planned_session.activity_match.garmin_activity
+        else None
+    )
+    analysis = _get_preferred_session_analysis(db, planned_session_id, linked_activity.id if linked_activity else None)
+    view_model = _build_session_analysis_v2_view_model(planned_session, linked_activity, analysis)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="analysis/session_detail_v2.html",
+        context={
+            "planned_session": planned_session,
+            "training_day": planned_session.training_day,
+            "linked_activity": linked_activity,
+            "analysis_v2": analysis,
+            "view_model": view_model,
+            "status_message": request.query_params.get("status"),
+        },
+    )
+
+
+@router.post("/{planned_session_id}/analysis/re-run")
+def rerun_planned_session_analysis_v2(
+    planned_session_id: int,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+
+    linked_activity = (
+        planned_session.activity_match.garmin_activity
+        if planned_session.activity_match and planned_session.activity_match.garmin_activity
+        else None
+    )
+    if linked_activity is None:
+        return RedirectResponse(
+            url=f"/planned_sessions/{planned_session_id}/analysis?status={quote('No hay actividad vinculada para reanalizar.')}",
+            status_code=303,
+        )
+
+    analysis = re_run_session_analysis(
+        db,
+        planned_session_id=planned_session.id,
+        activity_id=linked_activity.id,
+        trigger_source="manual_reanalysis",
+    )
+    return RedirectResponse(
+        url=f"/planned_sessions/{planned_session.id}/analysis?status={quote(f'Analisis actualizado ({analysis.status}).')}",
+        status_code=303,
+    )
+
+
+def _get_preferred_session_analysis(
+    db: Session,
+    planned_session_id: int,
+    linked_activity_id: int | None,
+) -> SessionAnalysis | None:
+    analyses = list(
+        db.scalars(
+            select(SessionAnalysis)
+            .where(
+                SessionAnalysis.planned_session_id == planned_session_id,
+                SessionAnalysis.analysis_version == ANALYSIS_VERSION,
+            )
+            .options(selectinload(SessionAnalysis.activity))
+            .order_by(SessionAnalysis.analyzed_at.desc(), SessionAnalysis.id.desc())
+        ).all()
+    )
+    if not analyses:
+        return None
+    if linked_activity_id is not None:
+        exact = next((item for item in analyses if item.activity_id == linked_activity_id), None)
+        if exact is not None:
+            return exact
+    return analyses[0]
+
+
+def _build_session_analysis_v2_view_model(planned_session, linked_activity, analysis: SessionAnalysis | None) -> dict[str, Any]:
+    status_value = analysis.status if analysis else "missing"
+    metrics_payload = analysis.metrics_json if analysis and isinstance(analysis.metrics_json, dict) else {}
+    metrics = metrics_payload.get("metrics", {}) if isinstance(metrics_payload, dict) else {}
+    context_payload = metrics_payload.get("context", {}) if isinstance(metrics_payload, dict) else {}
+    structured_output = (
+        analysis.llm_json.get("structured_output", {})
+        if analysis and isinstance(analysis.llm_json, dict)
+        else {}
+    )
+
+    header = {
+        "title": planned_session.name,
+        "date_label": planned_session.training_day.day_date.strftime("%d/%m/%Y") if planned_session.training_day and planned_session.training_day.day_date else "-",
+        "sport_label": _sport_label(planned_session.sport_type),
+        "duration_label": _duration_minutes_label(planned_session.expected_duration_min),
+        "distance_label": _distance_km_label(planned_session.expected_distance_km),
+        "status_label": _analysis_v2_status_label(status_value),
+        "status_class": _analysis_v2_status_class(status_value),
+    }
+
+    conclusion = {
+        "coach_conclusion": analysis.coach_conclusion if analysis and analysis.coach_conclusion else _empty_conclusion_copy(status_value),
+        "summary_short": analysis.summary_short if analysis and analysis.summary_short else _empty_summary_copy(status_value),
+    }
+
+    scores = [
+        _score_card("Cumplimiento", analysis.compliance_score if analysis else None),
+        _score_card("Ejecucion", analysis.execution_score if analysis else None),
+        _score_card("Control", analysis.control_score if analysis else None),
+        _score_card("Fatiga", analysis.fatigue_score if analysis else None),
+    ]
+
+    charts = _build_analysis_chart_data(metrics, context_payload)
+    recent_comparison = _build_recent_comparison_view(metrics, context_payload, linked_activity)
+    technical = _build_technical_view(metrics_payload, context_payload, analysis)
+
+    return {
+        "state": {
+            "status": status_value,
+            "has_analysis": analysis is not None,
+            "has_activity": linked_activity is not None,
+            "is_error": status_value == "error",
+            "is_pending": status_value in {"pending", "missing"},
+            "message": _analysis_v2_state_message(status_value, linked_activity is not None, analysis.error_message if analysis else None),
+        },
+        "header": header,
+        "conclusion": conclusion,
+        "scores": scores,
+        "positives": structured_output.get("key_positive_points") or [],
+        "risks": structured_output.get("key_risk_points") or [],
+        "recommendation": analysis.next_recommendation if analysis and analysis.next_recommendation else _empty_recommendation_copy(status_value, linked_activity is not None),
+        "session_type_detected": structured_output.get("session_type_detected") or "-",
+        "overall_assessment": structured_output.get("overall_assessment") or "-",
+        "tags": structured_output.get("tags") or [],
+        "charts": charts,
+        "recent_comparison": recent_comparison,
+        "technical": technical,
+    }
+
+
+def _analysis_v2_status_label(status_value: str) -> str:
+    return {
+        "completed": "Completo",
+        "completed_with_warnings": "Completo con advertencias",
+        "error": "Error en analisis",
+        "pending": "Pendiente",
+        "missing": "Sin analisis",
+    }.get(status_value, status_value or "Sin analisis")
+
+
+def _analysis_v2_status_class(status_value: str) -> str:
+    return {
+        "completed": "analysis-status-good",
+        "completed_with_warnings": "analysis-status-warn",
+        "error": "analysis-status-bad",
+        "pending": "analysis-status-neutral",
+        "missing": "analysis-status-neutral",
+    }.get(status_value, "analysis-status-neutral")
+
+
+def _analysis_v2_state_message(status_value: str, has_activity: bool, error_message: str | None) -> str:
+    if status_value == "error":
+        return error_message or "Hubo un error al generar el analisis."
+    if not has_activity:
+        return "No hay actividad vinculada. El analisis V2 se genera cuando una actividad queda asociada a la sesion."
+    if status_value in {"pending", "missing"}:
+        return "Analisis pendiente. La sesion todavia no tiene un analisis V2 listo para mostrar."
+    if status_value == "completed_with_warnings":
+        return "El analisis esta disponible, pero algunas partes se resolvieron con fallback o datos incompletos."
+    return ""
+
+
+def _empty_conclusion_copy(status_value: str) -> str:
+    if status_value == "error":
+        return "No se pudo completar el analisis automatico de esta sesion."
+    if status_value in {"pending", "missing"}:
+        return "Todavia no hay una conclusion disponible para esta sesion."
+    return "La conclusion principal no esta disponible."
+
+
+def _empty_summary_copy(status_value: str) -> str:
+    if status_value == "error":
+        return "Analisis V2 interrumpido por un error."
+    if status_value in {"pending", "missing"}:
+        return "Analisis pendiente o aun no generado."
+    return "No hay resumen corto disponible."
+
+
+def _empty_recommendation_copy(status_value: str, has_activity: bool) -> str:
+    if not has_activity:
+        return "Primero hace falta vincular una actividad real para poder analizar esta sesion."
+    if status_value == "error":
+        return "Reintentar el analisis una vez resuelto el error tecnico."
+    return "Todavia no hay recomendacion disponible."
+
+
+def _duration_minutes_label(value: int | None) -> str:
+    if value is None:
+        return "-"
+    hours, minutes = divmod(int(value), 60)
+    if hours and minutes:
+        return f"{hours}:{minutes:02d} h"
+    if hours:
+        return f"{hours} h"
+    return f"{minutes} min"
+
+
+def _distance_km_label(value: float | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value:.2f} km" if value >= 1 else f"{round(value * 1000)} m"
+
+
+def _score_card(label: str, value: float | None) -> dict[str, Any]:
+    if value is None:
+        return {"label": label, "value": "-", "class": "score-card-neutral"}
+    if value >= 80:
+        score_class = "score-card-good"
+    elif value >= 60:
+        score_class = "score-card-warn"
+    else:
+        score_class = "score-card-bad"
+    return {"label": label, "value": round(value), "class": score_class}
+
+
+def _build_analysis_chart_data(metrics: dict[str, Any], context_payload: dict[str, Any]) -> dict[str, Any]:
+    laps = context_payload.get("activity_laps") or []
+    hr_labels: list[str] = []
+    hr_values: list[int] = []
+    pace_labels: list[str] = []
+    pace_values: list[float] = []
+
+    for index, lap in enumerate(laps, start=1):
+        label = lap.get("name") or lap.get("lap_type") or f"Lap {lap.get('index') or index}"
+        avg_hr = lap.get("avg_hr")
+        avg_pace_sec_km = lap.get("avg_pace_sec_km")
+        if avg_hr is not None:
+            hr_labels.append(label)
+            hr_values.append(avg_hr)
+        if avg_pace_sec_km is not None:
+            pace_labels.append(label)
+            pace_values.append(round(float(avg_pace_sec_km) / 60.0, 2))
+
+    hr_zone_pct = (((metrics.get("heart_rate") or {}).get("estimated_pct_in_zones")) or {})
+    zone_labels = list(hr_zone_pct.keys())
+    zone_values = [hr_zone_pct[name] for name in zone_labels]
+
+    return {
+        "show_hr": len(hr_values) >= 2,
+        "show_pace": len(pace_values) >= 2,
+        "show_zones": any(value for value in zone_values),
+        "hr": {"labels": hr_labels, "values": hr_values},
+        "pace": {"labels": pace_labels, "values": pace_values},
+        "zones": {"labels": zone_labels, "values": zone_values},
+    }
+
+
+def _build_recent_comparison_view(metrics: dict[str, Any], context_payload: dict[str, Any], linked_activity) -> dict[str, Any] | None:
+    rows = context_payload.get("recent_similar_sessions") or []
+    if not rows:
+        return None
+
+    current = {
+        "duration_min": round((linked_activity.duration_sec or 0) / 60.0, 1) if linked_activity and linked_activity.duration_sec is not None else None,
+        "distance_km": round((linked_activity.distance_m or 0) / 1000.0, 2) if linked_activity and linked_activity.distance_m is not None else None,
+        "avg_hr": linked_activity.avg_hr if linked_activity else None,
+        "avg_pace_min_km": round(float(linked_activity.avg_pace_sec_km) / 60.0, 2) if linked_activity and linked_activity.avg_pace_sec_km is not None else None,
+    }
+
+    table_rows = []
+    for row in rows:
+        table_rows.append(
+            {
+                "date": _format_iso_date(row.get("date")),
+                "duration": _duration_seconds_compact(row.get("duration_sec")),
+                "distance": _distance_meters_compact(row.get("distance_m")),
+                "avg_hr": row.get("avg_hr") or "-",
+                "avg_pace": _pace_seconds_compact(row.get("avg_pace_sec_km")),
+                "title": row.get("title") or "-",
+            }
+        )
+
+    recent_metrics = (metrics.get("comparisons") or {}).get("recent_similar") or {}
+    averages = {
+        "duration_vs_avg_pct": _signed_pct_label(recent_metrics.get("duration_vs_recent_avg_pct")),
+        "distance_vs_avg_pct": _signed_pct_label(recent_metrics.get("distance_vs_recent_avg_pct")),
+        "avg_hr_vs_avg": _signed_plain_label(recent_metrics.get("avg_hr_vs_recent_avg")),
+        "avg_pace_vs_avg_sec_km": _signed_plain_label(recent_metrics.get("avg_pace_vs_recent_avg_sec_km"), suffix=" s/km"),
+    }
+
+    return {"rows": table_rows, "current": current, "averages": averages}
+
+
+def _build_technical_view(metrics_payload: dict[str, Any], context_payload: dict[str, Any], analysis: SessionAnalysis | None) -> dict[str, Any]:
+    laps = context_payload.get("activity_laps") or []
+    lap_rows = [
+        {
+            "index": lap.get("index"),
+            "name": lap.get("name") or lap.get("lap_type") or f"Lap {lap.get('index')}",
+            "duration": _duration_seconds_compact(lap.get("duration_sec")),
+            "distance": _distance_meters_compact(lap.get("distance_m")),
+            "avg_hr": lap.get("avg_hr") or "-",
+            "pace": _pace_seconds_compact(lap.get("avg_pace_sec_km")),
+            "power": lap.get("avg_power") or "-",
+            "cadence": round(lap.get("avg_cadence"), 1) if lap.get("avg_cadence") is not None else "-",
+        }
+        for lap in laps
+    ]
+    return {
+        "metrics_pretty": json.dumps(metrics_payload.get("metrics", {}), indent=2, ensure_ascii=False) if metrics_payload else "{}",
+        "llm_pretty": json.dumps((analysis.llm_json if analysis and analysis.llm_json else {}), indent=2, ensure_ascii=False),
+        "lap_rows": lap_rows,
+        "error_message": analysis.error_message if analysis else None,
+    }
+
+
+def _format_iso_date(value: Any) -> str:
+    if not value:
+        return "-"
+    try:
+        return date.fromisoformat(str(value)).strftime("%d/%m/%Y")
+    except ValueError:
+        return str(value)
+
+
+def _sport_label(value: str | None) -> str:
+    if not value:
+        return "-"
+    return SPORT_LABELS.get(value, value.replace("_", " ").title())
+
+
+def _duration_seconds_compact(value: Any) -> str:
+    if value is None:
+        return "-"
+    total_seconds = int(float(value))
+    total_minutes = round(total_seconds / 60.0)
+    hours, minutes = divmod(total_minutes, 60)
+    if hours:
+        return f"{hours}:{minutes:02d} h"
+    return f"{minutes} min"
+
+
+def _distance_meters_compact(value: Any) -> str:
+    if value is None:
+        return "-"
+    numeric = float(value)
+    if numeric >= 1000:
+        return f"{numeric / 1000.0:.2f} km"
+    return f"{round(numeric)} m"
+
+
+def _pace_seconds_compact(value: Any) -> str:
+    if value is None:
+        return "-"
+    total_seconds = int(round(float(value)))
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"{minutes}:{seconds:02d} min/km"
+
+
+def _signed_pct_label(value: Any) -> str:
+    if value is None:
+        return "-"
+    numeric = float(value)
+    sign = "+" if numeric > 0 else ""
+    return f"{sign}{numeric:.1f}%"
+
+
+def _signed_plain_label(value: Any, suffix: str = "") -> str:
+    if value is None:
+        return "-"
+    numeric = float(value)
+    sign = "+" if numeric > 0 else ""
+    return f"{sign}{numeric:.1f}{suffix}"
 
 
 @router.post("/quick")
