@@ -28,7 +28,10 @@ def list_health_metrics(request: Request, db: Session = Depends(get_db)):
         return templates.TemplateResponse(
             request=request,
             name="health/list.html",
-            context={"metrics": metrics},
+            context={
+                "metrics": metrics,
+                "ui_status": request.query_params.get("ui_status"),
+            },
         )
     return metrics
 

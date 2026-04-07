@@ -4,7 +4,7 @@ import json
 import re
 from datetime import date, time
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
@@ -17,9 +17,9 @@ from app.db.models.session_analysis import SessionAnalysis
 from app.db.session import get_db
 from app.schemas.planned_session import PlannedSessionCreate, PlannedSessionRead, PlannedSessionUpdate
 from app.schemas.planned_session_step import PlannedSessionStepCreate
-from app.services.analysis.report_service import get_latest_session_report
 from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION, re_run_session_analysis
 from app.services.intensity_target_service import normalize_step_target_fields
+from app.services.planning.presentation import build_session_display_blocks_for_session, derive_session_metrics
 from app.services.planning.quick_session_service import (
     SessionAdvancedData,
     create_session_from_quick_mode,
@@ -38,7 +38,7 @@ from app.services.session_group_service import create_inline_group
 from app.services.training_day_service import create_training_day, get_training_day, get_training_day_by_plan_and_date
 from app.services.training_plan_service import get_training_plan
 from app.schemas.training_day import TrainingDayCreate
-from app.ui.catalogs import SPORT_LABELS
+from app.ui.catalogs import INTENSITY_TARGET_LABELS, MATCH_METHOD_LABELS, SPORT_LABELS, STEP_TYPE_LABELS, label_for
 from app.web.templates import build_templates
 
 
@@ -140,13 +140,22 @@ def read_planned_session(planned_session_id: int, request: Request, db: Session 
     if planned_session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
     if _wants_html(request):
+        linked_activity = (
+            planned_session.activity_match.garmin_activity
+            if planned_session.activity_match and planned_session.activity_match.garmin_activity
+            else None
+        )
+        analysis_v2 = _get_preferred_session_analysis(db, planned_session.id, linked_activity.id if linked_activity else None)
         return templates.TemplateResponse(
             request=request,
             name="planned_sessions/detail.html",
             context={
                 "planned_session": planned_session,
                 "training_day": planned_session.training_day,
-                "latest_report": get_latest_session_report(db, planned_session.id),
+                "analysis_v2": analysis_v2,
+                "session_view": _build_session_detail_view_model(planned_session, analysis_v2),
+                "can_edit_session": linked_activity is None,
+                "back_link": _build_planned_session_back_link(request, planned_session),
                 "ui_status": request.query_params.get("ui_status"),
                 "match_status": request.query_params.get("match_status"),
                 "analysis_status": request.query_params.get("analysis_status"),
@@ -242,6 +251,49 @@ def _get_preferred_session_analysis(
         if exact is not None:
             return exact
     return analyses[0]
+
+
+def _build_planned_session_back_link(request: Request, planned_session) -> dict[str, str]:
+    training_day = planned_session.training_day
+    if training_day is None:
+        return {"label": "Volver", "url": "/training_plans"}
+
+    return_to = (request.query_params.get("return_to") or "").strip().lower()
+    month = request.query_params.get("month") or (
+        training_day.day_date.strftime("%Y-%m") if training_day.day_date else ""
+    )
+    selected_date = request.query_params.get("selected_date") or (
+        training_day.day_date.isoformat() if training_day.day_date else ""
+    )
+    training_plan = training_day.training_plan
+
+    if return_to == "calendar" and training_plan is not None:
+        query_parts: list[str] = []
+        if month:
+            query_parts.append(f"month={quote(month)}")
+        if selected_date:
+            query_parts.append(f"selected_date={quote(selected_date)}")
+        query = f"?{'&'.join(query_parts)}" if query_parts else ""
+        return {"label": "Volver", "url": f"/training_plans/{training_plan.id}/calendar{query}"}
+
+    if return_to == "plan" and training_plan is not None:
+        return {"label": "Volver", "url": f"/training_plans/{training_plan.id}"}
+
+    if return_to == "day":
+        return {"label": "Volver", "url": f"/training_days/{training_day.id}"}
+
+    referer = request.headers.get("referer")
+    if referer:
+        referer_parts = urlsplit(referer)
+        current_parts = urlsplit(str(request.url))
+        if referer_parts.scheme == current_parts.scheme and referer_parts.netloc == current_parts.netloc:
+            referer_path = referer_parts.path or ""
+            current_path = current_parts.path or ""
+            if referer_path and referer_path != current_path:
+                referer_query = f"?{referer_parts.query}" if referer_parts.query else ""
+                return {"label": "Volver", "url": f"{referer_path}{referer_query}"}
+
+    return {"label": "Volver", "url": f"/training_days/{training_day.id}"}
 
 
 def _build_session_analysis_v2_view_model(planned_session, linked_activity, analysis: SessionAnalysis | None) -> dict[str, Any]:
@@ -479,6 +531,417 @@ def _build_technical_view(metrics_payload: dict[str, Any], context_payload: dict
         "lap_rows": lap_rows,
         "error_message": analysis.error_message if analysis else None,
     }
+
+
+def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalysis | None) -> dict[str, Any]:
+    linked_activity = (
+        planned_session.activity_match.garmin_activity
+        if planned_session.activity_match and planned_session.activity_match.garmin_activity
+        else None
+    )
+    session_metrics = derive_session_metrics(planned_session)
+    objective_duration_sec = (
+        planned_session.expected_duration_min * 60
+        if planned_session.expected_duration_min is not None
+        else session_metrics.duration_sec
+    )
+    objective_distance_m = (
+        int(round(planned_session.expected_distance_km * 1000))
+        if planned_session.expected_distance_km is not None
+        else session_metrics.distance_m
+    )
+    metrics_payload = analysis_v2.metrics_json if analysis_v2 and isinstance(analysis_v2.metrics_json, dict) else {}
+    metrics = metrics_payload.get("metrics", {}) if isinstance(metrics_payload, dict) else {}
+    block_rows = _extract_v2_step_rows(metrics)
+
+    activity_match = planned_session.activity_match
+    confidence_pct = (
+        round(float(activity_match.match_confidence) * 100)
+        if activity_match and activity_match.match_confidence is not None
+        else None
+    )
+    activity_stats = [
+        {"label": "Duracion", "value": _duration_seconds_compact(linked_activity.duration_sec) if linked_activity else "-"},
+        {"label": "Distancia", "value": _distance_meters_compact(linked_activity.distance_m) if linked_activity else "-"},
+        {"label": "FC promedio", "value": str(linked_activity.avg_hr) if linked_activity and linked_activity.avg_hr is not None else "-"},
+        {"label": "Inicio", "value": linked_activity.start_time.strftime("%H:%M") if linked_activity and linked_activity.start_time else "-"},
+    ]
+    activity_meta = [
+        {"label": "Vinculo", "value": label_for(MATCH_METHOD_LABELS, activity_match.match_method) if activity_match else "Sin vinculacion"},
+        {"label": "Confianza", "value": f"{confidence_pct}%" if confidence_pct is not None else "-"},
+    ]
+
+    return {
+        "header": {
+            "title": session_metrics.title or planned_session.name,
+            "sport_label": _sport_label(planned_session.sport_type),
+            "duration_label": _duration_seconds_compact(objective_duration_sec),
+            "distance_label": _distance_meters_compact(objective_distance_m),
+            "session_type_label": label_for(STEP_TYPE_LABELS, None, "") if False else None,
+        },
+        "activity": {
+            "linked": linked_activity is not None,
+            "title": linked_activity.activity_name if linked_activity and linked_activity.activity_name else "Sin actividad vinculada",
+            "url": f"/activities/{linked_activity.id}" if linked_activity else None,
+            "subtitle": _sport_label(linked_activity.sport_type) if linked_activity and linked_activity.sport_type else "Esperando una actividad real para comparar.",
+            "stats": activity_stats,
+            "meta": activity_meta,
+            "match_status_label": "Match confirmado" if activity_match else "Sin match confirmado",
+            "match_badge_class": "status-badge-manual" if activity_match and activity_match.match_method == "manual" else "status-badge-garmin" if activity_match else "status-badge-empty",
+        },
+        "quick_compare": _build_session_quick_compare_view(
+            planned_session=planned_session,
+            linked_activity=linked_activity,
+            analysis_v2=analysis_v2,
+            metrics=metrics,
+            objective_duration_sec=objective_duration_sec,
+            objective_distance_m=objective_distance_m,
+            block_rows=block_rows,
+        ),
+        "notes": {
+            "description": planned_session.description_text,
+            "target_notes": planned_session.target_notes,
+        },
+        "steps": {
+            "has_steps": bool(build_session_display_blocks_for_session(planned_session)),
+            "cards": _build_step_cards_view(planned_session, block_rows),
+        },
+        "latest_analysis": _build_latest_analysis_summary_view(planned_session, analysis_v2, linked_activity is not None),
+    }
+
+
+def _build_session_quick_compare_view(
+    *,
+    planned_session,
+    linked_activity,
+    analysis_v2: SessionAnalysis | None,
+    metrics: dict[str, Any],
+    objective_duration_sec: int | None,
+    objective_distance_m: int | None,
+    block_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    planned_vs_actual = metrics.get("planned_vs_actual", {}) if isinstance(metrics, dict) else {}
+    lap_metrics = metrics.get("laps", {}) if isinstance(metrics, dict) else {}
+    overall_score = _session_analysis_overall_score(analysis_v2)
+    sport_matches = linked_activity is not None and _normalized_sport(linked_activity.sport_type) == _normalized_sport(planned_session.sport_type)
+
+    duration_real = (
+        _duration_seconds_compact(linked_activity.duration_sec)
+        if linked_activity and linked_activity.duration_sec is not None
+        else _v2_metric_actual_label(planned_vs_actual.get("duration"), "min")
+    )
+    distance_real = (
+        _distance_meters_compact(linked_activity.distance_m)
+        if linked_activity and linked_activity.distance_m is not None
+        else _v2_metric_actual_label(planned_vs_actual.get("distance"), "km")
+    )
+    total_blocks = (
+        int(lap_metrics.get("matched_count", 0)) + int(lap_metrics.get("missing_planned_steps", 0))
+        if isinstance(lap_metrics, dict)
+        else len(block_rows)
+    )
+    correct_blocks = sum(1 for row in block_rows if row.get("status_key") == "correct")
+
+    return [
+        {
+            "label": "Duracion",
+            "planned": _duration_seconds_compact(objective_duration_sec),
+            "actual": duration_real,
+        },
+        {
+            "label": "Distancia",
+            "planned": _distance_meters_compact(objective_distance_m),
+            "actual": distance_real,
+        },
+        {
+            "label": "Deporte",
+            "planned": _sport_label(planned_session.sport_type),
+            "actual": "Correcto" if sport_matches else _sport_label(linked_activity.sport_type) if linked_activity else "-",
+            "badge_class": "status-badge-garmin" if sport_matches else "status-badge-empty",
+        },
+        {
+            "label": "Bloques",
+            "planned": f"{total_blocks} planificados" if total_blocks else "-",
+            "actual": f"{correct_blocks}/{total_blocks} correctos" if total_blocks else "-",
+        },
+        {
+            "label": "Score",
+            "planned": "General",
+            "actual": f"{overall_score:.1f}" if overall_score is not None else "-",
+            "badge_class": _score_badge_class(overall_score),
+        },
+    ]
+
+
+def _build_latest_report_summary_view(latest_report, structured_summary: dict[str, Any], has_activity: bool) -> dict[str, Any]:
+    """Compatibilidad temporal: la pantalla de sesion ya usa el resumen V2."""
+    if latest_report is None:
+        return {
+            "exists": False,
+            "title": "Último reporte",
+            "empty_message": (
+                "Todavia no hay un analisis generado para esta sesion."
+                if has_activity
+                else "Todavia no hay analisis porque la sesion no tiene una actividad vinculada."
+            ),
+            "show_analyze_cta": has_activity,
+        }
+
+    summary_text = latest_report.final_conclusion_text or latest_report.summary_text or "-"
+    return {
+        "exists": True,
+        "title": "Resumen del ultimo analisis",
+        "status_label": _session_step_status_label(latest_report.overall_status),
+        "status_class": _session_step_status_class(latest_report.overall_status),
+        "score_label": round(float(latest_report.overall_score), 1) if latest_report.overall_score is not None else "-",
+        "reading": summary_text,
+        "summary": latest_report.summary_text or "-",
+        "recommendation": latest_report.recommendation_text or None,
+        "url": f"/analysis/{latest_report.id}",
+        "report_id": latest_report.id,
+    }
+
+
+def _build_step_cards_view(planned_session, block_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    blocks = build_session_display_blocks_for_session(planned_session)
+    cards: list[dict[str, Any]] = []
+    row_index = 0
+
+    for display_index, block in enumerate(blocks, start=1):
+        if getattr(block, "kind", None) == "repeat":
+            nested_items = []
+            for nested_index, step in enumerate(block.steps, start=1):
+                row = block_rows[row_index] if row_index < len(block_rows) else None
+                row_index += 1
+                nested_items.append(_build_step_item_view(step, row, nested_index))
+            cards.append(
+                {
+                    "kind": "repeat",
+                    "title": f"{display_index}º Bloque",
+                    "subtitle": f"Repetir {block.repeat_count} veces",
+                    "items": nested_items,
+                }
+            )
+            continue
+
+        row = block_rows[row_index] if row_index < len(block_rows) else None
+        row_index += 1
+        cards.append(
+            {
+                "kind": "simple",
+                "title": f"{display_index}º Bloque",
+                "item": _build_step_item_view(block, row, None),
+            }
+        )
+
+    return cards
+
+
+def _build_step_item_view(step: Any, row: dict[str, Any] | None, nested_index: int | None) -> dict[str, Any]:
+    summary_parts = []
+    duration_label = _duration_seconds_compact(getattr(step, "duration_sec", None))
+    distance_label = _distance_meters_compact(getattr(step, "distance_m", None))
+    if duration_label != "-":
+        summary_parts.append(duration_label)
+    if distance_label != "-":
+        summary_parts.append(distance_label)
+
+    intensity_parts = []
+    target_type = getattr(step, "target_type", None)
+    if target_type:
+        intensity_parts.append(label_for(INTENSITY_TARGET_LABELS, target_type))
+    for zone_attr in ("target_hr_zone", "target_pace_zone", "target_power_zone", "target_rpe_zone"):
+        zone_value = getattr(step, zone_attr, None)
+        if zone_value:
+            intensity_parts.append(zone_value)
+            break
+    if getattr(step, "target_hr_min", None) is not None or getattr(step, "target_hr_max", None) is not None:
+        intensity_parts.append(f"HR {getattr(step, 'target_hr_min', None) or '-'}-{getattr(step, 'target_hr_max', None) or '-'}")
+    elif getattr(step, "target_pace_min_sec_km", None) is not None or getattr(step, "target_pace_max_sec_km", None) is not None:
+        intensity_parts.append(
+            f"Ritmo {_pace_seconds_compact(getattr(step, 'target_pace_min_sec_km', None))} a {_pace_seconds_compact(getattr(step, 'target_pace_max_sec_km', None))}"
+        )
+    elif getattr(step, "target_power_min", None) is not None or getattr(step, "target_power_max", None) is not None:
+        intensity_parts.append(f"Potencia {getattr(step, 'target_power_min', None) or '-'}-{getattr(step, 'target_power_max', None) or '-'} w")
+
+    row_status = row.get("status") if row else None
+    comment = row.get("comment") if row else None
+    actual_text = row.get("actual") if row else None
+    return {
+        "label": f"Paso {nested_index}" if nested_index else label_for(STEP_TYPE_LABELS, getattr(step, "step_type", None), "Bloque"),
+        "summary": " | ".join(summary_parts) if summary_parts else "-",
+        "intensity": " | ".join(intensity_parts) if intensity_parts else None,
+        "notes": getattr(step, "target_notes", None),
+        "status_label": row.get("status_label") if row and row.get("status_label") else _session_step_status_label(row_status),
+        "status_class": row.get("status_class") if row and row.get("status_class") else _session_step_status_class(row_status),
+        "actual_text": actual_text if actual_text and actual_text != "Sin lap correspondiente" else None,
+        "comment": comment,
+        "missing_match": actual_text == "Sin lap correspondiente" if row else False,
+        "status_key": row.get("status_key") if row else None,
+    }
+
+
+def _session_step_status_label(value: str | None) -> str:
+    return {
+        "correct": "Correcto",
+        "partial": "Desviado",
+        "review": "Revisar",
+        "failed": "No completado",
+        "not_completed": "No completado",
+        "skipped": "Sin match",
+        None: "Sin match",
+    }.get(value, "Sin match")
+
+
+def _session_step_status_class(value: str | None) -> str:
+    return {
+        "correct": "status-badge-garmin",
+        "partial": "status-badge-active",
+        "review": "status-badge-empty",
+        "failed": "status-badge-manual",
+        "not_completed": "status-badge-manual",
+        "skipped": "status-badge-empty",
+        None: "status-badge-empty",
+    }.get(value, "status-badge-empty")
+
+
+def _score_badge_class(value: float | None) -> str:
+    if value is None:
+        return "status-badge-empty"
+    if value >= 85:
+        return "status-badge-garmin"
+    if value >= 60:
+        return "status-badge-active"
+    return "status-badge-manual"
+
+
+def _build_latest_analysis_summary_view(planned_session, analysis_v2: SessionAnalysis | None, has_activity: bool) -> dict[str, Any]:
+    if analysis_v2 is None:
+        return {
+            "exists": False,
+            "title": "Ultimo reporte",
+            "empty_message": (
+                "Todavia no hay un analisis generado para esta sesion."
+                if has_activity
+                else "Todavia no hay analisis porque la sesion no tiene una actividad vinculada."
+            ),
+            "show_analyze_cta": has_activity,
+            "analyze_url": f"/planned_sessions/{planned_session.id}/analysis/re-run",
+        }
+
+    score_value = _session_analysis_overall_score(analysis_v2)
+    return {
+        "exists": True,
+        "title": "Resumen del ultimo analisis",
+        "status_label": _analysis_v2_status_label(analysis_v2.status),
+        "status_class": _analysis_v2_status_class(analysis_v2.status),
+        "score_label": round(float(score_value), 1) if score_value is not None else "-",
+        "reading": analysis_v2.coach_conclusion or _empty_conclusion_copy(analysis_v2.status),
+        "summary": analysis_v2.summary_short or _empty_summary_copy(analysis_v2.status),
+        "recommendation": analysis_v2.next_recommendation or None,
+        "url": f"/planned_sessions/{planned_session.id}/analysis",
+        "analysis_id": analysis_v2.id,
+    }
+
+
+def _extract_v2_step_rows(metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    lap_metrics = metrics.get("laps", {}) if isinstance(metrics, dict) else {}
+    pairs = lap_metrics.get("pairs", []) if isinstance(lap_metrics, dict) else []
+    rows: list[dict[str, Any]] = []
+    for pair in pairs:
+        target_evaluation = pair.get("target_evaluation") if isinstance(pair, dict) else None
+        status_key, status_label, status_class = _v2_step_status_display(pair, target_evaluation)
+        rows.append(
+            {
+                "status": status_key,
+                "status_key": status_key,
+                "status_label": status_label,
+                "status_class": status_class,
+                "actual": _v2_pair_actual_summary(pair),
+                "comment": _v2_pair_comment(pair, target_evaluation),
+            }
+        )
+    return rows
+
+
+def _session_analysis_overall_score(analysis: SessionAnalysis | None) -> float | None:
+    if analysis is None:
+        return None
+    values = [
+        value
+        for value in (
+            analysis.compliance_score,
+            analysis.execution_score,
+            analysis.control_score,
+            analysis.fatigue_score,
+        )
+        if value is not None
+    ]
+    if not values:
+        return None
+    return round(sum(float(value) for value in values) / len(values), 1)
+
+
+def _v2_metric_actual_label(payload: Any, unit: str) -> str:
+    if not isinstance(payload, dict):
+        return "-"
+    value = payload.get("actual")
+    if value is None:
+        return "-"
+    if unit == "km":
+        return _distance_km_label(float(value))
+    if unit == "min":
+        return _duration_minutes_label(int(round(float(value))))
+    return str(value)
+
+
+def _normalized_sport(value: str | None) -> str:
+    return (value or "").strip().lower()
+
+
+def _v2_step_status_display(pair: dict[str, Any], target_evaluation: dict[str, Any] | None) -> tuple[str, str, str]:
+    if target_evaluation and target_evaluation.get("within_range") is True:
+        return ("correct", "Correcto", "status-badge-garmin")
+    if target_evaluation and target_evaluation.get("status") in {"above_range", "below_range"}:
+        return ("partial", "Desviado", "status-badge-active")
+
+    duration_delta_pct = pair.get("duration_delta_pct")
+    distance_delta_pct = pair.get("distance_delta_pct")
+    close_duration = duration_delta_pct is None or abs(float(duration_delta_pct)) <= 15
+    close_distance = distance_delta_pct is None or abs(float(distance_delta_pct)) <= 15
+    if close_duration and close_distance:
+        return ("correct", "Correcto", "status-badge-garmin")
+    return ("partial", "Desviado", "status-badge-active")
+
+
+def _v2_pair_actual_summary(pair: dict[str, Any]) -> str | None:
+    parts: list[str] = []
+    if pair.get("actual_duration_sec") is not None:
+        parts.append(_duration_seconds_compact(pair.get("actual_duration_sec")))
+    if pair.get("actual_distance_m") is not None:
+        parts.append(_distance_meters_compact(pair.get("actual_distance_m")))
+    if pair.get("avg_hr") is not None:
+        parts.append(f"avg HR {pair.get('avg_hr')}")
+    if pair.get("avg_pace_sec_km") is not None:
+        parts.append(f"pace {_pace_seconds_compact(pair.get('avg_pace_sec_km'))}")
+    if pair.get("avg_power") is not None:
+        parts.append(f"avg power {pair.get('avg_power')}")
+    return " | ".join(parts) if parts else None
+
+
+def _v2_pair_comment(pair: dict[str, Any], target_evaluation: dict[str, Any] | None) -> str | None:
+    if target_evaluation and target_evaluation.get("status") == "above_range":
+        return "La intensidad real quedo por encima del objetivo del bloque."
+    if target_evaluation and target_evaluation.get("status") == "below_range":
+        return "La intensidad real quedo por debajo del objetivo del bloque."
+
+    duration_delta_pct = pair.get("duration_delta_pct")
+    distance_delta_pct = pair.get("distance_delta_pct")
+    if duration_delta_pct is not None and abs(float(duration_delta_pct)) > 20:
+        return "La duracion real se desvio bastante respecto de lo planificado."
+    if distance_delta_pct is not None and abs(float(distance_delta_pct)) > 20:
+        return "La distancia real del lap quedo lejos de la referencia planificada."
+    return None
 
 
 def _format_iso_date(value: Any) -> str:

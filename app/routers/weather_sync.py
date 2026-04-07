@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 
@@ -15,7 +15,11 @@ router = APIRouter(prefix="/sync/weather", tags=["weather_sync"])
 
 
 @router.get("/activity/{activity_id}")
-def sync_activity_weather(activity_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def sync_activity_weather(
+    activity_id: int,
+    return_to: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
     activity = get_activity(db, activity_id)
     if activity is None:
         return RedirectResponse(
@@ -31,7 +35,10 @@ def sync_activity_weather(activity_id: int, db: Session = Depends(get_db)) -> Re
     except Exception as exc:
         message = f"La sincronizacion de clima fallo de forma inesperada: {exc}"
 
-    return RedirectResponse(
-        url=f"/activities/{activity_id}?weather_status={quote(message)}",
-        status_code=303,
-    )
+    target = (return_to or "").strip().lower()
+    if target == "list":
+        redirect_url = f"/activities?weather_status={quote(message)}"
+    else:
+        redirect_url = f"/activities/{activity_id}?weather_status={quote(message)}"
+
+    return RedirectResponse(url=redirect_url, status_code=303)

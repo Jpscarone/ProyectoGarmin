@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -20,6 +22,27 @@ from app.web.templates import build_templates
 
 router = APIRouter(prefix="/sync/garmin", tags=["garmin_health_sync"])
 templates = build_templates(Path(__file__).resolve().parent.parent)
+
+
+def _sync_health_and_redirect(*, success_url: str, error_url: str, db: Session) -> RedirectResponse:
+    settings = get_settings()
+
+    try:
+        result = sync_recent_health(db, settings)
+        message = (
+            f"Salud sincronizada. Dias revisados: {result.days_reviewed}, "
+            f"creados: {result.created}, actualizados: {result.updated}."
+        )
+        return RedirectResponse(url=f"{success_url}{quote(message)}", status_code=303)
+    except GarminMFARequired as exc:
+        return RedirectResponse(url=f"{error_url}{quote(str(exc))}", status_code=303)
+    except GarminServiceError as exc:
+        return RedirectResponse(url=f"{error_url}{quote(str(exc))}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"{error_url}{quote(f'La sincronizacion de salud Garmin fallo de forma inesperada: {exc}')}",
+            status_code=303,
+        )
 
 
 @router.get("/health", response_class=HTMLResponse)
@@ -95,4 +118,22 @@ def sync_garmin_health_mfa(
             "needs_mfa": has_pending_mfa(settings),
             "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
+    )
+
+
+@router.post("/health/from-activities")
+def sync_garmin_health_from_activities(db: Session = Depends(get_db)) -> RedirectResponse:
+    return _sync_health_and_redirect(
+        success_url="/health?ui_status=",
+        error_url="/sync/garmin/activities?status=",
+        db=db,
+    )
+
+
+@router.post("/health/from-health")
+def sync_garmin_health_from_health(db: Session = Depends(get_db)) -> RedirectResponse:
+    return _sync_health_and_redirect(
+        success_url="/health?ui_status=",
+        error_url="/health?ui_status=",
+        db=db,
     )

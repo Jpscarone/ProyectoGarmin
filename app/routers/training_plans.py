@@ -1,17 +1,20 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
 from app.schemas.training_day import TrainingDayCreate
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanRead, TrainingPlanUpdate
+from app.services.analysis_v2.weekly_analysis_service import ANALYSIS_VERSION as WEEKLY_ANALYSIS_VERSION
 from app.services.athlete_service import get_athletes
 from app.services.planning.presentation import derive_session_metrics, describe_session_structure_short
 from app.services.training_day_service import create_training_day
@@ -92,6 +95,8 @@ def read_training_plan_calendar(
     visible_month = _resolve_visible_month(training_plan, month)
     selected_day_date = _resolve_selected_date(selected_date, visible_month, training_plan)
     calendar_context = _build_calendar_context(training_plan, visible_month, selected_day_date)
+    selected_week_analysis = _build_selected_week_analysis_context(db, training_plan, selected_day_date, visible_month)
+    weekly_analysis_lookup = _build_weekly_analysis_lookup(db, training_plan, calendar_context["weeks"], visible_month)
 
     return templates.TemplateResponse(
         request=request,
@@ -107,6 +112,8 @@ def read_training_plan_calendar(
             "selected_day_cell": calendar_context["selected_day_cell"],
             "previous_month": calendar_context["previous_month"],
             "next_month": calendar_context["next_month"],
+            "selected_week_analysis": selected_week_analysis,
+            "weekly_analysis_lookup": weekly_analysis_lookup,
             "status_message": request.query_params.get("status"),
         },
     )
@@ -223,14 +230,124 @@ def _resolve_selected_date(selected_date_param: str | None, visible_month: date,
     if today.year == visible_month.year and today.month == visible_month.month:
         return today
 
-    visible_days = [day for day in training_plan.training_days if day.day_date.year == visible_month.year and day.day_date.month == visible_month.month]
-    if visible_days:
-        return min(visible_days, key=lambda item: item.day_date).day_date
-
-    if training_plan.start_date and training_plan.start_date.year == visible_month.year and training_plan.start_date.month == visible_month.month:
-        return training_plan.start_date
+    visible_month_days = [
+        day.day_date
+        for day in training_plan.training_days
+        if day.day_date.year == visible_month.year and day.day_date.month == visible_month.month
+    ]
+    if visible_month_days:
+        return min(visible_month_days)
 
     return visible_month
+
+
+def _week_start(day_value: date) -> date:
+    return day_value - timedelta(days=day_value.weekday())
+
+
+def _week_end(day_value: date) -> date:
+    return _week_start(day_value) + timedelta(days=6)
+
+
+def _get_weekly_analysis_for_range(db: Session, athlete_id: int, week_start_date: date) -> WeeklyAnalysis | None:
+    return db.scalar(
+        select(WeeklyAnalysis)
+        .where(
+            WeeklyAnalysis.athlete_id == athlete_id,
+            WeeklyAnalysis.week_start_date == week_start_date,
+            WeeklyAnalysis.analysis_version == WEEKLY_ANALYSIS_VERSION,
+        )
+        .order_by(WeeklyAnalysis.id.desc())
+    )
+
+
+def _build_selected_week_analysis_context(db: Session, training_plan, selected_day_date: date, visible_month: date) -> dict[str, object]:
+    return _build_week_analysis_link(db, training_plan, selected_day_date, visible_month)
+
+
+def _build_week_analysis_link(db: Session, training_plan, selected_date: date, visible_month: date) -> dict[str, object]:
+    week_start_date = _week_start(selected_date)
+    week_end_date = _week_end(selected_date)
+    analysis = _get_weekly_analysis_for_range(db, training_plan.athlete_id, week_start_date)
+    badge = _weekly_calendar_badge_view(analysis)
+    query = urlencode(
+        {
+            "return_to": "calendar",
+            "plan_id": training_plan.id,
+            "month": visible_month.strftime("%Y-%m"),
+            "selected_date": selected_date.isoformat(),
+        }
+    )
+    return {
+        "selected_date": selected_date.isoformat(),
+        "week_start_date": week_start_date.isoformat(),
+        "week_end_date": week_end_date.isoformat(),
+        "week_range_label": f"{week_start_date.strftime('%d/%m')} al {week_end_date.strftime('%d/%m/%Y')}",
+        "url": f"/analysis/weekly/{training_plan.athlete_id}/{week_start_date.isoformat()}?{query}",
+        "exists": analysis is not None,
+        "status": analysis.status if analysis else "missing",
+        "status_label": badge["label"],
+        "status_class": badge["class"],
+    }
+
+
+def _build_weekly_analysis_lookup(db: Session, training_plan, weeks: list[list[dict[str, object]]], visible_month: date) -> dict[str, dict[str, object]]:
+    lookup: dict[str, dict[str, object]] = {}
+    seen_week_starts: set[date] = set()
+    for week in weeks:
+        if not week:
+            continue
+        first_cell_date = week[0].get("date")
+        if not isinstance(first_cell_date, date):
+            continue
+        week_start_date = _week_start(first_cell_date)
+        if week_start_date in seen_week_starts:
+            continue
+        seen_week_starts.add(week_start_date)
+        lookup[week_start_date.isoformat()] = _build_week_analysis_link(db, training_plan, week_start_date, visible_month)
+    return lookup
+
+
+def _weekly_calendar_badge_view(analysis: WeeklyAnalysis | None) -> dict[str, str]:
+    if analysis is None:
+        return {"label": "Sin analisis", "class": "calendar-state-badge-empty"}
+
+    if analysis.status == "error":
+        return {"label": "Semana irregular", "class": "calendar-state-badge-failed"}
+    if analysis.status == "pending":
+        return {"label": "Analisis pendiente", "class": "calendar-state-badge-info"}
+
+    metrics_payload = analysis.metrics_json if isinstance(analysis.metrics_json, dict) else {}
+    metrics = metrics_payload.get("metrics", {}) if isinstance(metrics_payload, dict) else {}
+    derived_flags = metrics.get("derived_flags", {}) if isinstance(metrics, dict) else {}
+
+    if (
+        derived_flags.get("overload_flag")
+        or derived_flags.get("high_fatigue_risk_flag")
+        or (analysis.fatigue_score is not None and analysis.fatigue_score >= 75)
+    ):
+        return {"label": "Semana exigente", "class": "calendar-state-badge-partial"}
+
+    if (
+        analysis.status == "completed"
+        and (analysis.consistency_score is None or analysis.consistency_score >= 75)
+        and (analysis.balance_score is None or analysis.balance_score >= 70)
+        and (analysis.load_score is None or analysis.load_score >= 70)
+        and (analysis.fatigue_score is None or analysis.fatigue_score < 75)
+        and not derived_flags.get("poor_distribution_flag")
+        and not derived_flags.get("low_consistency_flag")
+    ):
+        return {"label": "Semana sólida", "class": "calendar-state-badge-success"}
+
+    if (
+        analysis.status in {"completed", "completed_with_warnings"}
+        and not derived_flags.get("poor_distribution_flag")
+        and not derived_flags.get("undertraining_flag")
+        and not derived_flags.get("overload_flag")
+    ):
+        return {"label": "Semana correcta", "class": "calendar-state-badge-info"}
+
+    return {"label": "Semana irregular", "class": "calendar-state-badge-failed"}
 
 
 def _build_calendar_context(training_plan, visible_month: date, selected_day_date: date) -> dict[str, object]:
@@ -277,6 +394,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                             "group_name": planned_session.session_group.name if planned_session.session_group else None,
                             "has_match": has_match,
                             "has_analysis": has_analysis,
+                            "description": (planned_session.description_text or planned_session.target_notes or "").strip(),
                         }
                     )
                 for goal in training_plan.goals:

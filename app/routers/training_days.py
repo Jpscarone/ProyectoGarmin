@@ -5,12 +5,14 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.db.models.session_analysis import SessionAnalysis
 from app.db.session import get_db
 from app.schemas.training_day import TrainingDayCreate, TrainingDayRead, TrainingDayUpdate
-from app.services.analysis.report_service import get_latest_day_report
+from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION
 from app.services.training_day_service import (
     create_training_day,
     delete_training_day,
@@ -90,6 +92,7 @@ def read_training_day(training_day_id: int, request: Request, db: Session = Depe
                 f"/training_plans/{training_day.training_plan.id}/calendar"
                 f"?month={training_day.day_date.strftime('%Y-%m')}&selected_date={training_day.day_date.isoformat()}"
             )
+        latest_analysis_by_session = _get_latest_session_analyses_map(db, training_day)
         return templates.TemplateResponse(
             request=request,
             name="training_days/detail.html",
@@ -100,7 +103,8 @@ def read_training_day(training_day_id: int, request: Request, db: Session = Depe
                 "ui_status": request.query_params.get("ui_status"),
                 "match_status": request.query_params.get("match_status"),
                 "analysis_status": request.query_params.get("analysis_status"),
-                "latest_report": get_latest_day_report(db, training_day.id),
+                "day_analysis_view": _build_training_day_analysis_view(training_day, latest_analysis_by_session),
+                "latest_analysis_by_session": latest_analysis_by_session,
             },
         )
     return training_day
@@ -178,3 +182,99 @@ def delete_training_day_endpoint(training_day_id: int, db: Session = Depends(get
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
     delete_training_day(db, training_day)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _get_latest_session_analyses_map(db: Session, training_day) -> dict[int, SessionAnalysis]:
+    session_ids = [session.id for session in training_day.planned_sessions]
+    if not session_ids:
+        return {}
+
+    analyses = list(
+        db.scalars(
+            select(SessionAnalysis)
+            .where(
+                SessionAnalysis.planned_session_id.in_(session_ids),
+                SessionAnalysis.analysis_version == ANALYSIS_VERSION,
+            )
+            .order_by(SessionAnalysis.analyzed_at.desc(), SessionAnalysis.id.desc())
+        ).all()
+    )
+    latest_by_session: dict[int, SessionAnalysis] = {}
+    for analysis in analyses:
+        latest_by_session.setdefault(analysis.planned_session_id, analysis)
+    return latest_by_session
+
+
+def _build_training_day_analysis_view(training_day, latest_by_session: dict[int, SessionAnalysis]) -> dict[str, object]:
+    if not training_day.planned_sessions:
+        return {
+            "has_items": False,
+            "title": "Analisis de sesiones del dia",
+            "empty_message": "Todavia no hay sesiones cargadas para este dia.",
+        }
+
+    items = []
+    for planned_session in training_day.planned_sessions:
+        analysis = latest_by_session.get(planned_session.id)
+        if analysis is None:
+            items.append(
+                {
+                    "session_name": planned_session.name,
+                    "session_url": f"/planned_sessions/{planned_session.id}",
+                    "status_label": "Pendiente",
+                    "status_class": "analysis-status-neutral",
+                    "score_label": "-",
+                    "summary": "Todavia no hay un analisis V2 listo para esta sesion.",
+                    "analysis_url": None,
+                }
+            )
+            continue
+
+        score_values = [
+            value
+            for value in (
+                analysis.compliance_score,
+                analysis.execution_score,
+                analysis.control_score,
+                analysis.fatigue_score,
+            )
+            if value is not None
+        ]
+        overall_score = round(sum(float(value) for value in score_values) / len(score_values), 1) if score_values else None
+        items.append(
+            {
+                "session_name": planned_session.name,
+                "session_url": f"/planned_sessions/{planned_session.id}",
+                "status_label": _analysis_v2_status_label(analysis.status),
+                "status_class": _analysis_v2_status_class(analysis.status),
+                "score_label": overall_score if overall_score is not None else "-",
+                "summary": analysis.summary_short or analysis.coach_conclusion or "Analisis disponible.",
+                "analysis_url": f"/planned_sessions/{planned_session.id}/analysis",
+            }
+        )
+
+    has_ready_items = any(item["analysis_url"] for item in items)
+    return {
+        "has_items": True,
+        "title": "Analisis de sesiones del dia",
+        "items": items,
+        "has_ready_items": has_ready_items,
+    }
+
+
+def _analysis_v2_status_label(status_value: str | None) -> str:
+    return {
+        "completed": "Completo",
+        "completed_with_warnings": "Completo con advertencias",
+        "error": "Error",
+        "pending": "Pendiente",
+    }.get(status_value or "", "Sin analisis")
+
+
+def _analysis_v2_status_class(status_value: str | None) -> str:
+    return {
+        "completed": "analysis-status-good",
+        "completed_with_warnings": "analysis-status-warn",
+        "error": "analysis-status-bad",
+        "pending": "analysis-status-neutral",
+    }.get(status_value or "", "analysis-status-neutral")

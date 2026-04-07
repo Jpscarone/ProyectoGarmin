@@ -3,10 +3,10 @@ from __future__ import annotations
 from datetime import date, timedelta
 import json
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 from typing import Any
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -20,13 +20,8 @@ from app.services.analysis.bundle_service import (
     build_bundle_for_session,
 )
 from app.services.analysis.report_service import (
-    analyze_training_day,
     get_analysis_report,
     update_final_conclusion,
-)
-from app.services.analysis.session_analysis_service import (
-    analyze_activity_session,
-    analyze_planned_session,
 )
 from app.services.analysis_v2.weekly_analysis_service import (
     ANALYSIS_VERSION as WEEKLY_ANALYSIS_VERSION,
@@ -41,11 +36,16 @@ router = APIRouter(prefix="/analysis", tags=["analysis"])
 templates = build_templates(Path(__file__).resolve().parent.parent)
 
 
+# WeeklyAnalysis V2 views
 @router.get("/weekly/{athlete_id}/{week_start_date}", response_class=HTMLResponse)
 def read_weekly_analysis_v2(
     athlete_id: int,
     week_start_date: str,
     request: Request,
+    return_to: str | None = Query(default=None),
+    plan_id: int | None = Query(default=None),
+    month: str | None = Query(default=None),
+    selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
     normalized_week_start = _parse_week_start_or_404(week_start_date)
@@ -71,6 +71,14 @@ def read_weekly_analysis_v2(
         preview_context=preview_context,
         preview_metrics=preview_metrics,
     )
+    return_context = _build_weekly_analysis_return_context(
+        athlete_id=athlete_id,
+        week_start_date=normalized_week_start,
+        return_to=return_to,
+        plan_id=plan_id,
+        month=month,
+        selected_date=selected_date,
+    )
 
     return templates.TemplateResponse(
         request=request,
@@ -79,6 +87,7 @@ def read_weekly_analysis_v2(
             "athlete": athlete,
             "analysis": analysis,
             "view_model": view_model,
+            "return_context": return_context,
             "status_message": request.query_params.get("status"),
         },
     )
@@ -88,8 +97,12 @@ def read_weekly_analysis_v2(
 def rerun_weekly_analysis_v2(
     athlete_id: int,
     week_start_date: str,
+    return_to: str | None = Form(default=None),
+    plan_id: int | None = Form(default=None),
+    month: str | None = Form(default=None),
+    selected_date: str | None = Form(default=None),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+    ) -> RedirectResponse:
     normalized_week_start = _parse_week_start_or_404(week_start_date)
     analysis = re_run_weekly_analysis(
         db,
@@ -97,12 +110,22 @@ def rerun_weekly_analysis_v2(
         reference_date=normalized_week_start,
         trigger_source="manual_reanalysis",
     )
+    redirect_url = _build_weekly_analysis_view_url(
+        athlete_id=athlete_id,
+        week_start_date=normalized_week_start,
+        return_to=return_to,
+        plan_id=plan_id,
+        month=month,
+        selected_date=selected_date,
+        status_message=f"Analisis semanal actualizado ({analysis.status}).",
+    )
     return RedirectResponse(
-        url=f"/analysis/weekly/{athlete_id}/{normalized_week_start.isoformat()}?status={quote(f'Analisis semanal actualizado ({analysis.status}).')}",
+        url=redirect_url,
         status_code=303,
     )
 
 
+# Classic analysis report views kept for day/activity flows and technical detail.
 @router.get("/{report_id}", response_class=HTMLResponse)
 def read_analysis_report(report_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     report = get_analysis_report(db, report_id)
@@ -113,42 +136,6 @@ def read_analysis_report(report_id: int, request: Request, db: Session = Depends
         request=request,
         name="analysis/detail.html",
         context={"report": report, "report_view": report_view, "status_message": request.query_params.get("status")},
-    )
-
-
-@router.post("/session/{planned_session_id}")
-def analyze_session_endpoint(planned_session_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
-    try:
-        report = analyze_planned_session(db, planned_session_id)
-        return RedirectResponse(url=f"/analysis/{report.id}", status_code=303)
-    except ValueError as exc:
-        return RedirectResponse(
-            url=f"/planned_sessions/{planned_session_id}?analysis_status={quote(str(exc))}",
-            status_code=303,
-        )
-
-
-@router.post("/activity/{activity_id}")
-def analyze_activity_endpoint(activity_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
-    try:
-        report = analyze_activity_session(db, activity_id)
-        return RedirectResponse(url=f"/analysis/{report.id}", status_code=303)
-    except ValueError as exc:
-        return RedirectResponse(
-            url=f"/activities/{activity_id}?analysis_status={quote(str(exc))}",
-            status_code=303,
-        )
-
-
-@router.post("/day/{training_day_id}")
-def analyze_day_endpoint(training_day_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
-    try:
-        report = analyze_training_day(db, training_day_id)
-        return RedirectResponse(url=f"/analysis/{report.id}", status_code=303)
-    except ValueError as exc:
-        return RedirectResponse(
-            url=f"/training_days/{training_day_id}?analysis_status={quote(str(exc))}",
-            status_code=303,
         )
 
 
@@ -168,6 +155,7 @@ def save_final_conclusion(
     )
 
 
+# Bundle endpoints remain available for legacy export/debug flows.
 @router.get("/bundle/session/{planned_session_id}", response_class=HTMLResponse)
 def session_bundle_view(planned_session_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     try:
@@ -212,6 +200,63 @@ def _parse_week_start_or_404(raw_value: str) -> date:
         return date.fromisoformat(raw_value)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="week_start_date invalida") from exc
+
+
+def _build_weekly_analysis_view_url(
+    *,
+    athlete_id: int,
+    week_start_date: date,
+    return_to: str | None,
+    plan_id: int | None,
+    month: str | None,
+    selected_date: str | None,
+    status_message: str | None = None,
+) -> str:
+    query_params: dict[str, str] = {}
+    if return_to:
+        query_params["return_to"] = return_to
+    if plan_id is not None:
+        query_params["plan_id"] = str(plan_id)
+    if month:
+        query_params["month"] = month
+    if selected_date:
+        query_params["selected_date"] = selected_date
+    if status_message:
+        query_params["status"] = status_message
+    query_string = urlencode(query_params)
+    base_url = f"/analysis/weekly/{athlete_id}/{week_start_date.isoformat()}"
+    return f"{base_url}?{query_string}" if query_string else base_url
+
+
+def _build_weekly_analysis_return_context(
+    *,
+    athlete_id: int,
+    week_start_date: date,
+    return_to: str | None,
+    plan_id: int | None,
+    month: str | None,
+    selected_date: str | None,
+) -> dict[str, str]:
+    if return_to == "calendar" and plan_id is not None:
+        selected_day = selected_date or week_start_date.isoformat()
+        month_value = month or selected_day[:7]
+        return {
+            "label": "Calendario",
+            "url": f"/training_plans/{plan_id}/calendar?month={month_value}&selected_date={selected_day}",
+            "return_to": "calendar",
+            "plan_id": str(plan_id),
+            "month": month_value,
+            "selected_date": selected_day,
+        }
+
+    return {
+        "label": "Atleta",
+        "url": f"/athletes/{athlete_id}",
+        "return_to": "",
+        "plan_id": "",
+        "month": "",
+        "selected_date": "",
+    }
 
 
 def _get_weekly_analysis_v2(db: Session, athlete_id: int, week_start_date: date) -> WeeklyAnalysis | None:

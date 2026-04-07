@@ -3,26 +3,27 @@
 {% block title %}{{ planned_session.name }} | training_app{% endblock %}
 
 {% block content %}
-{% set session_metrics = derive_session_metrics(planned_session) %}
-{% set linked_activity = planned_session.activity_match.garmin_activity if planned_session.activity_match and planned_session.activity_match.garmin_activity else none %}
-{% set objective_duration_sec = planned_session.expected_duration_min * 60 if planned_session.expected_duration_min is not none else session_metrics.duration_sec %}
-{% set objective_distance_m = (planned_session.expected_distance_km * 1000) | round | int if planned_session.expected_distance_km is not none else session_metrics.distance_m %}
 <section class="panel">
     <div class="section-heading planned-session-header">
-        <div>
+        <div class="planned-session-header-main">
             <p class="eyebrow">Sesion</p>
-            <h1 class="planned-session-title">{{ session_metrics.title or planned_session.name }}</h1>
-            <p class="text-muted">Fecha: {{ training_day.day_date.strftime('%d/%m/%Y') if training_day.day_date else '-' }} | Plan: {{ training_day.training_plan.name }}{% if planned_session.session_group %} | Grupo: {{ planned_session.session_group.name }}{% endif %}</p>
+            <h1 class="planned-session-title">{{ session_view.header.title }}</h1>
+            <p class="text-muted">
+                Fecha: {{ training_day.day_date.strftime('%d/%m/%Y') if training_day.day_date else '-' }}
+                | Plan: {{ training_day.training_plan.name }}
+                {% if planned_session.session_group %} | Grupo: {{ planned_session.session_group.name }}{% endif %}
+            </p>
         </div>
-        <div class="actions-inline">
-            <a class="button button-utility" href="/planned_sessions/{{ planned_session.id }}/analysis">Ver analisis V2</a>
+        <div class="actions-inline planned-session-header-actions">
             <a class="button button-utility" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
-            <a class="button button-utility" href="/analysis/bundle/session/{{ planned_session.id }}">Generar bundle</a>
-            <form method="post" action="/match/day/{{ training_day.id }}">
-                <button class="button button-utility" type="submit">Vincular actividad</button>
-            </form>
+            {% if can_edit_session %}
             <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar sesion</a>
-            <a class="button button-nav" href="/training_days/{{ training_day.id }}">Volver al dia</a>
+            {% else %}
+            <span class="planned-session-action-tooltip" title="No se puede editar una sesion que ya tiene actividad vinculada.">
+                <button class="button button-secondary" type="button" disabled>Editar sesion</button>
+            </span>
+            {% endif %}
+            <a class="button button-nav" href="{{ back_link.url }}">{{ back_link.label }}</a>
         </div>
     </div>
 
@@ -39,38 +40,84 @@
     <div class="planned-session-layout">
         <div class="detail-item detail-item-full planned-session-inline-card">
             <div class="planned-session-inline-list">
-                <span class="planned-session-inline-pill"><strong>Deporte:</strong> {{ sport_label(planned_session.sport_type) }}</span>
-                <span class="planned-session-inline-pill"><strong>Duracion objetivo:</strong> {{ duration_seconds_human(objective_duration_sec) or "-" }}</span>
-                <span class="planned-session-inline-pill"><strong>Distancia objetivo:</strong> {{ distance_label_meters(objective_distance_m) if objective_distance_m is not none else "-" }}</span>
+                <span class="planned-session-inline-pill"><strong>Deporte:</strong> {{ session_view.header.sport_label }}</span>
+                <span class="planned-session-inline-pill"><strong>Duracion objetivo:</strong> {{ session_view.header.duration_label }}</span>
+                <span class="planned-session-inline-pill"><strong>Distancia objetivo:</strong> {{ session_view.header.distance_label }}</span>
             </div>
         </div>
 
-        <div class="planned-session-activity-card detail-item detail-item-full">
-            <div class="planned-session-card-heading">
-                <div>
-                    <p class="eyebrow">Actividad real</p>
-                    <h2 class="planned-session-activity-title">{% if linked_activity %}<a href="/activities/{{ linked_activity.id }}">{{ linked_activity.activity_name or ('Actividad ' ~ linked_activity.id) }}</a>{% else %}Sin actividad vinculada{% endif %}</h2>
-                </div>
-                <div class="planned-session-confidence">
-                    <span class="status-badge {% if planned_session.activity_match %}status-badge-manual{% else %}status-badge-empty{% endif %}">
-                        Confianza: {% if planned_session.activity_match and planned_session.activity_match.match_confidence is not none %}{{ (planned_session.activity_match.match_confidence * 100)|round|int }}%{% else %}-{% endif %}
-                    </span>
-                </div>
+        <div class="planned-session-summary-grid">
+            <div class="planned-session-main-column">
+                {% if session_view.notes.description %}
+                <article class="detail-item planned-session-description-card">
+                    <p class="eyebrow">Descripcion</p>
+                    <p class="planned-session-description-text">{{ session_view.notes.description }}</p>
+                </article>
+                {% endif %}
+
+                <article class="detail-item planned-session-activity-card">
+                    <div class="planned-session-card-heading">
+                        <div>
+                            <p class="eyebrow">Actividad vinculada</p>
+                            <h2 class="planned-session-activity-title">
+                                {% if session_view.activity.url %}
+                                <a href="{{ session_view.activity.url }}">{{ session_view.activity.title }}</a>
+                                {% else %}
+                                {{ session_view.activity.title }}
+                                {% endif %}
+                            </h2>
+                            <p class="planned-session-activity-subtitle">{{ session_view.activity.subtitle }}</p>
+                        </div>
+                        <div class="planned-session-confidence">
+                            <span class="status-badge {{ session_view.activity.match_badge_class }}">{{ session_view.activity.match_status_label }}</span>
+                        </div>
+                    </div>
+                    <div class="planned-session-activity-stats">
+                        {% for item in session_view.activity.stats %}
+                        <div class="planned-session-activity-stat">
+                            <span class="planned-session-activity-stat-label">{{ item.label }}</span>
+                            <strong class="planned-session-activity-stat-value">{{ item.value }}</strong>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="planned-session-activity-meta">
+                        {% for item in session_view.activity.meta %}
+                        <div class="planned-session-activity-meta-pill">
+                            <span class="planned-session-activity-meta-label">{{ item.label }}</span>
+                            <strong>{{ item.value }}</strong>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </article>
             </div>
-            <div class="planned-session-inline-list">
-                <span class="planned-session-inline-pill"><strong>Duracion:</strong> {{ duration_seconds_human(linked_activity.duration_sec) if linked_activity and linked_activity.duration_sec else "-" }}</span>
-                <span class="planned-session-inline-pill"><strong>Distancia:</strong> {{ distance_label_meters(linked_activity.distance_m) if linked_activity and linked_activity.distance_m is not none else "-" }}</span>
-                <span class="planned-session-inline-pill"><strong>FC promedio:</strong> {{ linked_activity.avg_hr if linked_activity and linked_activity.avg_hr else "-" }}</span>
-            </div>
+
+            <article class="detail-item planned-session-compare-card">
+                <div class="planned-session-card-heading">
+                    <div>
+                        <p class="eyebrow">Plan vs real</p>
+                        <h2 class="planned-session-activity-title">Resumen rapido</h2>
+                    </div>
+                </div>
+                <div class="planned-session-compare-grid">
+                    {% for item in session_view.quick_compare %}
+                    <div class="planned-session-compare-pill">
+                        <span class="planned-session-compare-label">{{ item.label }}</span>
+                        <strong>{{ item.planned }}</strong>
+                        {% if item.badge_class %}
+                        <span class="status-badge {{ item.badge_class }}">{{ item.actual }}</span>
+                        {% else %}
+                        <span class="text-muted">Real: {{ item.actual }}</span>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </article>
         </div>
 
-        {% if planned_session.description_text or planned_session.target_notes %}
+        {% if session_view.notes.target_notes %}
         <div class="planned-session-notes-grid">
-            {% if planned_session.description_text %}
-            <div class="detail-item detail-item-full planned-session-inline-card"><strong>Descripcion:</strong> {{ planned_session.description_text }}</div>
-            {% endif %}
-            {% if planned_session.target_notes %}
-            <div class="detail-item detail-item-full planned-session-inline-card"><strong>Notas objetivo:</strong> {{ planned_session.target_notes }}</div>
+            {% if session_view.notes.target_notes %}
+            <div class="detail-item detail-item-full planned-session-inline-card"><strong>Notas objetivo:</strong> {{ session_view.notes.target_notes }}</div>
             {% endif %}
         </div>
         {% endif %}
@@ -82,67 +129,79 @@
         <div>
             <p class="eyebrow">Pasos</p>
             <h2>Pasos estructurados</h2>
+            <p class="text-muted">Resumen visual de los bloques planificados y, si existe analisis, lectura rapida de su lap equivalente.</p>
         </div>
     </div>
 
-    {% set display_blocks = session_display_blocks_for_session(planned_session) %}
-    {% if display_blocks %}
-    <div class="session-stack planned-session-step-stack">
-        {% for block in display_blocks %}
-            {% if block.kind == "repeat" %}
-            <article class="session-card repeat-card planned-session-step-card">
-                <div>
-                    <strong>{{ loop.index }}º Bloque</strong>
-                    <p class="text-muted">Repetir {{ block.repeat_count }} veces</p>
-                    <div class="repeat-step-list">
-                        {% for step in block.steps %}
-                        <div class="repeat-step-row">
-                            <div class="repeat-step-item">
-                                <p class="text-muted">
-                                    {% if step.duration_sec %}{{ duration_seconds_human(step.duration_sec) }}{% endif %}
-                                    {% if step.duration_sec and step.distance_m %} | {% endif %}
-                                    {% if step.distance_m %}{{ distance_label_meters(step.distance_m) }}{% endif %}
-                                </p>
-                                <p>
-                                    {% if step.target_type %}{{ intensity_target_label(step.target_type) }} {% endif %}
-                                    {% if step.target_hr_zone %}| Zona {{ step.target_hr_zone }} {% endif %}
-                                    {% if step.target_pace_zone %}| Zona {{ step.target_pace_zone }} {% endif %}
-                                    {% if step.target_power_zone %}| Zona {{ step.target_power_zone }} {% endif %}
-                                    {% if step.target_rpe_zone %}| Zona {{ step.target_rpe_zone }} {% endif %}
-                                    {% if step.target_hr_min or step.target_hr_max %}| HR {{ step.target_hr_min or "-" }}-{{ step.target_hr_max or "-" }} {% endif %}
-                                    {% if step.target_power_min or step.target_power_max %}| Potencia {{ step.target_power_min or "-" }}-{{ step.target_power_max or "-" }} {% endif %}
-                                    {% if step.target_pace_min_sec_km or step.target_pace_max_sec_km %}| Ritmo {{ pace_mmss(step.target_pace_min_sec_km) or "-" }}-{{ pace_mmss(step.target_pace_max_sec_km) or "-" }} min/km {% endif %}
-                                    {% if step.target_cadence_min or step.target_cadence_max %}| Cadencia {{ step.target_cadence_min or "-" }}-{{ step.target_cadence_max or "-" }}{% endif %}
-                                </p>
-                            </div>
-                        </div>
-                        {% endfor %}
+    {% if session_view.steps.has_steps %}
+    <div class="planned-session-steps-timeline">
+        {% for card in session_view.steps.cards %}
+        <article class="planned-session-step-timeline-card">
+            <div class="planned-session-step-marker">{{ loop.index }}</div>
+            <div class="planned-session-step-body">
+                <div class="planned-session-step-head">
+                    <div>
+                        <h3>{{ card.title }}</h3>
+                        <p class="text-muted">{{ card.subtitle if card.kind == "repeat" else card.item.label }}</p>
                     </div>
                 </div>
-            </article>
-            {% else %}
-            <article class="session-card planned-session-step-card">
-                <div>
-                    <strong>{{ loop.index }}º Bloque</strong>
-                    <p class="text-muted">
-                        {% if block.duration_sec %}{{ duration_seconds_human(block.duration_sec) }}{% endif %}
-                        {% if block.duration_sec and block.distance_m %} | {% endif %}
-                        {% if block.distance_m %}{{ distance_label_meters(block.distance_m) }}{% endif %}
-                    </p>
-                    <p>
-                        {% if block.target_type %}{{ intensity_target_label(block.target_type) }} {% endif %}
-                        {% if block.target_hr_zone %}| Zona {{ block.target_hr_zone }} {% endif %}
-                        {% if block.target_pace_zone %}| Zona {{ block.target_pace_zone }} {% endif %}
-                        {% if block.target_power_zone %}| Zona {{ block.target_power_zone }} {% endif %}
-                        {% if block.target_rpe_zone %}| Zona {{ block.target_rpe_zone }} {% endif %}
-                        {% if block.target_hr_min or block.target_hr_max %}| HR {{ block.target_hr_min or "-" }}-{{ block.target_hr_max or "-" }} {% endif %}
-                        {% if block.target_power_min or block.target_power_max %}| Potencia {{ block.target_power_min or "-" }}-{{ block.target_power_max or "-" }} {% endif %}
-                        {% if block.target_pace_min_sec_km or block.target_pace_max_sec_km %}| Ritmo {{ pace_mmss(block.target_pace_min_sec_km) or "-" }}-{{ pace_mmss(block.target_pace_max_sec_km) or "-" }} min/km {% endif %}
-                        {% if block.target_cadence_min or block.target_cadence_max %}| Cadencia {{ block.target_cadence_min or "-" }}-{{ block.target_cadence_max or "-" }}{% endif %}
-                    </p>
+
+                {% if card.kind == "repeat" %}
+                <div class="planned-session-step-substack">
+                    {% for item in card["items"] %}
+                    <div class="planned-session-step-summary">
+                        <div class="planned-session-step-summary-main">
+                            <strong>{{ item.label }}</strong>
+                            <span class="text-muted">{{ item.summary }}</span>
+                        </div>
+                        {% if item.intensity %}
+                        <div class="planned-session-inline-list">
+                            <span class="planned-session-inline-pill">{{ item.intensity }}</span>
+                        </div>
+                        {% endif %}
+                        {% if item.notes %}
+                        <p class="text-muted">{{ item.notes }}</p>
+                        {% endif %}
+                        <div class="planned-session-step-result">
+                            <span class="status-badge {{ item.status_class }}">{{ item.status_label }}</span>
+                            {% if item.actual_text %}
+                            <span class="text-muted">Lap real: {{ item.actual_text }}</span>
+                            {% elif item.missing_match %}
+                            <span class="text-muted">Sin lap correspondiente</span>
+                            {% endif %}
+                        </div>
+                        {% if item.comment %}
+                        <p class="planned-session-step-comment">{{ item.comment }}</p>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
                 </div>
-            </article>
-            {% endif %}
+                {% else %}
+                <div class="planned-session-step-summary">
+                    <div class="planned-session-step-summary-main">
+                        <strong>{{ card.item.summary }}</strong>
+                        {% if card.item.intensity %}
+                        <span class="text-muted">{{ card.item.intensity }}</span>
+                        {% endif %}
+                    </div>
+                    {% if card.item.notes %}
+                    <p class="text-muted">{{ card.item.notes }}</p>
+                    {% endif %}
+                    <div class="planned-session-step-result">
+                        <span class="status-badge {{ card.item.status_class }}">{{ card.item.status_label }}</span>
+                        {% if card.item.actual_text %}
+                        <span class="text-muted">Lap real: {{ card.item.actual_text }}</span>
+                        {% elif card.item.missing_match %}
+                        <span class="text-muted">Sin lap correspondiente</span>
+                        {% endif %}
+                    </div>
+                    {% if card.item.comment %}
+                    <p class="planned-session-step-comment">{{ card.item.comment }}</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </article>
         {% endfor %}
     </div>
     {% else %}
@@ -154,29 +213,54 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Analisis</p>
-            <h2>Ultimo reporte</h2>
+            <h2>{{ session_view.latest_analysis.title }}</h2>
         </div>
     </div>
 
-    {% if latest_report %}
-    <div class="planned-session-analysis-grid">
-        {% if latest_report.final_conclusion_text %}
-        <div class="detail-item detail-item-full analysis-ai-highlight analysis-ai-highlight-compact">
+    {% if session_view.latest_analysis.exists %}
+    <div class="planned-session-report-card">
+        <div class="analysis-ai-highlight analysis-ai-highlight-compact">
             <p class="eyebrow">Analisis de Inteligencia Artificial</p>
             <h3>Lectura principal de la sesion</h3>
-            <p class="analysis-ai-highlight-text">{{ latest_report.final_conclusion_text }}</p>
+            <p class="analysis-ai-highlight-text">{{ session_view.latest_analysis.reading }}</p>
+        </div>
+
+        <div class="planned-session-report-meta">
+            <div class="planned-session-report-meta-card">
+                <span class="planned-session-report-meta-label">Estado general</span>
+                <span class="status-badge {{ session_view.latest_analysis.status_class }}">{{ session_view.latest_analysis.status_label }}</span>
+            </div>
+            <div class="planned-session-report-meta-card">
+                <span class="planned-session-report-meta-label">Score</span>
+                <strong>{{ session_view.latest_analysis.score_label }}</strong>
+            </div>
+        </div>
+
+        <div class="detail-item detail-item-full planned-session-inline-card">
+            <strong>Lectura corta</strong>
+            <p>{{ session_view.latest_analysis.summary }}</p>
+        </div>
+
+        {% if session_view.latest_analysis.recommendation %}
+        <div class="detail-item detail-item-full planned-session-inline-card">
+            <strong>Recomendacion</strong>
+            <p>{{ session_view.latest_analysis.recommendation }}</p>
         </div>
         {% endif %}
-        <div class="detail-item"><strong>Estado:</strong> {{ analysis_status_label(latest_report.overall_status) }}</div>
-        <div class="detail-item"><strong>Score:</strong> {{ latest_report.overall_score if latest_report.overall_score is not none else '-' }}</div>
-        <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
-        <div class="detail-item detail-item-full"><strong>Recomendacion:</strong> {{ latest_report.recommendation_text or '-' }}</div>
-    </div>
-    <div class="actions-inline">
-        <a class="button button-nav" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+
+        <div class="actions-inline">
+            <a class="button button-nav" href="{{ session_view.latest_analysis.url }}">Ver reporte</a>
+        </div>
     </div>
     {% else %}
-    <p class="empty-state">Todavia no hay reporte de analisis para esta sesion.</p>
+    <div class="planned-session-empty-report">
+        <p class="empty-state">{{ session_view.latest_analysis.empty_message }}</p>
+        {% if session_view.latest_analysis.show_analyze_cta %}
+        <form method="post" action="{{ session_view.latest_analysis.analyze_url }}">
+            <button class="button button-utility" type="submit">Generar analisis</button>
+        </form>
+        {% endif %}
+    </div>
     {% endif %}
 </section>
 

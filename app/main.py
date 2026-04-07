@@ -1,10 +1,13 @@
+from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.db.session import get_db
 from app.routers.activities import router as activities_router
 from app.routers.activity_matching import router as activity_matching_router
 from app.routers.analysis import router as analysis_router
@@ -20,6 +23,7 @@ from app.routers.session_templates import router as session_templates_router
 from app.routers.training_days import router as training_days_router
 from app.routers.training_plans import router as training_plans_router
 from app.routers.weather_sync import router as weather_sync_router
+from app.services.training_plan_service import get_training_plans
 from app.web.templates import build_templates
 
 
@@ -53,4 +57,32 @@ async def dashboard(request: Request) -> HTMLResponse:
         request=request,
         name="dashboard.html",
         context={"app_name": settings.app_name},
+    )
+
+
+@app.get("/calendar")
+def open_calendar(db: Session = Depends(get_db)) -> RedirectResponse:
+    plans = get_training_plans(db)
+    if not plans:
+        return RedirectResponse(url="/training_plans", status_code=303)
+
+    today = date.today()
+    current_plans = [
+        plan
+        for plan in plans
+        if plan.start_date is not None
+        and plan.end_date is not None
+        and plan.start_date <= today <= plan.end_date
+    ]
+    if current_plans:
+        selected_plan = max(current_plans, key=lambda plan: (plan.start_date, plan.id))
+    else:
+        selected_plan = plans[0]
+
+    return RedirectResponse(
+        url=(
+            f"/training_plans/{selected_plan.id}/calendar"
+            f"?month={today.strftime('%Y-%m')}&selected_date={today.isoformat()}"
+        ),
+        status_code=303,
     )

@@ -11,14 +11,6 @@
             <p class="text-muted">{{ sport_label(activity.sport_type) }} | {{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</p>
         </div>
         <div class="actions-inline">
-            <form method="post" action="/activities/{{ activity.id }}/auto-match">
-                <button class="button button-utility" type="submit">Auto-match</button>
-            </form>
-            <form method="post" action="/analysis/activity/{{ activity.id }}">
-                <button class="button button-utility" type="submit">Analizar actividad</button>
-            </form>
-            <a class="button button-utility" href="/analysis/bundle/activity/{{ activity.id }}">Generar bundle</a>
-            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
             <a class="button button-nav" href="/activities">Volver a actividades</a>
         </div>
     </div>
@@ -143,21 +135,58 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Analisis</p>
-            <h2>Ultimo reporte</h2>
+            <h2>{{ analysis_v2_summary.title }}</h2>
         </div>
     </div>
 
-    {% if latest_report %}
-    <div class="detail-grid">
-        <div class="detail-item"><strong>Estado:</strong> {{ analysis_status_label(latest_report.overall_status) }}</div>
-        <div class="detail-item"><strong>Score:</strong> {{ latest_report.overall_score if latest_report.overall_score is not none else '-' }}</div>
-        <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
-    </div>
-    <div class="actions-inline">
-        <a class="button button-nav" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+    {% if analysis_v2_summary.exists %}
+    <div class="planned-session-report-card">
+        <div class="analysis-ai-highlight analysis-ai-highlight-compact">
+            <p class="eyebrow">Analisis de Inteligencia Artificial</p>
+            <h3>Lectura principal de la sesion</h3>
+            <p class="analysis-ai-highlight-text">{{ analysis_v2_summary.conclusion }}</p>
+        </div>
+
+        <div class="planned-session-report-meta">
+            <div class="planned-session-report-meta-card">
+                <span class="planned-session-report-meta-label">Sesion</span>
+                <strong><a href="{{ analysis_v2_summary.session_url }}">{{ analysis_v2_summary.session_name }}</a></strong>
+            </div>
+            <div class="planned-session-report-meta-card">
+                <span class="planned-session-report-meta-label">Estado</span>
+                <span class="status-badge {{ analysis_v2_summary.status_class }}">{{ analysis_v2_summary.status_label }}</span>
+            </div>
+            <div class="planned-session-report-meta-card">
+                <span class="planned-session-report-meta-label">Score</span>
+                <strong>{{ analysis_v2_summary.score_label }}</strong>
+            </div>
+        </div>
+
+        <div class="detail-item detail-item-full planned-session-inline-card">
+            <strong>Lectura corta</strong>
+            <p>{{ analysis_v2_summary.summary }}</p>
+        </div>
+
+        {% if analysis_v2_summary.recommendation %}
+        <div class="detail-item detail-item-full planned-session-inline-card">
+            <strong>Recomendacion</strong>
+            <p>{{ analysis_v2_summary.recommendation }}</p>
+        </div>
+        {% endif %}
+
+        <div class="actions-inline">
+            <a class="button button-nav" href="{{ analysis_v2_summary.analysis_url }}">Ver analisis de la sesion</a>
+        </div>
     </div>
     {% else %}
-    <p class="empty-state">Todavia no hay reporte de analisis para esta actividad.</p>
+    <div class="planned-session-empty-report">
+        <p class="empty-state">{{ analysis_v2_summary.empty_message }}</p>
+        {% if analysis_v2_summary.session_url %}
+        <div class="actions-inline">
+            <a class="button button-nav" href="{{ analysis_v2_summary.session_url }}">Ver sesion vinculada</a>
+        </div>
+        {% endif %}
+    </div>
     {% endif %}
 </section>
 

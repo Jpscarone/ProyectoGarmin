@@ -20,6 +20,23 @@ from app.services.analysis_v2.schemas import NarrativeLLMOutput, NarrativeResult
 
 logger = logging.getLogger(__name__)
 
+WEATHER_HEAT_THRESHOLD_C = 28.0
+WEATHER_HUMIDITY_THRESHOLD_PCT = 75.0
+WEATHER_WIND_THRESHOLD_KMH = 25.0
+WEATHER_PRECIP_THRESHOLD_MM = 1.0
+WEATHER_COLD_THRESHOLD_C = 5.0
+
+HEALTH_SLEEP_HOURS_LOW = 6.0
+HEALTH_SLEEP_HOURS_MODERATE = 6.75
+HEALTH_SLEEP_SCORE_LOW = 60
+HEALTH_SLEEP_SCORE_MODERATE = 70
+HEALTH_STRESS_HIGH = 40
+HEALTH_STRESS_MODERATE = 30
+HEALTH_BODY_BATTERY_LOW = 40
+HEALTH_BODY_BATTERY_MODERATE = 55
+HEALTH_RECOVERY_TIME_HIGH_HOURS = 24.0
+HEALTH_RECOVERY_TIME_MODERATE_HOURS = 18.0
+
 SYSTEM_PROMPT = """
 Sos un analista de entrenamiento de endurance para atletas amateurs avanzados.
 Tu trabajo es interpretar una sesion planificada comparada con una actividad real.
@@ -39,6 +56,12 @@ Objetivos del analisis:
 - interpretar intensidad, control y fatiga
 - contextualizar clima, fatiga y semana solo si realmente aportan
 - cerrar con una recomendacion practica y accionable
+
+Uso del contexto:
+- Si contextual_factors.has_relevant_context es false, no menciones clima ni estado general como relleno.
+- Si hay contexto relevante, usalo solo para matizar la lectura, no como excusa automatica.
+- No atribuyas todos los problemas al clima o al estado general sin evidencia en los datos.
+- No inventes sensaciones subjetivas del atleta.
 """.strip()
 
 
@@ -65,6 +88,7 @@ def _session_token_attempts(settings: Settings) -> list[int]:
 
 def build_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
     missing_data = _collect_missing_data(context, metrics)
+    relevant_context = build_relevant_context_for_llm(context, metrics)
 
     planned_vs_actual = metrics.get("planned_vs_actual", {})
     scores = metrics.get("scores", {})
@@ -157,25 +181,7 @@ def build_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any
             "alignment_score": laps.get("alignment_score"),
             "comparisons": (laps.get("comparisons") or [])[:10],
         },
-        "weather": {
-            "temperature_c": context.weather.temperature_c,
-            "humidity_pct": context.weather.humidity_pct,
-            "wind_speed_kmh": context.weather.wind_speed_kmh,
-            "precipitation_total_mm": context.weather.precipitation_total_mm,
-            "condition_text": context.weather.condition_text,
-        } if context.weather else None,
-        "health": {
-            "metric_date": _iso(context.health.metric_date),
-            "sleep_hours": context.health.sleep_hours,
-            "sleep_score": context.health.sleep_score,
-            "hrv_status": context.health.hrv_status,
-            "hrv_avg_ms": context.health.hrv_avg_ms,
-            "body_battery_start": context.health.body_battery_start,
-            "body_battery_end": context.health.body_battery_end,
-            "stress_avg": context.health.stress_avg,
-            "recovery_time_hours": context.health.recovery_time_hours,
-            "resting_hr": context.health.resting_hr,
-        } if context.health else None,
+        "contextual_factors": relevant_context,
         "key_metrics": {
             "planned_vs_actual": planned_vs_actual,
             "heart_rate": heart_rate,
@@ -346,6 +352,166 @@ def generate_session_narrative(context: Any, metrics: Mapping[str, Any]) -> Narr
             },
             error_message=str(exc),
         )
+
+
+def build_analysis_context_flags(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    weather_context = build_weather_context_summary(getattr(context, "weather", None), metrics)
+    health_context = build_health_context_summary(getattr(context, "health", None), metrics)
+    combined_parts = [part for part in (weather_context["summary"], health_context["summary"]) if part]
+    return {
+        "weather_relevant": weather_context["relevant"],
+        "health_relevant": health_context["relevant"],
+        "weather_signals": weather_context["signals"],
+        "health_signals": health_context["signals"],
+        "combined_summary": " ".join(combined_parts) if combined_parts else None,
+    }
+
+
+def build_weather_context_summary(weather: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    if weather is None:
+        return {"relevant": False, "summary": None, "signals": []}
+
+    derived_flags = metrics.get("derived_flags", {}) if isinstance(metrics, Mapping) else {}
+    signals: list[str] = []
+    detail_parts: list[str] = []
+
+    effective_temp = _first_number(getattr(weather, "apparent_temperature_c", None), getattr(weather, "temperature_c", None))
+    if effective_temp is not None and effective_temp >= WEATHER_HEAT_THRESHOLD_C:
+        signals.append("calor")
+        detail_parts.append(f"temperatura alta (~{round(effective_temp)}°C)")
+    elif effective_temp is not None and effective_temp <= WEATHER_COLD_THRESHOLD_C:
+        signals.append("frio")
+        detail_parts.append(f"frio marcado (~{round(effective_temp)}°C)")
+
+    humidity = getattr(weather, "humidity_pct", None)
+    if humidity is not None and humidity >= WEATHER_HUMIDITY_THRESHOLD_PCT:
+        signals.append("humedad_alta")
+        detail_parts.append(f"humedad alta (~{round(humidity)}%)")
+
+    wind_speed = getattr(weather, "wind_speed_kmh", None)
+    if wind_speed is not None and wind_speed >= WEATHER_WIND_THRESHOLD_KMH:
+        signals.append("viento_fuerte")
+        detail_parts.append(f"viento fuerte (~{round(wind_speed)} km/h)")
+
+    precipitation = _first_number(
+        getattr(weather, "precipitation_total_mm", None),
+        getattr(weather, "precipitation_mm", None),
+    )
+    if precipitation is not None and precipitation >= WEATHER_PRECIP_THRESHOLD_MM:
+        signals.append("lluvia")
+        detail_parts.append(f"precipitacion relevante (~{round(precipitation, 1)} mm)")
+
+    if not detail_parts:
+        return {"relevant": False, "summary": None, "signals": []}
+
+    effect_parts: list[str] = []
+    if derived_flags.get("heat_impact_flag") or derived_flags.get("hydration_risk_flag"):
+        effect_parts.append("puede haber elevado la frecuencia cardiaca o la carga fisiologica")
+    if derived_flags.get("pace_instability_flag") and wind_speed is not None and wind_speed >= WEATHER_WIND_THRESHOLD_KMH:
+        effect_parts.append("puede haber encarecido el control del ritmo")
+    if not effect_parts:
+        effect_parts.append("puede haber matizado la lectura del esfuerzo")
+
+    summary = (
+        f"La sesion se realizo con {', '.join(detail_parts)}, un contexto que "
+        f"{' y '.join(effect_parts)}."
+    )
+    return {"relevant": True, "summary": summary, "signals": signals}
+
+
+def build_health_context_summary(health: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    if health is None:
+        return {"relevant": False, "summary": None, "signals": []}
+
+    signals: list[str] = []
+    critical = False
+    moderate_signals = 0
+
+    sleep_hours = getattr(health, "sleep_hours", None)
+    sleep_score = getattr(health, "sleep_score", None)
+    hrv_status = getattr(health, "hrv_status", None)
+    stress_avg = getattr(health, "stress_avg", None)
+    body_battery_start = getattr(health, "body_battery_start", None)
+    recovery_time_hours = getattr(health, "recovery_time_hours", None)
+
+    if sleep_hours is not None:
+        if sleep_hours < HEALTH_SLEEP_HOURS_LOW:
+            signals.append(f"sueño bajo ({sleep_hours:.1f} h)")
+            critical = True
+        elif sleep_hours < HEALTH_SLEEP_HOURS_MODERATE:
+            signals.append(f"sueño algo corto ({sleep_hours:.1f} h)")
+            moderate_signals += 1
+
+    if sleep_score is not None:
+        if sleep_score < HEALTH_SLEEP_SCORE_LOW:
+            signals.append(f"sleep score bajo ({sleep_score})")
+            critical = True
+        elif sleep_score < HEALTH_SLEEP_SCORE_MODERATE:
+            signals.append(f"sleep score algo bajo ({sleep_score})")
+            moderate_signals += 1
+
+    if _is_low_hrv_status(hrv_status):
+        signals.append(f"HRV {hrv_status}")
+        critical = True
+
+    if stress_avg is not None:
+        if stress_avg >= HEALTH_STRESS_HIGH:
+            signals.append(f"estres alto ({stress_avg})")
+            critical = True
+        elif stress_avg >= HEALTH_STRESS_MODERATE:
+            signals.append(f"estres moderado-alto ({stress_avg})")
+            moderate_signals += 1
+
+    if body_battery_start is not None:
+        if body_battery_start < HEALTH_BODY_BATTERY_LOW:
+            signals.append(f"body battery baja ({body_battery_start})")
+            critical = True
+        elif body_battery_start < HEALTH_BODY_BATTERY_MODERATE:
+            signals.append(f"body battery algo baja ({body_battery_start})")
+            moderate_signals += 1
+
+    if recovery_time_hours is not None:
+        if recovery_time_hours >= HEALTH_RECOVERY_TIME_HIGH_HOURS:
+            signals.append(f"recuperacion alta pendiente ({round(recovery_time_hours)} h)")
+            critical = True
+        elif recovery_time_hours >= HEALTH_RECOVERY_TIME_MODERATE_HOURS:
+            signals.append(f"recuperacion todavia exigente ({round(recovery_time_hours)} h)")
+            moderate_signals += 1
+
+    relevant = critical or moderate_signals >= 2
+    if not relevant:
+        return {"relevant": False, "summary": None, "signals": []}
+
+    scores = metrics.get("scores", {}) if isinstance(metrics, Mapping) else {}
+    control_score = scores.get("control_score")
+    fatigue_score = scores.get("fatigue_score")
+    effect_parts: list[str] = []
+    if fatigue_score is not None and fatigue_score >= 65:
+        effect_parts.append("puede haber aumentado el costo fisiologico")
+    if control_score is not None and control_score < 75:
+        effect_parts.append("puede haber afectado el control del esfuerzo")
+    if not effect_parts:
+        effect_parts.append("puede haber condicionado la disponibilidad del dia")
+
+    summary = (
+        f"El atleta llegaba con señales de fatiga o recuperacion incompleta ({', '.join(signals)}), "
+        f"lo que {' y '.join(effect_parts)}."
+    )
+    return {"relevant": True, "summary": summary, "signals": signals}
+
+
+def build_relevant_context_for_llm(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    weather_context = build_weather_context_summary(getattr(context, "weather", None), metrics)
+    health_context = build_health_context_summary(getattr(context, "health", None), metrics)
+    flags = build_analysis_context_flags(context, metrics)
+    return {
+        "has_relevant_context": bool(flags["weather_relevant"] or flags["health_relevant"]),
+        "weather_relevant": flags["weather_relevant"],
+        "health_relevant": flags["health_relevant"],
+        "weather_summary": weather_context["summary"],
+        "health_summary": health_context["summary"],
+        "summary": flags["combined_summary"],
+    }
 
 
 def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> NarrativeLLMOutput:
@@ -672,3 +838,24 @@ def _unique_items(values: list[str]) -> list[str]:
         seen.add(normalized)
         result.append(value)
     return result
+
+
+def _is_low_hrv_status(value: Any) -> bool:
+    if value is None:
+        return False
+    normalized = str(value).strip().lower()
+    if not normalized:
+        return False
+    low_markers = ("low", "unbalanced", "below", "poor", "reduced", "baja", "bajo", "desequilibr")
+    return any(marker in normalized for marker in low_markers)
+
+
+def _first_number(*values: Any) -> float | None:
+    for value in values:
+        if value is None:
+            continue
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None

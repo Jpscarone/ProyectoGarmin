@@ -19,12 +19,6 @@
         <div class="actions-inline">
             <a class="button button-nav" href="{{ back_href }}">{{ back_label }}</a>
             <a class="button" href="/planned_sessions/quick?training_day_id={{ training_day.id }}">Crear sesion</a>
-            <form method="post" action="/analysis/day/{{ training_day.id }}">
-                <button class="button button-utility" type="submit">Analizar dia</button>
-            </form>
-            <form method="post" action="/match/day/{{ training_day.id }}">
-                <button class="button button-utility" type="submit">Vincular actividades del dia</button>
-            </form>
             <a class="button button-secondary" href="/training_days/{{ training_day.id }}/edit?return_to={{ 'plan' if back_label == 'Volver a dias del plan' else 'calendar' }}">Editar dia</a>
             <a class="button button-utility" href="/session_groups/create?training_day_id={{ training_day.id }}">Crear grupo</a>
         </div>
@@ -60,6 +54,21 @@
                     {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
                     {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}| Vinculada: {{ planned_session.activity_match.garmin_activity.activity_name or ('Actividad ' ~ planned_session.activity_match.garmin_activity.id) }}{% endif %}
                 </p>
+                {% set latest_analysis = latest_analysis_by_session.get(planned_session.id) %}
+                <div class="calendar-meta-row">
+                    {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
+                    <span class="calendar-state-badge calendar-state-badge-success">Actividad vinculada</span>
+                    {% else %}
+                    <span class="calendar-state-badge calendar-state-badge-empty">Sin actividad</span>
+                    {% endif %}
+                    {% if latest_analysis %}
+                    <span class="calendar-state-badge {{ latest_analysis.status == 'completed' and 'calendar-state-badge-success' or latest_analysis.status == 'completed_with_warnings' and 'calendar-state-badge-partial' or latest_analysis.status == 'error' and 'calendar-state-badge-failed' or 'calendar-state-badge-info' }}">
+                        Analizada
+                    </span>
+                    {% else %}
+                    <span class="calendar-state-badge calendar-state-badge-empty">Sin analisis</span>
+                    {% endif %}
+                </div>
                 {% set structure_summary_short = session_structure_summary_short(planned_session) %}
                 {% if structure_summary_short %}
                 <p class="text-muted"><strong>Resumen:</strong> {{ structure_summary_short }}</p>
@@ -71,7 +80,13 @@
             </div>
             <div class="actions-inline">
                 <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
+                <span title="No se puede editar una sesion que ya tiene actividad vinculada.">
+                    <button class="button button-secondary" type="button" disabled>Editar</button>
+                </span>
+                {% else %}
                 <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
+                {% endif %}
                 <button class="button button-danger" type="button" onclick="deletePlannedSession({{ planned_session.id }}, {{ training_day.id }})">Eliminar</button>
             </div>
         </div>
@@ -128,6 +143,21 @@
                         {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
                         {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}| Vinculada: {{ planned_session.activity_match.garmin_activity.activity_name or ('Actividad ' ~ planned_session.activity_match.garmin_activity.id) }}{% endif %}
                     </p>
+                    {% set latest_analysis = latest_analysis_by_session.get(planned_session.id) %}
+                    <div class="calendar-meta-row">
+                        {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
+                        <span class="calendar-state-badge calendar-state-badge-success">Actividad vinculada</span>
+                        {% else %}
+                        <span class="calendar-state-badge calendar-state-badge-empty">Sin actividad</span>
+                        {% endif %}
+                        {% if latest_analysis %}
+                        <span class="calendar-state-badge {{ latest_analysis.status == 'completed' and 'calendar-state-badge-success' or latest_analysis.status == 'completed_with_warnings' and 'calendar-state-badge-partial' or latest_analysis.status == 'error' and 'calendar-state-badge-failed' or 'calendar-state-badge-info' }}">
+                            Analizada
+                        </span>
+                        {% else %}
+                        <span class="calendar-state-badge calendar-state-badge-empty">Sin analisis</span>
+                        {% endif %}
+                    </div>
                     {% set structure_summary_short = session_structure_summary_short(planned_session) %}
                     {% if structure_summary_short %}
                     <p class="text-muted"><strong>Resumen:</strong> {{ structure_summary_short }}</p>
@@ -139,7 +169,13 @@
                 </div>
                 <div class="actions-inline">
                     <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                    {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
+                    <span title="No se puede editar una sesion que ya tiene actividad vinculada.">
+                        <button class="button button-secondary" type="button" disabled>Editar</button>
+                    </span>
+                    {% else %}
                     <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
+                    {% endif %}
                     <button class="button button-danger" type="button" onclick="deletePlannedSession({{ planned_session.id }}, {{ training_day.id }})">Eliminar</button>
                 </div>
             </div>
@@ -163,21 +199,32 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Analisis</p>
-            <h2>Ultimo reporte del dia</h2>
+            <h2>{{ day_analysis_view.title }}</h2>
         </div>
     </div>
 
-    {% if latest_report %}
-    <div class="detail-grid">
-        <div class="detail-item"><strong>Estado:</strong> {{ analysis_status_label(latest_report.overall_status) }}</div>
-        <div class="detail-item"><strong>Score:</strong> {{ latest_report.overall_score if latest_report.overall_score is not none else '-' }}</div>
-        <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ latest_report.summary_text or '-' }}</div>
-    </div>
-    <div class="actions-inline">
-        <a class="button button-nav" href="/analysis/{{ latest_report.id }}">Ver reporte</a>
+    {% if day_analysis_view.has_items %}
+    <div class="session-stack">
+        {% for item in day_analysis_view["items"] %}
+        <article class="session-card">
+            <div>
+                <strong><a href="{{ item.session_url }}">{{ item.session_name }}</a></strong>
+                <p class="text-muted">{{ item.summary }}</p>
+            </div>
+            <div class="actions-inline">
+                <span class="status-badge {{ item.status_class }}">{{ item.status_label }}</span>
+                <span class="planned-session-inline-pill"><strong>Score:</strong> {{ item.score_label }}</span>
+                {% if item.analysis_url %}
+                <a class="button button-nav" href="{{ item.analysis_url }}">Ver analisis</a>
+                {% else %}
+                <a class="button button-secondary" href="{{ item.session_url }}">Ver sesion</a>
+                {% endif %}
+            </div>
+        </article>
+        {% endfor %}
     </div>
     {% else %}
-    <p class="empty-state">Todavia no hay reporte de analisis para este dia.</p>
+    <p class="empty-state">{{ day_analysis_view.empty_message }}</p>
     {% endif %}
 </section>
 

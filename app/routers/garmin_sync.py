@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from dataclasses import dataclass
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -34,6 +36,27 @@ class SyncAllResult:
     match_summary: str
 
 
+def _sync_activities_and_redirect(*, success_url: str, error_url: str, db: Session) -> RedirectResponse:
+    settings = get_settings()
+
+    try:
+        result = sync_recent_activities(db, settings)
+        message = (
+            f"Actividades sincronizadas. Encontradas: {result.found}, "
+            f"insertadas: {result.inserted}, actualizadas: {result.existing}."
+        )
+        return RedirectResponse(url=f"{success_url}{quote(message)}", status_code=303)
+    except GarminMFARequired as exc:
+        return RedirectResponse(url=f"{error_url}{quote(str(exc))}", status_code=303)
+    except GarminServiceError as exc:
+        return RedirectResponse(url=f"{error_url}{quote(str(exc))}", status_code=303)
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"{error_url}{quote(f'La sincronizacion Garmin fallo de forma inesperada: {exc}')}",
+            status_code=303,
+        )
+
+
 @router.get("/activities", response_class=HTMLResponse)
 def sync_garmin_activities_page(request: Request) -> HTMLResponse:
     settings = get_settings()
@@ -45,6 +68,7 @@ def sync_garmin_activities_page(request: Request) -> HTMLResponse:
             "result": None,
             "sync_all_result": None,
             "error": None,
+            "status_message": request.query_params.get("status"),
             "needs_mfa": has_pending_mfa(settings),
             "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
@@ -74,6 +98,7 @@ def sync_garmin_activities(request: Request, db: Session = Depends(get_db)) -> H
             "result": result,
             "sync_all_result": None,
             "error": error,
+            "status_message": None,
             "needs_mfa": has_pending_mfa(settings),
             "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
@@ -107,6 +132,7 @@ def sync_garmin_activities_mfa(
             "result": result,
             "sync_all_result": None,
             "error": error,
+            "status_message": None,
             "needs_mfa": has_pending_mfa(settings),
             "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
@@ -148,7 +174,17 @@ def sync_everything(request: Request, db: Session = Depends(get_db)) -> HTMLResp
             "result": None,
             "sync_all_result": sync_all_result,
             "error": error,
+            "status_message": None,
             "needs_mfa": has_pending_mfa(settings),
             "garmin_auth_diagnostics": get_garmin_auth_diagnostics(settings),
         },
+    )
+
+
+@router.post("/activities/from-list")
+def sync_garmin_activities_from_list(db: Session = Depends(get_db)) -> RedirectResponse:
+    return _sync_activities_and_redirect(
+        success_url="/activities?ui_status=",
+        error_url="/activities?ui_status=",
+        db=db,
     )

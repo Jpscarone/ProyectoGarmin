@@ -7,16 +7,21 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Actividades</p>
-            <h1>Actividades sincronizadas</h1>
+            <h1>Actividades en Garmin</h1>
         </div>
         <div class="actions-inline">
             <form method="post" action="/activities/auto-match-pending">
                 <button class="button button-utility" type="submit">Vincular recientes</button>
             </form>
-            <a class="button button-utility" href="/sync/garmin/activities">Sincronizar Garmin</a>
+            <form method="post" action="/sync/garmin/activities/from-list">
+                <button class="button" type="submit">Sincronizar Actividades</button>
+            </form>
         </div>
     </div>
 
+    {% if ui_status %}
+    <div class="alert alert-info">{{ ui_status }}</div>
+    {% endif %}
     {% if weather_status %}
     <div class="alert alert-info">{{ weather_status }}</div>
     {% endif %}
@@ -34,6 +39,7 @@
                     <th>Nombre</th>
                     <th>Duracion</th>
                     <th>Distancia</th>
+                    <th>Match</th>
                     <th>Clima</th>
                     <th>Acciones</th>
                 </tr>
@@ -46,17 +52,35 @@
                     <td>{{ activity.activity_name or '-' }}</td>
                     <td>{{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</td>
                     <td>{{ distance_label_meters(activity.distance_m) }}</td>
-                    <td>{{ 'Disponible' if activity.weather else 'Pendiente' }}</td>
+                    <td class="table-icon-cell">
+                        {% if activity.activity_match and activity.activity_match.planned_session %}
+                        <span class="table-check-indicator" title="Actividad vinculada con una sesion" aria-label="Actividad vinculada">&#10003;</span>
+                        {% else %}
+                        <span class="table-check-indicator table-check-indicator-empty" aria-hidden="true"></span>
+                        {% endif %}
+                    </td>
+                    <td class="table-icon-cell">
+                        {% if activity.weather %}
+                        <span class="table-check-indicator" title="Clima disponible" aria-label="Clima disponible">&#10003;</span>
+                        {% else %}
+                        <span class="table-check-indicator table-check-indicator-empty" aria-hidden="true"></span>
+                        {% endif %}
+                    </td>
                     <td>
                         <div class="actions-inline table-actions-inline activity-actions-inline">
                             <a class="button button-nav" href="/activities/{{ activity.id }}">Ver detalle</a>
-                            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
-                            <form method="post" action="/activities/{{ activity.id }}/auto-match">
+                            {% if activity.weather %}
+                            <button class="button button-utility" type="button" disabled>Sincronizar clima</button>
+                            {% else %}
+                            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}?return_to=list">Sincronizar clima</a>
+                            {% endif %}
+                            {% if activity.activity_match and activity.activity_match.planned_session %}
+                            <button class="button button-utility" type="button" disabled>Auto-match</button>
+                            {% else %}
+                            <form method="post" action="/activities/{{ activity.id }}/auto-match?return_to=list">
                                 <button class="button button-utility" type="submit">Auto-match</button>
                             </form>
-                            <form method="post" action="/analysis/activity/{{ activity.id }}">
-                                <button class="button button-utility" type="submit">Analizar</button>
-                            </form>
+                            {% endif %}
                         </div>
                     </td>
                 </tr>

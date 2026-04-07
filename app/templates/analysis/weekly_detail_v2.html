@@ -18,9 +18,13 @@
         </div>
         <div class="actions-inline">
             <form method="post" action="/analysis/weekly/{{ athlete.id }}/{{ view_model.header.week_start_date }}/re-run">
+                <input type="hidden" name="return_to" value="{{ return_context.return_to }}">
+                <input type="hidden" name="plan_id" value="{{ return_context.plan_id }}">
+                <input type="hidden" name="month" value="{{ return_context.month }}">
+                <input type="hidden" name="selected_date" value="{{ return_context.selected_date }}">
                 <button class="button button-utility" type="submit">Reanalizar semana</button>
             </form>
-            <a class="button button-nav" href="/athletes/{{ athlete.id }}">Ver atleta</a>
+            <a class="button button-nav" href="{{ return_context.url }}">{{ return_context.label }}</a>
         </div>
     </div>
 

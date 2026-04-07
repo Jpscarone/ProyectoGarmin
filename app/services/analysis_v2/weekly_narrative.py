@@ -23,6 +23,17 @@ from app.services.analysis_v2.weekly_schemas import (
 
 logger = logging.getLogger(__name__)
 
+WEEKLY_HEALTH_SLEEP_HOURS_LOW = 6.5
+WEEKLY_HEALTH_SLEEP_HOURS_MODERATE = 7.0
+WEEKLY_HEALTH_SLEEP_SCORE_LOW = 65
+WEEKLY_HEALTH_SLEEP_SCORE_MODERATE = 75
+WEEKLY_HEALTH_STRESS_HIGH = 35
+WEEKLY_HEALTH_STRESS_MODERATE = 28
+WEEKLY_HEALTH_BODY_BATTERY_LOW = 35
+WEEKLY_HEALTH_BODY_BATTERY_MODERATE = 50
+WEEKLY_HEALTH_RECOVERY_HIGH = 24.0
+WEEKLY_HEALTH_RECOVERY_MODERATE = 16.0
+
 WEEKLY_SYSTEM_PROMPT = """
 Sos un analista de entrenamiento de endurance enfocado en lectura semanal.
 Tu tarea es interpretar la semana completa de un atleta y ayudar a decidir que hacer la semana siguiente.
@@ -40,10 +51,28 @@ Objetivos:
 - interpretar carga, consistencia, balance y fatiga
 - detectar si la semana quedo ordenada o caotica
 - dejar una recomendacion concreta para la proxima semana
+
+Uso del contexto:
+- Si contextual_factors.has_relevant_context es false, no menciones salud o recuperacion como relleno.
+- Si hay contexto relevante, usalo solo para matizar la lectura semanal.
+- No conviertas la salud en explicacion unica de toda la semana.
+- No hagas inferencias medicas ni subjetivas.
 """.strip()
 
 
 def build_weekly_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    contextual_factors = build_weekly_contextual_factors(context, metrics)
+    filtered_metrics = {
+        "totals": metrics.get("totals", {}),
+        "distribution": metrics.get("distribution", {}),
+        "compliance": metrics.get("compliance", {}),
+        "trends": metrics.get("trends", {}),
+        "consistency": metrics.get("consistency", {}),
+        "session_analysis_aggregate": metrics.get("session_analysis_aggregate", {}),
+        "derived_flags": metrics.get("derived_flags", {}),
+        "scores": metrics.get("scores", {}),
+        "rule_thresholds": metrics.get("rule_thresholds", {}),
+    }
     return {
         "athlete": {
             "name": context.athlete.name,
@@ -81,7 +110,8 @@ def build_weekly_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[s
                 for item in context.planned_sessions
             ],
         },
-        "metrics": metrics,
+        "metrics": filtered_metrics,
+        "contextual_factors": contextual_factors,
         "previous_weeks": [
             {
                 "week_start_date": _iso(item.week_start_date),
@@ -96,6 +126,93 @@ def build_weekly_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[s
             for item in context.previous_weeks
         ],
         "missing_data": _collect_missing_data(context, metrics),
+    }
+
+
+def build_weekly_health_context_summary(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    health_context = metrics.get("health_context", {}) if isinstance(metrics, Mapping) else {}
+    if not health_context or not health_context.get("days_with_health"):
+        return {"relevant": False, "summary": None, "signals": []}
+
+    signals: list[str] = []
+    critical = False
+    moderate_signals = 0
+
+    avg_sleep_hours = health_context.get("avg_sleep_hours")
+    avg_sleep_score = health_context.get("avg_sleep_score")
+    avg_stress = health_context.get("avg_stress")
+    avg_body_battery_end = health_context.get("avg_body_battery_end")
+    avg_recovery_time_hours = health_context.get("avg_recovery_time_hours")
+
+    if avg_sleep_hours is not None:
+        if avg_sleep_hours < WEEKLY_HEALTH_SLEEP_HOURS_LOW:
+            signals.append(f"sueño medio bajo ({avg_sleep_hours:.1f} h)")
+            critical = True
+        elif avg_sleep_hours < WEEKLY_HEALTH_SLEEP_HOURS_MODERATE:
+            signals.append(f"sueño medio algo corto ({avg_sleep_hours:.1f} h)")
+            moderate_signals += 1
+
+    if avg_sleep_score is not None:
+        if avg_sleep_score < WEEKLY_HEALTH_SLEEP_SCORE_LOW:
+            signals.append(f"sleep score medio bajo ({round(avg_sleep_score)})")
+            critical = True
+        elif avg_sleep_score < WEEKLY_HEALTH_SLEEP_SCORE_MODERATE:
+            signals.append(f"sleep score medio moderado ({round(avg_sleep_score)})")
+            moderate_signals += 1
+
+    if avg_stress is not None:
+        if avg_stress >= WEEKLY_HEALTH_STRESS_HIGH:
+            signals.append(f"estres medio alto ({round(avg_stress)})")
+            critical = True
+        elif avg_stress >= WEEKLY_HEALTH_STRESS_MODERATE:
+            signals.append(f"estres medio sostenido ({round(avg_stress)})")
+            moderate_signals += 1
+
+    if avg_body_battery_end is not None:
+        if avg_body_battery_end < WEEKLY_HEALTH_BODY_BATTERY_LOW:
+            signals.append(f"body battery final baja ({round(avg_body_battery_end)})")
+            critical = True
+        elif avg_body_battery_end < WEEKLY_HEALTH_BODY_BATTERY_MODERATE:
+            signals.append(f"body battery final justa ({round(avg_body_battery_end)})")
+            moderate_signals += 1
+
+    if avg_recovery_time_hours is not None:
+        if avg_recovery_time_hours >= WEEKLY_HEALTH_RECOVERY_HIGH:
+            signals.append(f"recuperacion media pendiente alta ({round(avg_recovery_time_hours)} h)")
+            critical = True
+        elif avg_recovery_time_hours >= WEEKLY_HEALTH_RECOVERY_MODERATE:
+            signals.append(f"recuperacion media exigente ({round(avg_recovery_time_hours)} h)")
+            moderate_signals += 1
+
+    relevant = critical or moderate_signals >= 2
+    if not relevant:
+        return {"relevant": False, "summary": None, "signals": []}
+
+    scores = metrics.get("scores", {}) if isinstance(metrics, Mapping) else {}
+    fatigue_score = scores.get("fatigue_score")
+    consistency_score = scores.get("consistency_score")
+    effects: list[str] = []
+    if fatigue_score is not None and fatigue_score >= 65:
+        effects.append("puede haber aumentado la fatiga acumulada")
+    if consistency_score is not None and consistency_score < 70:
+        effects.append("puede haber reducido la calidad de la semana")
+    if not effects:
+        effects.append("puede matizar la lectura de la carga semanal")
+
+    summary = (
+        f"La semana estuvo acompañada por señales de recuperacion mejorable ({', '.join(signals)}), "
+        f"lo que {' y '.join(effects)}."
+    )
+    return {"relevant": True, "summary": summary, "signals": signals}
+
+
+def build_weekly_contextual_factors(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
+    health_context = build_weekly_health_context_summary(context, metrics)
+    return {
+        "has_relevant_context": bool(health_context["relevant"]),
+        "health_relevant": health_context["relevant"],
+        "health_summary": health_context["summary"],
+        "summary": health_context["summary"],
     }
 
 

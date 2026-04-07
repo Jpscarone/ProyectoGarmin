@@ -162,9 +162,6 @@
                             <a class="button button-utility" href="/session_templates?training_day_id={{ selected_training_day.id if selected_training_day else '' }}&training_plan_id={{ training_plan.id }}&planned_day_date={{ selected_day_date.isoformat() }}&return_to=planner&month={{ visible_month }}">Agregar desde biblioteca</a>
                             {% if selected_training_day %}
                             <a class="button button-utility" href="/session_groups/create?training_day_id={{ selected_training_day.id }}">Crear grupo</a>
-                            <form method="post" action="/analysis/day/{{ selected_training_day.id }}">
-                                <button class="button button-utility" type="submit">Analizar dia</button>
-                            </form>
                             <form method="post" action="/match/day/{{ selected_training_day.id }}">
                                 <button class="button button-utility" type="submit">Sincronizar todo</button>
                             </form>
@@ -176,7 +173,6 @@
                     <div class="planner-card-stack">
                         {% for session_row in selected_day_sessions %}
                         {% set planned_session = session_row.planned_session %}
-                        {% set latest_report = session_row.latest_report %}
                         {% set metrics = session_row.metrics %}
                         <article class="planner-session-card">
                             <div class="planner-card-main">
@@ -197,16 +193,16 @@
                                 </div>
                                 <div class="planner-chip-row">
                                     <span class="calendar-state-badge">{% if session_row.has_match %}Actividad vinculada{% else %}Sin actividad{% endif %}</span>
-                                    <span class="calendar-state-badge">{% if latest_report %}{{ analysis_status_label(latest_report.overall_status) }}{% else %}Sin analisis{% endif %}</span>
+                                    <span class="calendar-state-badge">{% if session_row.has_match %}Lista para analisis{% else %}Pendiente{% endif %}</span>
                                 </div>
                                 <p class="text-muted">{{ planned_session.description_text or planned_session.target_notes or (session_structure_summary_short(planned_session) or "Sin descripcion.") }}</p>
                             </div>
                             <div class="actions-inline planner-card-actions">
                                 <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver detalle</a>
+                                {% if session_row.has_match %}
+                                <a class="button button-utility" href="/planned_sessions/{{ planned_session.id }}/analysis">Ver analisis</a>
+                                {% endif %}
                                 <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
-                                <form method="post" action="/analysis/session/{{ planned_session.id }}">
-                                    <button class="button button-utility" type="submit">Analizar</button>
-                                </form>
                                 <a class="button button-utility" href="/session_templates/from-session/{{ planned_session.id }}">Guardar en biblioteca</a>
                             </div>
                         </article>
@@ -237,7 +233,13 @@
                                 </div>
                                 <div class="planner-chip-row">
                                     <span class="calendar-state-badge">{{ activity_row.match_label }}</span>
-                                    <span class="calendar-state-badge">{% if activity_row.latest_report %}{{ analysis_status_label(activity_row.latest_report.overall_status) }}{% else %}Sin analisis{% endif %}</span>
+                                    <span class="calendar-state-badge">
+                                        {% if activity.activity_match and activity.activity_match.planned_session %}
+                                        Lista para analisis
+                                        {% else %}
+                                        Sin sesion vinculada
+                                        {% endif %}
+                                    </span>
                                 </div>
                                 <p class="text-muted">
                                     {% if activity.activity_match and activity.activity_match.planned_session %}
@@ -249,9 +251,9 @@
                             </div>
                             <div class="actions-inline planner-card-actions">
                                 <a class="button button-nav" href="/activities/{{ activity.id }}">Ver detalle</a>
-                                <form method="post" action="/analysis/activity/{{ activity.id }}">
-                                    <button class="button button-utility" type="submit">Analizar</button>
-                                </form>
+                                {% if activity.activity_match and activity.activity_match.planned_session %}
+                                <a class="button button-utility" href="/planned_sessions/{{ activity.activity_match.planned_session.id }}/analysis">Ver analisis</a>
+                                {% endif %}
                             </div>
                         </article>
                         {% endfor %}

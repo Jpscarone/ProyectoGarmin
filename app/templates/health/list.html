@@ -9,8 +9,14 @@
             <p class="eyebrow">Salud</p>
             <h1>Metricas diarias Garmin</h1>
         </div>
-        <a class="button" href="/sync/garmin/health">Sincronizar salud</a>
+        <form method="post" action="/sync/garmin/health/from-health">
+            <button class="button" type="submit">Sincronizar salud</button>
+        </form>
     </div>
+
+    {% if ui_status %}
+    <div class="alert alert-info">{{ ui_status }}</div>
+    {% endif %}
 
     {% if metrics %}
     <div class="table-wrap">

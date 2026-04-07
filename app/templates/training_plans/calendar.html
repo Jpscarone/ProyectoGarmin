@@ -35,8 +35,10 @@
         <div>
             <p class="eyebrow">Calendario</p>
             <h2>{{ calendar_month_label }}</h2>
+            <p class="text-muted" id="calendar-week-summary">Semana seleccionada: {{ selected_week_analysis.week_range_label }}{% if selected_week_analysis.exists %} &middot; {{ selected_week_analysis.status_label }}{% endif %}</p>
         </div>
         <div class="actions-inline">
+            <a class="button button-nav" id="calendar-week-analysis-link" href="{{ selected_week_analysis.url }}">Ver análisis semanal</a>
             <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ previous_month }}">Mes anterior</a>
             <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ next_month }}">Mes siguiente</a>
         </div>
@@ -93,7 +95,12 @@
                     </div>
                     {% endfor %}
                     {% for summary in cell.session_summaries %}
-                    <a class="calendar-session-chip calendar-session-line" href="/planned_sessions/{{ summary.id }}" onclick="event.stopPropagation()">
+                    <a
+                        class="calendar-session-chip calendar-session-line"
+                        href="/planned_sessions/{{ summary.id }}?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}"
+                        onclick="event.stopPropagation()"
+                        {% if summary.description %}title="{{ summary.description }}"{% endif %}
+                    >
                         <strong>{{ summary.compact_label }}</strong>
                     </a>
                     {% endfor %}
@@ -145,6 +152,15 @@
                         {% else %}
                         <p class="text-muted">Todavia no hay un dia creado para esta fecha.</p>
                         {% endif %}
+                        <div class="calendar-week-analysis-inline" data-week-analysis-wrap{% if not (cell.is_selected and selected_week_analysis.exists) %} hidden{% endif %}>
+                            <a
+                                class="calendar-state-badge {% if cell.is_selected and selected_week_analysis.exists %}{{ selected_week_analysis.status_class }}{% else %}calendar-state-badge-empty{% endif %} calendar-week-analysis-badge"
+                                href="{% if cell.is_selected and selected_week_analysis.exists %}{{ selected_week_analysis.url }}{% else %}#{% endif %}"
+                                data-week-analysis-link
+                            >
+                                {% if cell.is_selected and selected_week_analysis.exists %}{{ selected_week_analysis.status_label }}{% endif %}
+                            </a>
+                        </div>
                     </div>
                     <div class="actions-inline">
                         {% if cell.training_day %}
@@ -243,8 +259,14 @@
                                 <p>{{ planned_session.description_text or planned_session.target_notes or "Sin descripcion." }}</p>
                             </div>
                             <div class="actions-inline">
-                                <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
-                                <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit">Editar</a>
+                                <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}">Ver sesion</a>
+                                {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
+                                <span title="No se puede editar una sesion que ya tiene actividad vinculada.">
+                                    <button class="button button-secondary" type="button" disabled>Editar</button>
+                                </span>
+                                {% else %}
+                                <a class="button button-secondary" href="/planned_sessions/{{ planned_session.id }}/edit?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}">Editar</a>
+                                {% endif %}
                                 <button class="button button-danger" type="button" onclick="deletePlannedSessionFromCalendar(event, {{ planned_session.id }}, '{{ cell.date.isoformat() }}')">Eliminar</button>
                             </div>
                         </article>
@@ -268,8 +290,70 @@
 <script>
 const calendarMonth = "{{ visible_month }}";
 const trainingPlanId = "{{ training_plan.id }}";
+const athleteId = "{{ training_plan.athlete_id }}";
 const calendarScrollKey = `training-plan-calendar-scroll-${trainingPlanId}`;
 const todayDateKey = "{{ today_iso }}";
+const currentSelectedDate = "{{ selected_day_date.isoformat() if selected_day_date else '' }}";
+const weeklyAnalysisLookup = {{ weekly_analysis_lookup | tojson }};
+
+function weekStartFromDate(dateKey) {
+    const [year, month, day] = dateKey.split("-").map(Number);
+    const selected = new Date(year, month - 1, day);
+    const jsDay = selected.getDay();
+    const diffToMonday = jsDay === 0 ? -6 : 1 - jsDay;
+    selected.setDate(selected.getDate() + diffToMonday);
+    const normalizedYear = selected.getFullYear();
+    const normalizedMonth = String(selected.getMonth() + 1).padStart(2, "0");
+    const normalizedDay = String(selected.getDate()).padStart(2, "0");
+    return `${normalizedYear}-${normalizedMonth}-${normalizedDay}`;
+}
+
+function updateSelectedWeekAnalysis(dateKey) {
+    const weekStartDate = weekStartFromDate(dateKey);
+    const weekData = weeklyAnalysisLookup[weekStartDate];
+    const weekSummary = document.getElementById("calendar-week-summary");
+    const weekLink = document.getElementById("calendar-week-analysis-link");
+    const weekAnalysisUrl = `/analysis/weekly/${athleteId}/${weekStartDate}?return_to=calendar&plan_id=${trainingPlanId}&month=${calendarMonth}&selected_date=${dateKey}`;
+
+    if (weekLink) {
+        weekLink.href = weekAnalysisUrl;
+    }
+
+    if (weekData && weekSummary) {
+        weekSummary.textContent = weekData.exists
+            ? `Semana seleccionada: ${weekData.week_range_label} · ${weekData.status_label}`
+            : `Semana seleccionada: ${weekData.week_range_label}`;
+    }
+
+    document.querySelectorAll("[data-week-analysis-wrap]").forEach((wrap) => {
+        wrap.hidden = true;
+        const badgeLink = wrap.querySelector("[data-week-analysis-link]");
+        if (!badgeLink) return;
+        badgeLink.textContent = "";
+        badgeLink.href = "#";
+        badgeLink.className = "calendar-state-badge calendar-state-badge-empty calendar-week-analysis-badge";
+    });
+
+    if (!weekData || !weekData.exists) {
+        return;
+    }
+
+    const activePanel = document.querySelector(`.calendar-day-panel[data-date="${dateKey}"]`);
+    if (!activePanel) {
+        return;
+    }
+
+    const badgeWrap = activePanel.querySelector("[data-week-analysis-wrap]");
+    const badgeLink = activePanel.querySelector("[data-week-analysis-link]");
+    if (!badgeWrap || !badgeLink) {
+        return;
+    }
+
+    badgeWrap.hidden = false;
+    badgeLink.textContent = weekData.status_label;
+    badgeLink.href = weekAnalysisUrl;
+    badgeLink.className = `calendar-state-badge ${weekData.status_class} calendar-week-analysis-badge`;
+}
 
 function selectCalendarDay(dateKey) {
     document.querySelectorAll(".calendar-cell").forEach((cell) => {
@@ -282,6 +366,7 @@ function selectCalendarDay(dateKey) {
 
     const nextUrl = `/training_plans/${trainingPlanId}/calendar?month=${calendarMonth}&selected_date=${dateKey}`;
     window.history.replaceState({}, "", nextUrl);
+    updateSelectedWeekAnalysis(dateKey);
 }
 
 function openCalendarDetail(event, plannedSessionId, trainingDayId) {
@@ -333,6 +418,10 @@ async function deleteTrainingDayFromCalendar(event, trainingDayId, dateKey) {
 }
 
 window.addEventListener("load", () => {
+    if (currentSelectedDate) {
+        updateSelectedWeekAnalysis(currentSelectedDate);
+    }
+
     const savedScrollY = sessionStorage.getItem(calendarScrollKey);
     if (savedScrollY) {
         sessionStorage.removeItem(calendarScrollKey);

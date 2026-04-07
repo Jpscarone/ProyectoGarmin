@@ -7,19 +7,24 @@
     <div class="section-heading">
         <div>
             <p class="eyebrow">Garmin</p>
-            <h1>Sincronizacion manual de actividades</h1>
+            <h1>Sincronizacion Manual</h1>
             <p class="text-muted">La sincronizacion usa credenciales configuradas en `.env` y guarda tokens en `GARMIN_TOKEN_DIR`.</p>
         </div>
-        <div class="actions-inline">
-            <a class="button button-secondary" href="/activities">Ver actividades</a>
-            <a class="button button-secondary" href="/sync/garmin/health">Sincronizar salud</a>
-        </div>
     </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
 
     <div class="actions-inline">
         <form method="post" action="/sync/garmin/activities">
             <div class="form-actions">
                 <button class="button" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar actividades recientes</button>
+            </div>
+        </form>
+        <form method="post" action="/sync/garmin/health/from-activities">
+            <div class="form-actions">
+                <button class="button button-utility" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar salud</button>
             </div>
         </form>
         <form method="post" action="/sync/garmin/all">
