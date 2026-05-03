@@ -298,6 +298,8 @@ def _build_weekly_analysis_v2_view_model(
     scores = metrics.get("scores", {})
     compliance = metrics.get("compliance", {})
     trends = metrics.get("trends", {})
+    distribution = metrics.get("distribution", {})
+    intensity_indicator = _weekly_intensity_indicator(scores, metrics.get("derived_flags", {}), distribution)
     technical = _build_weekly_technical_view(
         metrics_payload=metrics_payload,
         context_payload=context_payload,
@@ -334,6 +336,7 @@ def _build_weekly_analysis_v2_view_model(
             _score_card("Fatiga", analysis.fatigue_score if analysis else scores.get("fatigue_score")),
             _score_card("Balance", analysis.balance_score if analysis else scores.get("balance_score")),
         ],
+        "intensity_indicator": intensity_indicator,
         "positives": structured_output.get("positives") or [],
         "risks": structured_output.get("risks") or [],
         "recommendation": analysis.next_week_recommendation if analysis and analysis.next_week_recommendation else _weekly_empty_recommendation(status_value),
@@ -348,6 +351,39 @@ def _build_weekly_analysis_v2_view_model(
         "charts": _build_weekly_chart_data(metrics),
         "comparisons": _build_weekly_comparison_view(trends),
         "technical": technical,
+    }
+
+
+def _weekly_intensity_indicator(scores: dict[str, Any], flags: dict[str, Any], distribution: dict[str, Any]) -> dict[str, Any]:
+    score = scores.get("weekly_intensity_balance_score")
+    imbalance_flag = bool(flags.get("intensity_distribution_imbalance_flag"))
+    label = "intermedio"
+    status_class = "analysis-status-neutral"
+    if imbalance_flag or (score is not None and score < 50):
+        label = "desbalanceado"
+        status_class = "analysis-status-bad"
+    elif score is not None and score >= 75:
+        label = "equilibrado"
+        status_class = "analysis-status-good"
+    elif score is not None:
+        label = "intermedio"
+        status_class = "analysis-status-warn"
+
+    intensity_summary = distribution.get("intensity_zone_summary", {}) if isinstance(distribution, dict) else {}
+    pct_z2 = intensity_summary.get("pct_z2")
+    pct_z3 = intensity_summary.get("pct_z3")
+    pct_z4_plus = intensity_summary.get("pct_z4_plus")
+    pct_z4 = intensity_summary.get("pct_z4")
+    z3_z4 = (pct_z3 + pct_z4_plus) if pct_z3 is not None and pct_z4_plus is not None else None
+
+    def fmt(value: float | None) -> str:
+        return f"{value:.0f}%" if value is not None else "-"
+
+    return {
+        "label": label,
+        "status_class": status_class,
+        "score": round(score, 1) if score is not None else None,
+        "summary": f"Z2 {fmt(pct_z2)} · Z3-Z4 {fmt(z3_z4)} · Z4 {fmt(pct_z4)}",
     }
 
 

@@ -29,7 +29,14 @@ def stability_score_from_cv(cv_ratio: float | None) -> float | None:
     return clamp_score(100.0 - (cv_ratio * 400.0))
 
 
-def range_target_score(value: float | None, minimum: float | None, maximum: float | None, soft_margin: float) -> dict[str, float | str | bool | None]:
+def range_target_score(
+    value: float | None,
+    minimum: float | None,
+    maximum: float | None,
+    soft_margin: float,
+    *,
+    higher_is_better: bool = False,
+) -> dict[str, float | str | bool | None]:
     if value is None or (minimum is None and maximum is None):
         return {
             "score": None,
@@ -44,9 +51,10 @@ def range_target_score(value: float | None, minimum: float | None, maximum: floa
             score = 85.0
         else:
             score = max(0.0, 85.0 - ((delta - soft_margin) / max(soft_margin, 1)) * 20.0)
+        status = "above_range" if higher_is_better else "below_range"
         return {
             "score": clamp_score(score),
-            "status": "below_range",
+            "status": status,
             "within_range": False,
             "delta_to_range": round(delta, 2),
         }
@@ -57,9 +65,10 @@ def range_target_score(value: float | None, minimum: float | None, maximum: floa
             score = 85.0
         else:
             score = max(0.0, 85.0 - ((delta - soft_margin) / max(soft_margin, 1)) * 20.0)
+        status = "below_range" if higher_is_better else "above_range"
         return {
             "score": clamp_score(score),
-            "status": "above_range",
+            "status": status,
             "within_range": False,
             "delta_to_range": round(delta, 2),
         }

@@ -21,6 +21,7 @@ class DailyHealthMetric(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     athlete_id: Mapped[int] = mapped_column(ForeignKey("athletes.id"), nullable=False, index=True)
     metric_date: Mapped[date] = mapped_column(Date, nullable=False)
+    sleep_duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     sleep_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     deep_sleep_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -29,17 +30,23 @@ class DailyHealthMetric(Base):
     stress_avg: Mapped[int | None] = mapped_column(Integer, nullable=True)
     stress_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     high_stress_duration_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    body_battery_morning: Mapped[int | None] = mapped_column(Integer, nullable=True)
     body_battery_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     body_battery_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    body_battery_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     body_battery_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     hrv_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    hrv_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     hrv_avg_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     resting_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
     avg_daily_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    training_load: Mapped[float | None] = mapped_column(Float, nullable=True)
     recovery_time_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
     vo2max: Mapped[float | None] = mapped_column(Float, nullable=True)
     spo2_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
     respiration_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str | None] = mapped_column(String(50), nullable=True)
     raw_health_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
@@ -50,3 +57,7 @@ class DailyHealthMetric(Base):
     )
 
     athlete: Mapped["Athlete"] = relationship(back_populates="daily_health_metrics")
+
+    @property
+    def date(self) -> date:
+        return self.metric_date

@@ -13,13 +13,23 @@
             <nav class="site-nav">
                 <a href="/">Panel</a>
                 <a href="/athletes">Atletas</a>
-                <a href="/training_plans">Planes</a>
+                <a href="/training_plans{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Planes</a>
                 <a href="/calendar">Calendario</a>
                 <a href="/session_templates">Biblioteca</a>
-                <a href="/activities">Actividades</a>
-                <a href="/health">Salud</a>
-                <a href="/sync/garmin/activities">Sincronizar Garmin</a>
+                <a href="/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% if request.state.current_training_plan %}&training_plan_id={{ request.state.current_training_plan.id }}{% endif %}{% endif %}">Actividades</a>
+                <a href="/health{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Salud</a>
+                <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Sincronizar Garmin</a>
             </nav>
+            <div class="top-context">
+                {% if request.state.current_athlete %}
+                <a class="top-context-link" href="/athletes/select">
+                    {{ request.state.current_athlete.name }}
+                    {% if request.state.current_training_plan %} · {{ request.state.current_training_plan.name }}{% endif %}
+                </a>
+                {% else %}
+                <a class="top-context-link top-context-missing" href="/athletes/select">Seleccionar atleta</a>
+                {% endif %}
+            </div>
         </header>
         <main class="page-content">
             {% block content %}{% endblock %}

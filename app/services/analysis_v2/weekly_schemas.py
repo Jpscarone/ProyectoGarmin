@@ -25,13 +25,15 @@ class WeeklyNarrativeStructuredOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     week_type_detected: str = "indeterminada"
+    dominant_week_issue: str | None = None
+    recommendation_reason: str | None = None
     main_findings: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     positives: list[str] = Field(default_factory=list)
     recommendations: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
-    @field_validator("week_type_detected", mode="before")
+    @field_validator("week_type_detected", "dominant_week_issue", "recommendation_reason", mode="before")
     @classmethod
     def clean_text_field(cls, value: Any) -> Any:
         if isinstance(value, str):
@@ -58,6 +60,8 @@ class WeeklyNarrativeLLMOutput(BaseModel):
     coach_conclusion: str = ""
     next_week_recommendation: str = ""
     week_type_detected: str = "indeterminada"
+    dominant_week_issue: str | None = None
+    recommendation_reason: str | None = None
     main_findings: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     positives: list[str] = Field(default_factory=list)
@@ -70,6 +74,8 @@ class WeeklyNarrativeLLMOutput(BaseModel):
         "coach_conclusion",
         "next_week_recommendation",
         "week_type_detected",
+        "dominant_week_issue",
+        "recommendation_reason",
         mode="before",
     )
     @classmethod
@@ -94,6 +100,8 @@ class WeeklyNarrativeLLMOutput(BaseModel):
     def to_structured_output(self) -> WeeklyNarrativeStructuredOutput:
         return WeeklyNarrativeStructuredOutput(
             week_type_detected=self.week_type_detected,
+            dominant_week_issue=self.dominant_week_issue,
+            recommendation_reason=self.recommendation_reason,
             main_findings=self.main_findings,
             risks=self.risks,
             positives=self.positives,

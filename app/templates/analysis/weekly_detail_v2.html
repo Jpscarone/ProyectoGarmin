@@ -40,6 +40,12 @@
         <span class="analysis-v2-status-pill analysis-status-neutral">
             Cumplimiento: {{ view_model.compliance.completed or 0 }}/{{ view_model.compliance.planned or 0 }} ({{ view_model.compliance.ratio_pct }})
         </span>
+        <span class="analysis-v2-status-pill {{ view_model.intensity_indicator.status_class }}">
+            Balance de intensidad: {{ view_model.intensity_indicator.label }}
+        </span>
+        <span class="analysis-v2-status-pill analysis-status-neutral">
+            {{ view_model.intensity_indicator.summary }}
+        </span>
     </div>
 
     {% if view_model.state.message %}

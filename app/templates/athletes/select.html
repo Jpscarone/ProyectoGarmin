@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}Seleccionar atleta | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Contexto</p>
+            <h1>Seleccionar atleta</h1>
+            <p class="text-muted">Elegi con que atleta queres trabajar. Planes, calendario, actividades y salud se filtraran por esta seleccion.</p>
+        </div>
+        <a class="button" href="/athletes/create">Nuevo atleta</a>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-danger">{{ error_message }}</div>
+    {% endif %}
+
+    {% if active_athletes %}
+    <div class="athlete-select-grid">
+        {% for athlete in active_athletes %}
+        <form class="athlete-select-card" method="post" action="/athletes/select">
+            <input type="hidden" name="athlete_id" value="{{ athlete.id }}">
+            <div>
+                <p class="eyebrow">Atleta activo</p>
+                <h2>{{ athlete.name }}</h2>
+                <p class="text-muted">FC max {{ athlete.max_hr or "-" }} · FTP {{ athlete.cycling_ftp or "-" }}</p>
+            </div>
+            <button class="button" type="submit">Usar este atleta</button>
+        </form>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state">No hay atletas activos. Crea uno nuevo o reactiva un atleta existente.</p>
+    {% endif %}
+</section>
+{% endblock %}

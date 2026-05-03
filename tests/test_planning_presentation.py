@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from app.services.planning.presentation import (
     build_session_display_blocks,
+    build_session_summary_with_ranges,
     describe_session_structure,
     describe_session_structure_short,
     derive_session_metrics,
@@ -401,6 +402,68 @@ class PlanningPresentationTests(unittest.TestCase):
         summary = describe_session_structure_short(session)
 
         self.assertEqual(summary, "10min suave + 4x(2km+1:30) Z4")
+
+    def test_custom_ranges_show_in_short_and_full_summaries(self) -> None:
+        session = SimpleNamespace(
+            sport_type="running",
+            athlete=None,
+            expected_duration_min=None,
+            expected_distance_km=None,
+            target_notes=None,
+            session_type="intervals",
+            planned_session_steps=[
+                SimpleNamespace(
+                    id=1,
+                    step_order=1,
+                    step_type="steady",
+                    repeat_count=None,
+                    duration_sec=600,
+                    distance_m=None,
+                    target_type="hr",
+                    target_hr_zone=None,
+                    target_hr_min=151,
+                    target_hr_max=155,
+                    target_power_zone=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_zone=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_rpe_zone=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    target_notes=None,
+                ),
+                SimpleNamespace(
+                    id=2,
+                    step_order=2,
+                    step_type="work",
+                    repeat_count=None,
+                    duration_sec=360,
+                    distance_m=None,
+                    target_type="pace",
+                    target_hr_zone=None,
+                    target_hr_min=None,
+                    target_hr_max=None,
+                    target_power_zone=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_zone=None,
+                    target_pace_min_sec_km=300,
+                    target_pace_max_sec_km=310,
+                    target_rpe_zone=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    target_notes=None,
+                ),
+            ],
+        )
+
+        short_summary = describe_session_structure_short(session)
+        full_summary = build_session_summary_with_ranges(session)
+
+        self.assertEqual(short_summary, "10min FC personalizada 151-155 + 6min Ritmo personalizado 5:00-5:10")
+        self.assertEqual(full_summary, "Running 10min FC personalizada [151-155] + 6min Ritmo personalizado [5:00-5:10]")
 
 
 if __name__ == "__main__":

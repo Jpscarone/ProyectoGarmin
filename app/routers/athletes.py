@@ -11,12 +11,16 @@ from app.config import get_settings
 from app.db.session import get_db
 from app.schemas.athlete import AthleteCreate, AthleteRead, AthleteUpdate
 from app.services.athlete_service import (
+    ATHLETE_STATUS_ACTIVE,
     create_athlete,
     delete_athlete,
+    get_active_athletes,
     get_athlete,
     get_athletes,
     update_athlete,
 )
+from app.services.athlete_context import clear_current_athlete, set_current_athlete, set_current_training_plan
+from app.services.training_plan_service import select_default_training_plan
 from app.services.athlete_zone_service import (
     build_zone_form_rows,
     recalculate_athlete_zones,
@@ -60,6 +64,85 @@ def create_athlete_page(request: Request) -> HTMLResponse:
         request=request,
         name="athletes/create.html",
         context={"athlete": None},
+    )
+
+
+@router.get("/select", response_class=HTMLResponse)
+def select_athlete_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request=request,
+        name="athletes/select.html",
+        context={
+            "active_athletes": get_active_athletes(db),
+            "status_message": request.query_params.get("status_message"),
+            "error_message": request.query_params.get("error"),
+        },
+    )
+
+
+@router.post("/select")
+def select_athlete_endpoint(
+    request: Request,
+    athlete_id: int = Form(...),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
+        clear_current_athlete(request)
+        return RedirectResponse(url="/athletes/select?error=El%20atleta%20no%20esta%20activo", status_code=303)
+
+    set_current_athlete(request, athlete.id)
+    default_plan = select_default_training_plan(db, athlete_id=athlete.id)
+    set_current_training_plan(request, default_plan.id if default_plan else None)
+    if default_plan is not None:
+        return RedirectResponse(url=f"/training_plans/{default_plan.id}/calendar?athlete_id={athlete.id}", status_code=303)
+    return RedirectResponse(url=f"/training_plans?athlete_id={athlete.id}", status_code=303)
+
+
+@router.get("/{athlete_id}/plans")
+def athlete_plans_alias(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    set_current_athlete(request, athlete.id)
+    return RedirectResponse(url=f"/training_plans?athlete_id={athlete.id}", status_code=303)
+
+
+@router.get("/{athlete_id}/activities")
+def athlete_activities_alias(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    set_current_athlete(request, athlete.id)
+    return RedirectResponse(url=f"/activities?athlete_id={athlete.id}", status_code=303)
+
+
+@router.get("/{athlete_id}/health")
+def athlete_health_alias(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    set_current_athlete(request, athlete.id)
+    return RedirectResponse(url=f"/health?athlete_id={athlete.id}", status_code=303)
+
+
+@router.get("/{athlete_id}/training-plans/{training_plan_id}/calendar")
+def athlete_calendar_alias(
+    request: Request,
+    athlete_id: int,
+    training_plan_id: int,
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    athlete = get_athlete(db, athlete_id)
+    if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    set_current_athlete(request, athlete.id)
+    set_current_training_plan(request, training_plan_id)
+    query = request.url.query
+    suffix = f"&{query}" if query else ""
+    return RedirectResponse(
+        url=f"/training_plans/{training_plan_id}/calendar?athlete_id={athlete.id}{suffix}",
+        status_code=303,
     )
 
 

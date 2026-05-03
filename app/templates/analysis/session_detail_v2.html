@@ -49,9 +49,24 @@
     <div class="analysis-v2-conclusion-card">
         <p class="eyebrow">Conclusion principal</p>
         <h2>{{ view_model.conclusion.coach_conclusion }}</h2>
+        {% if view_model.conclusion.is_ai_generated %}
+        <small>Redactado por IA</small>
+        {% endif %}
         <p class="analysis-v2-summary-short">{{ view_model.conclusion.summary_short }}</p>
     </div>
 </section>
+
+{% if view_model.quick_takeaway %}
+<section class="panel analysis-v2-quick-panel">
+    <div class="analysis-v2-quick-takeaway-card">
+        <p class="eyebrow">Lectura rapida experimental</p>
+        <h2>Interpretacion practica</h2>
+        {% for paragraph in view_model.quick_takeaway.split('\n\n') %}
+        <p class="analysis-v2-quick-takeaway-text">{{ paragraph }}</p>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
 
 <section class="panel">
     <div class="section-heading">
@@ -117,6 +132,9 @@
     </div>
     <div class="analysis-v2-recommendation-card">
         {{ view_model.recommendation }}
+        {% if view_model.recommendation_is_ai_generated %}
+        <small>Redactado por IA</small>
+        {% endif %}
     </div>
 </section>
 
@@ -204,6 +222,12 @@
         <div class="alert alert-warning">{{ view_model.technical.error_message }}</div>
         {% endif %}
 
+        <div class="actions-inline analysis-v2-copy-actions">
+            <button class="button button-nav" type="button" data-copy-button="metrics" onclick="copyJson('metrics', this)">Copiar Metrics JSON</button>
+            <button class="button button-secondary" type="button" data-copy-button="llm" onclick="copyJson('llm', this)">Copiar LLM JSON</button>
+            <span id="copy-feedback" class="analysis-v2-copy-feedback" hidden>Copiado ✔</span>
+        </div>
+
         {% if view_model.technical.lap_rows %}
         <div class="table-wrap">
             <table class="table">
@@ -235,6 +259,44 @@
         </div>
         {% endif %}
 
+        {% if view_model.technical.matching_rows %}
+        <div class="table-wrap analysis-v2-matching-audit">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Step</th>
+                        <th>Lap</th>
+                        <th>Planificado</th>
+                        <th>Real</th>
+                        <th>Estado</th>
+                        <th>Motivo elegido</th>
+                        <th>Penalizaciones</th>
+                        <th>Descartados</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in view_model.technical.matching_rows %}
+                    <tr class="{{ row.row_class }}">
+                        <td>{{ row.step_order }}</td>
+                        <td>{{ row.lap_index }}</td>
+                        <td>{{ row.planned }}</td>
+                        <td>{{ row.actual }}</td>
+                        <td><span class="status-badge {{ row.status_class }}">{{ row.status }}</span></td>
+                        <td><span class="analysis-v2-matching-reason">{{ row.reason }}</span></td>
+                        <td>
+                            <span class="analysis-v2-matching-meta">{{ row.penalties }}</span>
+                            {% if row.total_penalty is not none %}
+                            <br><span class="analysis-v2-matching-meta">total {{ row.total_penalty }}</span>
+                            {% endif %}
+                        </td>
+                        <td><span class="analysis-v2-matching-meta">{{ row.rejected }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         <div class="analysis-v2-technical-grid">
             <article class="analysis-v2-technical-card">
                 <h3>Metrics JSON</h3>
@@ -252,6 +314,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script>
 const chartData = {{ view_model.charts|tojson }};
+const metricsJson = {{ view_model.technical.metrics_json | tojson | safe }};
+const llmJson = {{ view_model.technical.llm_json | tojson | safe }};
 
 if (chartData.show_hr) {
   new Chart(document.getElementById("analysisHrChart"), {
@@ -302,6 +366,99 @@ if (chartData.show_zones) {
     },
     options: { responsive: true, maintainAspectRatio: false }
   });
+}
+
+function copyJson(type, buttonEl) {
+  let data = null;
+  if (type === "metrics") {
+    data = metricsJson;
+  } else if (type === "llm") {
+    data = llmJson;
+  }
+
+  if (data === null) {
+    return;
+  }
+
+  const text = JSON.stringify(data, null, 2);
+  navigator.clipboard.writeText(text)
+    .then(() => {
+      showCopiedButtonState(buttonEl);
+      showCopyFeedback();
+    })
+    .catch(() => {
+      alert("No se pudo copiar");
+    });
+}
+
+function showCopyFeedback() {
+  const el = document.getElementById("copy-feedback");
+  if (!el) return;
+  el.hidden = false;
+  window.setTimeout(() => {
+    el.hidden = true;
+  }, 1500);
+}
+
+function showCopiedButtonState(buttonEl) {
+  if (!buttonEl) return;
+  const originalText = buttonEl.dataset.originalText || buttonEl.textContent;
+  buttonEl.dataset.originalText = originalText;
+  buttonEl.textContent = "Copiado";
+  buttonEl.disabled = true;
+  window.setTimeout(() => {
+    buttonEl.textContent = buttonEl.dataset.originalText || originalText;
+    buttonEl.disabled = false;
+  }, 1500);
+}
+</script>
+{% else %}
+<script>
+const metricsJson = {{ view_model.technical.metrics_json | tojson | safe }};
+const llmJson = {{ view_model.technical.llm_json | tojson | safe }};
+
+function copyJson(type, buttonEl) {
+  let data = null;
+  if (type === "metrics") {
+    data = metricsJson;
+  } else if (type === "llm") {
+    data = llmJson;
+  }
+
+  if (data === null) {
+    return;
+  }
+
+  const text = JSON.stringify(data, null, 2);
+  navigator.clipboard.writeText(text)
+    .then(() => {
+      showCopiedButtonState(buttonEl);
+      showCopyFeedback();
+    })
+    .catch(() => {
+      alert("No se pudo copiar");
+    });
+}
+
+function showCopyFeedback() {
+  const el = document.getElementById("copy-feedback");
+  if (!el) return;
+  el.hidden = false;
+  window.setTimeout(() => {
+    el.hidden = true;
+  }, 1500);
+}
+
+function showCopiedButtonState(buttonEl) {
+  if (!buttonEl) return;
+  const originalText = buttonEl.dataset.originalText || buttonEl.textContent;
+  buttonEl.dataset.originalText = originalText;
+  buttonEl.textContent = "Copiado";
+  buttonEl.disabled = true;
+  window.setTimeout(() => {
+    buttonEl.textContent = buttonEl.dataset.originalText || originalText;
+    buttonEl.disabled = false;
+  }, 1500);
 }
 </script>
 {% endif %}

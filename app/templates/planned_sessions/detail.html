@@ -51,7 +51,12 @@
                 {% if session_view.notes.description %}
                 <article class="detail-item planned-session-description-card">
                     <p class="eyebrow">Descripcion</p>
-                    <p class="planned-session-description-text">{{ session_view.notes.description }}</p>
+                    <p class="planned-session-description-text">
+                        {{ (session_view.notes.description_html or session_view.notes.description or "") | safe }}
+                        {% if session_view.notes.description_plain %}
+                        <span class="sr-only">{{ session_view.notes.description_plain }}</span>
+                        {% endif %}
+                    </p>
                 </article>
                 {% endif %}
 
@@ -153,17 +158,14 @@
                         <div class="planned-session-step-summary-main">
                             <strong>{{ item.label }}</strong>
                             <span class="text-muted">{{ item.summary }}</span>
+                            <span class="status-badge {{ item.status_class }} planned-session-step-status">{{ item.status_label }}</span>
                         </div>
                         {% if item.intensity %}
                         <div class="planned-session-inline-list">
                             <span class="planned-session-inline-pill">{{ item.intensity }}</span>
                         </div>
                         {% endif %}
-                        {% if item.notes %}
-                        <p class="text-muted">{{ item.notes }}</p>
-                        {% endif %}
                         <div class="planned-session-step-result">
-                            <span class="status-badge {{ item.status_class }}">{{ item.status_label }}</span>
                             {% if item.actual_text %}
                             <span class="text-muted">Lap real: {{ item.actual_text }}</span>
                             {% elif item.missing_match %}
@@ -183,12 +185,9 @@
                         {% if card.item.intensity %}
                         <span class="text-muted">{{ card.item.intensity }}</span>
                         {% endif %}
+                        <span class="status-badge {{ card.item.status_class }} planned-session-step-status">{{ card.item.status_label }}</span>
                     </div>
-                    {% if card.item.notes %}
-                    <p class="text-muted">{{ card.item.notes }}</p>
-                    {% endif %}
                     <div class="planned-session-step-result">
-                        <span class="status-badge {{ card.item.status_class }}">{{ card.item.status_label }}</span>
                         {% if card.item.actual_text %}
                         <span class="text-muted">Lap real: {{ card.item.actual_text }}</span>
                         {% elif card.item.missing_match %}

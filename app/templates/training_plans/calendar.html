@@ -13,9 +13,28 @@
             <p class="text-muted">Atleta: {{ training_plan.athlete.name }}{% if training_plan.goal %} | Objetivo: {{ training_plan.goal.name }}{% endif %}</p>
         </div>
         <div class="actions-inline">
-            <a class="button button-nav" href="/training_plans/{{ training_plan.id }}">Ver lista</a>
+            <a class="button button-nav" href="/training_plans?athlete_id={{ training_plan.athlete_id }}">Ver lista</a>
         </div>
     </div>
+
+    {% if plan_options and plan_options|length > 1 %}
+    <form class="calendar-plan-switcher" method="get" action="/training_plans/{{ training_plan.id }}/calendar" onsubmit="return switchTrainingPlanCalendar(this)">
+        <label>
+            <span>Plan seleccionado</span>
+            <select name="training_plan_id" id="calendar-plan-selector">
+                {% for option in plan_options %}
+                <option value="{{ option.id }}" {% if option.id == training_plan.id %}selected{% endif %}>
+                    {{ option.name }}{% if option.status %} ({{ option.status }}){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <input type="hidden" name="month" value="{{ visible_month }}">
+        <input type="hidden" name="selected_date" value="{{ selected_day_date.isoformat() if selected_day_date else '' }}">
+        <input type="hidden" name="athlete_id" value="{{ training_plan.athlete_id }}">
+        <button class="button button-utility" type="submit">Cambiar plan</button>
+    </form>
+    {% endif %}
 
     {% if status_message %}
     <div class="alert alert-info">{{ status_message }}</div>
@@ -39,8 +58,8 @@
         </div>
         <div class="actions-inline">
             <a class="button button-nav" id="calendar-week-analysis-link" href="{{ selected_week_analysis.url }}">Ver análisis semanal</a>
-            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ previous_month }}">Mes anterior</a>
-            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?month={{ next_month }}">Mes siguiente</a>
+            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?athlete_id={{ training_plan.athlete_id }}&month={{ previous_month }}">Mes anterior</a>
+            <a class="button button-utility" href="/training_plans/{{ training_plan.id }}/calendar?athlete_id={{ training_plan.athlete_id }}&month={{ next_month }}">Mes siguiente</a>
         </div>
     </div>
 
@@ -63,6 +82,11 @@
             >
                 <div class="calendar-cell-header">
                     <span class="calendar-day-link">{{ cell.date.day }}</span>
+                    {% if cell.session_summaries %}
+                    <span class="calendar-header-icon" aria-hidden="true">
+                        <span class="calendar-sport-icon" data-sport="{{ cell.session_summaries[0].sport_type }}"></span>
+                    </span>
+                    {% endif %}
                     {% if cell.is_today %}
                     <span class="calendar-pill calendar-pill-today">Hoy</span>
                     {% endif %}
@@ -79,9 +103,6 @@
 
                 {% if cell.training_day %}
                 <div class="calendar-cell-body">
-                    <div class="calendar-state-row calendar-state-row-top">
-                        <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
-                    </div>
                     {% for goal in cell.primary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
                         <strong>Principal</strong>
@@ -99,9 +120,10 @@
                         class="calendar-session-chip calendar-session-line"
                         href="/planned_sessions/{{ summary.id }}?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}"
                         onclick="event.stopPropagation()"
-                        {% if summary.description %}title="{{ summary.description }}"{% endif %}
+                        {% if summary.description or summary.short_description %}title="{{ summary.description or summary.short_description }}"{% endif %}
                     >
-                        <strong>{{ summary.compact_label }}</strong>
+                        <span class="sr-only">{{ summary.sport_type }}</span>
+                        <span class="calendar-session-text">{{ summary.compact_label }}</span>
                     </a>
                     {% endfor %}
                     {% if not cell.session_summaries and not cell.primary_goals and not cell.secondary_goals %}
@@ -110,14 +132,12 @@
                     {% if cell.overflow_count %}
                     <p class="calendar-more">+{{ cell.overflow_count }} sesiones mas</p>
                     {% endif %}
+                    <div class="calendar-state-row calendar-state-row-bottom">
+                        <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
+                    </div>
                 </div>
                 {% else %}
                 <div class="calendar-cell-body">
-                    {% if cell.primary_goals or cell.secondary_goals %}
-                    <div class="calendar-state-row calendar-state-row-top">
-                        <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
-                    </div>
-                    {% endif %}
                     {% for goal in cell.primary_goals %}
                     <div class="calendar-session-chip calendar-goal-chip calendar-goal-primary">
                         <strong>Principal</strong>
@@ -130,6 +150,9 @@
                         <span>{{ goal.name }}</span>
                     </div>
                     {% endfor %}
+                    <div class="calendar-state-row calendar-state-row-bottom">
+                        <span class="calendar-state-badge calendar-state-badge-{{ cell.day_status }}">{{ cell.day_status_label }}</span>
+                    </div>
                 </div>
                 {% endif %}
             </article>
@@ -256,7 +279,7 @@
                                     <span class="calendar-state-badge">{% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}Actividad vinculada{% else %}Sin actividad{% endif %}</span>
                                     <span class="calendar-state-badge">{% if planned_session.analysis_reports %}Con analisis{% else %}Sin analisis{% endif %}</span>
                                 </div>
-                                <p>{{ planned_session.description_text or planned_session.target_notes or "Sin descripcion." }}</p>
+                                <p>{{ (planned_session.long_description_html or planned_session.description_text or planned_session.target_notes or "Sin descripcion.") | safe }}</p>
                             </div>
                             <div class="actions-inline">
                                 <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}">Ver sesion</a>
@@ -293,7 +316,7 @@ const trainingPlanId = "{{ training_plan.id }}";
 const athleteId = "{{ training_plan.athlete_id }}";
 const calendarScrollKey = `training-plan-calendar-scroll-${trainingPlanId}`;
 const todayDateKey = "{{ today_iso }}";
-const currentSelectedDate = "{{ selected_day_date.isoformat() if selected_day_date else '' }}";
+let currentSelectedDate = "{{ selected_day_date.isoformat() if selected_day_date else '' }}";
 const weeklyAnalysisLookup = {{ weekly_analysis_lookup | tojson }};
 
 function weekStartFromDate(dateKey) {
@@ -356,6 +379,7 @@ function updateSelectedWeekAnalysis(dateKey) {
 }
 
 function selectCalendarDay(dateKey) {
+    currentSelectedDate = dateKey;
     document.querySelectorAll(".calendar-cell").forEach((cell) => {
         cell.classList.toggle("calendar-cell-selected", cell.dataset.date === dateKey);
     });
@@ -374,13 +398,22 @@ function openCalendarDetail(event, plannedSessionId, trainingDayId) {
     event.stopPropagation();
 
     if (plannedSessionId) {
-        window.location.href = `/planned_sessions/${plannedSessionId}`;
+        window.location.href = `/planned_sessions/${plannedSessionId}?return_to=calendar&month=${calendarMonth}&selected_date=${currentSelectedDate || ""}`;
         return;
     }
 
     if (trainingDayId) {
         window.location.href = `/training_days/${trainingDayId}?return_to=calendar`;
     }
+}
+
+function switchTrainingPlanCalendar(form) {
+    const selector = document.getElementById("calendar-plan-selector");
+    if (!selector || !selector.value) return true;
+    const params = new URLSearchParams(new FormData(form));
+    params.delete("training_plan_id");
+    window.location.href = `/training_plans/${selector.value}/calendar?${params.toString()}`;
+    return false;
 }
 
 async function deletePlannedSessionFromCalendar(event, plannedSessionId, dateKey) {

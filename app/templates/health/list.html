@@ -9,14 +9,300 @@
             <p class="eyebrow">Salud</p>
             <h1>Metricas diarias Garmin</h1>
         </div>
-        <form method="post" action="/sync/garmin/health/from-health">
-            <button class="button" type="submit">Sincronizar salud</button>
-        </form>
+        <div class="actions-inline">
+            <form class="health-readiness-date-form" method="get" action="/health">
+                <input type="date" name="selected_date" value="{{ readiness.selected_date }}">
+                {% if readiness.athlete_id %}
+                <input type="hidden" name="athlete_id" value="{{ readiness.athlete_id }}">
+                {% endif %}
+                <button class="button button-secondary" type="submit">Ver estado</button>
+                <div class="health-readiness-quick-nav">
+                    <a class="button button-utility" href="{{ readiness.quick_nav.yesterday_url }}">Ayer</a>
+                    <a class="button button-utility" href="{{ readiness.quick_nav.minus_7d_url }}">-7 dias</a>
+                    {% if readiness.quick_nav.plus_1d_url %}
+                    <a class="button button-utility" href="{{ readiness.quick_nav.plus_1d_url }}">+1 dia</a>
+                    {% endif %}
+                    <a class="button button-utility" href="{{ readiness.quick_nav.today_url }}">Hoy</a>
+                    {% set health_llm_json_url = "/health/readiness/llm-json?selected_date=" ~ readiness.selected_date ~ ("&athlete_id=" ~ readiness.athlete_id if readiness.athlete_id else "") %}
+                    {% set health_ai_analysis_url = "/health/readiness/ai-analysis?selected_date=" ~ readiness.selected_date ~ ("&athlete_id=" ~ readiness.athlete_id if readiness.athlete_id else "") %}
+                    {% set health_auto_ai_analysis_url = "/health/readiness/auto-ai-analysis?selected_date=" ~ readiness.selected_date ~ ("&athlete_id=" ~ readiness.athlete_id if readiness.athlete_id else "") %}
+                    <a
+                        class="button button-utility"
+                        href="{{ health_llm_json_url }}"
+                        target="_blank"
+                        rel="noreferrer"
+                    >
+                        Ver JSON para IA
+                    </a>
+                    <button
+                        class="button button-utility"
+                        type="button"
+                        data-health-llm-copy-url="{{ health_llm_json_url }}"
+                        onclick="copyHealthLlmJson(this)"
+                    >
+                        Copiar JSON para IA
+                    </button>
+                    <button
+                        class="button button-utility"
+                        type="button"
+                        data-health-ai-analysis-url="{{ health_ai_analysis_url }}"
+                        onclick="runHealthAiAnalysis(this)"
+                    >
+                        Analizar con IA
+                    </button>
+                </div>
+            </form>
+            <button
+                class="button"
+                type="button"
+                data-health-auto-sync-url="{{ readiness.health_auto_sync_url }}"
+                onclick="runHealthAutoSync(this, true)"
+            >
+                Sincronizar salud
+            </button>
+        </div>
     </div>
 
     {% if ui_status %}
     <div class="alert alert-info">{{ ui_status }}</div>
     {% endif %}
+
+    <div
+        id="health-sync-status"
+        class="health-sync-status {{ readiness.sync_view.class }}"
+        data-should-auto-sync="{{ 'true' if readiness.should_auto_sync else 'false' }}"
+        data-health-auto-sync-url="{{ readiness.health_auto_sync_url }}"
+        data-health-auto-ai-analysis-url="{{ health_auto_ai_analysis_url }}"
+    >
+        <div>
+            <strong id="health-sync-label">{{ readiness.sync_view.label }}</strong>
+            <span id="health-sync-detail">{{ readiness.sync_view.detail }}</span>
+        </div>
+    </div>
+
+    <section class="health-readiness-card">
+        <div class="health-readiness-header">
+            <div>
+                <p class="eyebrow">Readiness local</p>
+                <h2>Estado para entrenar el {{ readiness.selected_date_label }}</h2>
+                {% if readiness.athlete_name %}
+                <p class="text-muted">{{ readiness.athlete_name }} · referencia {{ readiness.selected_date }}</p>
+                {% endif %}
+            </div>
+            <div class="health-readiness-status">
+                <span class="status-badge {{ readiness.status_class }}">{{ readiness.evaluation.readiness_label }}</span>
+                <strong class="health-readiness-score">{{ readiness.score_label }}</strong>
+            </div>
+        </div>
+
+        <p class="health-readiness-recommendation">{{ readiness.evaluation.recommendation }}</p>
+
+        {% if readiness.main_limiter_label %}
+        <p class="health-readiness-limiter"><strong>Factor principal:</strong> {{ readiness.main_limiter_label }}</p>
+        {% endif %}
+
+        {% if readiness.reason_items %}
+        <ul class="health-readiness-reasons">
+            {% for item in readiness.reason_items %}
+            <li>{{ item }}</li>
+            {% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if readiness.evaluation.readiness_status == "insufficient_data" %}
+        <p class="text-muted">Hacen falta al menos 5 dias con datos dentro de los ultimos 14 para evaluar la tendencia.</p>
+        {% endif %}
+
+        <div class="health-readiness-metrics-grid">
+            {% for item in readiness.metric_overview %}
+            <article class="health-readiness-metric">
+                <span class="health-readiness-metric-label">{{ item.label }}</span>
+                <strong class="health-readiness-metric-value">{{ item.value }}</strong>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="health-training-context-card">
+        <div class="health-training-context-header">
+            <div>
+                <p class="eyebrow">Carga reciente</p>
+                <h2>Contexto de entrenamiento reciente</h2>
+            </div>
+        </div>
+
+        {% if readiness.training_context_view.has_recent_data %}
+        <div class="health-training-context-grid">
+            {% for item in readiness.training_context_view.metric_items %}
+            <article class="health-training-context-item">
+                <span class="health-training-context-label">{{ item.label }}</span>
+                <strong class="health-training-context-value">{{ item.value }}</strong>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">Sin datos recientes de entrenamiento.</p>
+        {% endif %}
+    </section>
+
+    <section id="health-ai-saved-card" class="health-ai-saved-card" {% if not readiness.latest_ai_analysis %}hidden{% endif %}>
+        <div class="health-ai-analysis-header">
+            <div>
+                <p class="eyebrow">Analisis de IA guardado</p>
+                <h2>Ultimo analisis IA guardado</h2>
+            </div>
+            <div class="health-ai-analysis-header-side">
+                <span id="health-ai-saved-risk-badge" class="status-badge {% if readiness.latest_ai_analysis %}health-ai-risk-{{ readiness.latest_ai_analysis.risk_level or 'unknown' }}{% else %}health-ai-risk-unknown{% endif %}">
+                    {% if readiness.latest_ai_analysis %}
+                    Riesgo {{ readiness.latest_ai_analysis.risk_level or "desconocido" }}
+                    {% else %}
+                    Riesgo desconocido
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+
+        <p id="health-ai-saved-meta" class="text-muted">
+            {% if readiness.latest_ai_analysis %}
+            Generado {{ readiness.latest_ai_analysis.created_at_label }}{% if readiness.latest_ai_analysis.model_name %} · modelo {{ readiness.latest_ai_analysis.model_name }}{% endif %}
+            {% endif %}
+        </p>
+
+        <div class="health-ai-analysis-grid">
+            <article class="health-ai-analysis-block">
+                <span class="health-ai-analysis-label">Resumen</span>
+                <p id="health-ai-saved-summary" class="health-ai-analysis-text">{{ readiness.latest_ai_analysis.summary if readiness.latest_ai_analysis else "-" }}</p>
+            </article>
+
+            <article class="health-ai-analysis-block">
+                <span class="health-ai-analysis-label">Recomendacion de entrenamiento</span>
+                <p id="health-ai-saved-recommendation" class="health-ai-analysis-text">{{ readiness.latest_ai_analysis.training_recommendation if readiness.latest_ai_analysis else "-" }}</p>
+            </article>
+        </div>
+    </section>
+
+    <section id="health-ai-analysis-card" class="health-ai-analysis-card" hidden>
+        <div class="health-ai-analysis-header">
+            <div>
+                <p class="eyebrow">Analisis de IA</p>
+                <h2>Lectura breve del readiness</h2>
+            </div>
+            <div class="health-ai-analysis-header-side">
+                <span id="health-ai-risk-badge" class="status-badge health-ai-risk-unknown">Riesgo desconocido</span>
+                <button
+                    id="health-ai-copy-button"
+                    class="button button-utility"
+                    type="button"
+                    hidden
+                    onclick="copyHealthAiAnalysis(this)"
+                >
+                    Copiar analisis IA
+                </button>
+            </div>
+        </div>
+
+        <div id="health-ai-analysis-message" class="health-ai-analysis-message" hidden></div>
+
+        <div class="health-ai-analysis-grid">
+            <article class="health-ai-analysis-block">
+                <span class="health-ai-analysis-label">Resumen</span>
+                <p id="health-ai-summary" class="health-ai-analysis-text">-</p>
+            </article>
+
+            <article class="health-ai-analysis-block">
+                <span class="health-ai-analysis-label">Recomendacion de entrenamiento</span>
+                <p id="health-ai-recommendation" class="health-ai-analysis-text">-</p>
+            </article>
+        </div>
+
+        <div class="health-ai-analysis-grid">
+            <article class="health-ai-analysis-block">
+                <span class="health-ai-analysis-label">Factores principales</span>
+                <ul id="health-ai-main-factors" class="health-ai-analysis-list"></ul>
+            </article>
+
+            <article class="health-ai-analysis-block">
+                <span class="health-ai-analysis-label">Que mirar</span>
+                <ul id="health-ai-watch-list" class="health-ai-analysis-list"></ul>
+            </article>
+        </div>
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Tendencia</p>
+                <h2>Tendencia reciente de readiness</h2>
+            </div>
+        </div>
+
+        {% if readiness.recent_ai_trend.has_enough_points %}
+        <div class="health-readiness-trend" aria-label="Tendencia reciente de readiness">
+            {% for point in readiness.recent_ai_trend.points %}
+            <article class="health-readiness-trend-point">
+                <div class="health-readiness-trend-plot">
+                    <div
+                        class="health-readiness-trend-bar {{ point.readiness_status_class }}"
+                        style="height: {{ point.readiness_score }}%;"
+                        title="{{ point.reference_date_label }} · score {{ point.readiness_score }} · riesgo {{ point.risk_level_label }}"
+                    ></div>
+                </div>
+                <strong class="health-readiness-trend-score">{{ point.readiness_score }}</strong>
+                <span class="health-readiness-trend-date">{{ point.reference_date_label }}</span>
+                <span class="health-readiness-trend-risk">{{ point.risk_level_label|capitalize }}</span>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">Todavia no hay suficientes analisis guardados para mostrar tendencia.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Historial IA</p>
+                <h2>Historial reciente de analisis IA</h2>
+            </div>
+        </div>
+
+        {% if readiness.recent_ai_history %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Fecha evaluada</th>
+                        <th>Generado</th>
+                        <th>Readiness local</th>
+                        <th>Score local</th>
+                        <th>Riesgo IA</th>
+                        <th>Resumen</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in readiness.recent_ai_history %}
+                    <tr>
+                        <td>{{ item.reference_date_label }}</td>
+                        <td>{{ item.created_at_label or "-" }}</td>
+                        <td>
+                            <span class="status-badge {{ item.readiness_status_class }}">{{ item.readiness_status_label }}</span>
+                        </td>
+                        <td>{{ item.readiness_score if item.readiness_score is not none else "-" }}</td>
+                        <td>{{ item.risk_level_label|capitalize }}</td>
+                        <td>{{ item.summary }}</td>
+                        <td class="actions-inline">
+                            <a class="button button-utility" href="{{ item.view_date_url }}">Ver fecha</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="empty-state">Todavia no hay analisis IA guardados.</p>
+        {% endif %}
+    </section>
 
     {% if metrics %}
     <div class="table-wrap">
@@ -57,4 +343,365 @@
     <p class="empty-state">Todavia no hay metricas diarias sincronizadas.</p>
     {% endif %}
 </section>
+
+<script>
+let currentHealthAiAnalysis = null;
+
+function updateHealthSyncStatus(label, detail, cssClass) {
+  const statusEl = document.getElementById("health-sync-status");
+  const labelEl = document.getElementById("health-sync-label");
+  const detailEl = document.getElementById("health-sync-detail");
+  if (!statusEl || !labelEl || !detailEl) return;
+  statusEl.className = `health-sync-status ${cssClass || "health-sync-pending"}`;
+  labelEl.textContent = label;
+  detailEl.textContent = detail || "";
+}
+
+async function runHealthAutoSync(buttonEl, force = false) {
+  const statusEl = document.getElementById("health-sync-status");
+  const baseUrl = buttonEl?.dataset?.healthAutoSyncUrl || statusEl?.dataset?.healthAutoSyncUrl;
+  if (!baseUrl) return;
+
+  const originalText = buttonEl?.dataset?.originalText || buttonEl?.textContent;
+  if (buttonEl) {
+    buttonEl.dataset.originalText = originalText;
+    buttonEl.disabled = true;
+    buttonEl.textContent = "Sincronizando...";
+  }
+  updateHealthSyncStatus("Sincronizando salud...", "La pantalla sigue usable mientras Garmin responde.", "health-sync-running");
+
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  const url = `${baseUrl}${force ? `${separator}force=true` : ""}`;
+
+  try {
+    const response = await fetch(url, { method: "POST", headers: { "accept": "application/json" } });
+    const payload = await response.json();
+    if (!response.ok || payload.reason === "failed") {
+      updateHealthSyncStatus("Ultima sincronizacion fallida", payload.error || payload.message || "No se pudo sincronizar salud.", "health-sync-failed");
+      return;
+    }
+    if (payload.synced) {
+      updateHealthSyncStatus("Salud sincronizada", "Analizando salud con IA...", "health-sync-success");
+      await runHealthAutoAiAnalysisAfterSync(statusEl);
+      return;
+    }
+    updateHealthSyncStatus("Salud ya sincronizada recientemente", "No hizo falta volver a consultar Garmin.", "health-sync-success");
+  } catch (error) {
+    updateHealthSyncStatus("Ultima sincronizacion fallida", "No se pudo conectar con el endpoint de sincronizacion.", "health-sync-failed");
+  } finally {
+    if (buttonEl) {
+      window.setTimeout(() => {
+        buttonEl.textContent = buttonEl.dataset.originalText || originalText || "Sincronizar salud";
+        buttonEl.disabled = false;
+      }, 1200);
+    }
+  }
+}
+
+async function runHealthAutoAiAnalysisAfterSync(statusEl) {
+  const url = statusEl?.dataset?.healthAutoAiAnalysisUrl;
+  if (!url) {
+    window.setTimeout(() => window.location.reload(), 900);
+    return;
+  }
+
+  try {
+    const response = await fetch(url, { method: "POST", headers: { "accept": "application/json" } });
+    const payload = await response.json();
+    if (!response.ok) {
+      updateHealthSyncStatus("Salud sincronizada", payload.message || "No se pudo generar el analisis IA automatico.", "health-sync-failed");
+      return;
+    }
+    if (payload.ran) {
+      updateHealthSyncStatus("Analisis IA generado", "Actualizando datos...", "health-sync-success");
+      window.setTimeout(() => window.location.reload(), 900);
+      return;
+    }
+    updateHealthSyncStatus("Analisis IA ya actualizado", "No hizo falta generar un analisis nuevo.", "health-sync-success");
+    if (payload.latest_analysis) {
+      renderSavedHealthAiAnalysis(payload.latest_analysis);
+    }
+  } catch (error) {
+    updateHealthSyncStatus("Salud sincronizada", "No se pudo ejecutar el analisis IA automatico.", "health-sync-failed");
+  }
+}
+
+window.addEventListener("DOMContentLoaded", () => {
+  const statusEl = document.getElementById("health-sync-status");
+  if (statusEl?.dataset?.shouldAutoSync === "true") {
+    runHealthAutoSync(null, false);
+  }
+});
+
+async function copyHealthLlmJson(buttonEl) {
+  const url = buttonEl?.dataset?.healthLlmCopyUrl;
+  if (!url) {
+    return;
+  }
+
+  const originalText = buttonEl.dataset.originalText || buttonEl.textContent;
+  buttonEl.dataset.originalText = originalText;
+
+  try {
+    const response = await fetch(url, {
+      headers: { "accept": "application/json" }
+    });
+    if (!response.ok) {
+      throw new Error("request_failed");
+    }
+
+    const payload = await response.json();
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    buttonEl.textContent = "JSON copiado";
+  } catch (error) {
+    buttonEl.textContent = "No se pudo copiar el JSON";
+  } finally {
+    buttonEl.disabled = true;
+    window.setTimeout(() => {
+      buttonEl.textContent = buttonEl.dataset.originalText || originalText;
+      buttonEl.disabled = false;
+    }, 1600);
+  }
+}
+
+function renderHealthAiList(listEl, items) {
+  if (!listEl) {
+    return;
+  }
+  listEl.innerHTML = "";
+  const values = Array.isArray(items) && items.length ? items : ["Sin observaciones relevantes."];
+  values.forEach((item) => {
+    const li = document.createElement("li");
+    li.textContent = item;
+    listEl.appendChild(li);
+  });
+}
+
+function buildHealthAiAnalysisText(analysis) {
+  const selectedDateLabel = "{{ readiness.selected_date_label }}";
+  const safeAnalysis = analysis || {};
+  const mainFactors = Array.isArray(safeAnalysis.main_factors) ? safeAnalysis.main_factors : [];
+  const watchItems = Array.isArray(safeAnalysis.what_to_watch) ? safeAnalysis.what_to_watch : [];
+
+  const lines = [
+    "Estado de salud / readiness",
+    `Fecha: ${selectedDateLabel}`,
+    "",
+    "Resumen:",
+    safeAnalysis.summary || "-",
+    "",
+    "Recomendacion:",
+    safeAnalysis.training_recommendation || "-",
+    "",
+    "Nivel de riesgo:",
+    healthAiRiskLabel(safeAnalysis.risk_level),
+    "",
+    "Factores principales:",
+  ];
+
+  if (mainFactors.length) {
+    mainFactors.forEach((item) => lines.push(`- ${item}`));
+  } else {
+    lines.push("- Sin factores destacados.");
+  }
+
+  lines.push("", "A observar:");
+
+  if (watchItems.length) {
+    watchItems.forEach((item) => lines.push(`- ${item}`));
+  } else {
+    lines.push("- Sin observaciones adicionales.");
+  }
+
+  return lines.join("\n");
+}
+
+function healthAiRiskClass(riskLevel) {
+  switch ((riskLevel || "").toLowerCase()) {
+    case "low":
+      return "health-ai-risk-low";
+    case "moderate":
+      return "health-ai-risk-moderate";
+    case "high":
+      return "health-ai-risk-high";
+    default:
+      return "health-ai-risk-unknown";
+  }
+}
+
+function healthAiRiskLabel(riskLevel) {
+  switch ((riskLevel || "").toLowerCase()) {
+    case "low":
+      return "Riesgo bajo";
+    case "moderate":
+      return "Riesgo moderado";
+    case "high":
+      return "Riesgo alto";
+    default:
+      return "Riesgo desconocido";
+  }
+}
+
+function healthAiRiskText(riskLevel) {
+  switch ((riskLevel || "").toLowerCase()) {
+    case "low":
+      return "Riesgo bajo";
+    case "moderate":
+      return "Riesgo moderado";
+    case "high":
+      return "Riesgo alto";
+    default:
+      return "Riesgo desconocido";
+  }
+}
+
+function renderSavedHealthAiAnalysis(savedAnalysis) {
+  const card = document.getElementById("health-ai-saved-card");
+  const badgeEl = document.getElementById("health-ai-saved-risk-badge");
+  const metaEl = document.getElementById("health-ai-saved-meta");
+  const summaryEl = document.getElementById("health-ai-saved-summary");
+  const recommendationEl = document.getElementById("health-ai-saved-recommendation");
+
+  if (!card || !badgeEl || !metaEl || !summaryEl || !recommendationEl || !savedAnalysis) {
+    return;
+  }
+
+  card.hidden = false;
+  badgeEl.className = `status-badge ${healthAiRiskClass(savedAnalysis.risk_level)}`;
+  badgeEl.textContent = healthAiRiskText(savedAnalysis.risk_level);
+  metaEl.textContent = savedAnalysis.created_at_label
+    ? `Generado ${savedAnalysis.created_at_label}${savedAnalysis.model_name ? ` · modelo ${savedAnalysis.model_name}` : ""}`
+    : "Analisis guardado";
+  summaryEl.textContent = savedAnalysis.summary || "-";
+  recommendationEl.textContent = savedAnalysis.training_recommendation || "-";
+}
+
+function renderHealthAiAnalysis(payload) {
+  const card = document.getElementById("health-ai-analysis-card");
+  const messageEl = document.getElementById("health-ai-analysis-message");
+  const badgeEl = document.getElementById("health-ai-risk-badge");
+  const copyButtonEl = document.getElementById("health-ai-copy-button");
+  const summaryEl = document.getElementById("health-ai-summary");
+  const recommendationEl = document.getElementById("health-ai-recommendation");
+  const mainFactorsEl = document.getElementById("health-ai-main-factors");
+  const watchListEl = document.getElementById("health-ai-watch-list");
+
+  if (!card || !badgeEl || !summaryEl || !recommendationEl || !mainFactorsEl || !watchListEl) {
+    return;
+  }
+
+  const analysis = payload?.analysis || null;
+  const message = payload?.message || payload?.warning || null;
+
+  card.hidden = false;
+
+  if (messageEl) {
+    if (message) {
+      messageEl.hidden = false;
+      messageEl.textContent = message;
+    } else {
+      messageEl.hidden = true;
+      messageEl.textContent = "";
+    }
+  }
+
+  const riskLevel = analysis?.risk_level || "unknown";
+  badgeEl.className = `status-badge ${healthAiRiskClass(riskLevel)}`;
+  badgeEl.textContent = healthAiRiskLabel(riskLevel);
+
+  summaryEl.textContent = analysis?.summary || "No se recibio un resumen interpretable.";
+  recommendationEl.textContent = analysis?.training_recommendation || "No se recibio una recomendacion interpretable.";
+  renderHealthAiList(mainFactorsEl, analysis?.main_factors);
+  renderHealthAiList(watchListEl, analysis?.what_to_watch);
+
+  currentHealthAiAnalysis = analysis;
+  if (copyButtonEl) {
+    copyButtonEl.hidden = !analysis;
+  }
+
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+async function copyHealthAiAnalysis(buttonEl) {
+  const analysis = currentHealthAiAnalysis;
+  if (!analysis) {
+    return;
+  }
+
+  const originalText = buttonEl.dataset.originalText || buttonEl.textContent;
+  buttonEl.dataset.originalText = originalText;
+
+  try {
+    await navigator.clipboard.writeText(buildHealthAiAnalysisText(analysis));
+    buttonEl.textContent = "Analisis copiado";
+  } catch (error) {
+    buttonEl.textContent = "No se pudo copiar";
+  } finally {
+    buttonEl.disabled = true;
+    window.setTimeout(() => {
+      buttonEl.textContent = buttonEl.dataset.originalText || originalText;
+      buttonEl.disabled = false;
+    }, 1600);
+  }
+}
+
+async function runHealthAiAnalysis(buttonEl) {
+  const url = buttonEl?.dataset?.healthAiAnalysisUrl;
+  if (!url) {
+    return;
+  }
+
+  const originalText = buttonEl.dataset.originalText || buttonEl.textContent;
+  buttonEl.dataset.originalText = originalText;
+  buttonEl.disabled = true;
+  buttonEl.textContent = "Analizando...";
+
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "accept": "application/json"
+      }
+    });
+    const payload = await response.json();
+
+    if (!response.ok) {
+      renderHealthAiAnalysis({
+        message: payload?.message || "No se pudo analizar el readiness con IA.",
+        analysis: {
+          summary: payload?.message || "No se pudo completar el analisis.",
+          training_recommendation: "Revisa la configuracion de OpenAI o intenta nuevamente mas tarde.",
+          risk_level: "unknown",
+          main_factors: [],
+          what_to_watch: [],
+        }
+      });
+      return;
+    }
+
+    renderHealthAiAnalysis(payload);
+    if (payload?.saved_analysis) {
+      renderSavedHealthAiAnalysis(payload.saved_analysis);
+    }
+    buttonEl.textContent = "Analizado";
+  } catch (error) {
+    renderHealthAiAnalysis({
+      message: "No se pudo analizar el readiness con IA.",
+      analysis: {
+        summary: "La solicitud no pudo completarse.",
+        training_recommendation: "Volve a intentar en unos minutos.",
+        risk_level: "unknown",
+        main_factors: [],
+        what_to_watch: [],
+      }
+    });
+    buttonEl.textContent = "Error al analizar";
+  } finally {
+    window.setTimeout(() => {
+      buttonEl.textContent = buttonEl.dataset.originalText || originalText;
+      buttonEl.disabled = false;
+    }, 1800);
+  }
+}
+</script>
 {% endblock %}

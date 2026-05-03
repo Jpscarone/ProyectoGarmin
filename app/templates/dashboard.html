@@ -1,19 +1,91 @@
 {% extends "base.html" %}
 
-{% block title %}{{ app_name }}{% endblock %}
+{% block title %}Dashboard | training_app{% endblock %}
 
 {% block content %}
+{% if ui_status %}
+<div class="alert alert-info">{{ ui_status }}</div>
+{% endif %}
+
+{% if not dashboard %}
 <section class="panel panel-center">
-    <p class="eyebrow">Uso diario</p>
-    <h1>{{ app_name }}</h1>
-    <p>La app ya permite planificar, sincronizar Garmin, consultar salud y clima, vincular actividades y analizar sesiones sin salir del flujo diario.</p>
-    <div class="actions">
-        <a class="button" href="/training_plans">Abrir planes</a>
-        <a class="button button-secondary" href="/athletes">Atletas</a>
-        <a class="button button-secondary" href="/goals">Objetivos</a>
-        <a class="button button-secondary" href="/activities">Actividades</a>
-        <a class="button button-secondary" href="/health">Salud</a>
-        <a class="button button-secondary" href="/sync/garmin/activities">Sincronizar Garmin</a>
+    <p class="eyebrow">Dashboard</p>
+    <h1>Selecciona un atleta para empezar</h1>
+    <p>Primero hace falta elegir con qué atleta querés trabajar para ver el estado del día.</p>
+    <div class="actions-inline">
+        <a class="button" href="/athletes/select">Seleccionar atleta</a>
     </div>
 </section>
+{% else %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Dashboard</p>
+            <h1>Estado actual de {{ dashboard.athlete.name }}</h1>
+            <p class="text-muted">
+                {% if dashboard.training_plan %}
+                {{ dashboard.training_plan.name }}
+                {% else %}
+                Sin plan activo seleccionado
+                {% endif %}
+            </p>
+        </div>
+        <div class="dashboard-action-row">
+            <a class="button button-utility" href="/dashboard?selected_date={{ dashboard.prev_date_iso }}">Ayer</a>
+            <a class="button" href="/dashboard?selected_date={{ dashboard.today_date_iso }}">Hoy</a>
+            <a class="button button-utility" href="/dashboard?selected_date={{ dashboard.next_date_iso }}">Mañana</a>
+        </div>
+    </div>
+    <form class="dashboard-date-form" method="get" action="/dashboard">
+        <label>
+            Fecha
+            <input type="date" name="selected_date" value="{{ dashboard.selected_date_iso }}">
+        </label>
+        <button class="button button-utility" type="submit">Ver fecha</button>
+    </form>
+</section>
+
+<div
+    id="dashboard-refresh-host"
+    data-refresh-url="/dashboard/auto-refresh?selected_date={{ dashboard.selected_date_iso }}"
+    data-refresh-once="true">
+    {% include "dashboard/_refresh_region.html" %}
+</div>
+
+<script>
+(() => {
+    const host = document.getElementById("dashboard-refresh-host");
+    if (!host || host.dataset.refreshStarted === "true") {
+        return;
+    }
+    host.dataset.refreshStarted = "true";
+    const url = host.dataset.refreshUrl;
+    if (!url) {
+        return;
+    }
+    window.setTimeout(() => {
+        fetch(url, {
+            method: "POST",
+            headers: {
+                "Accept": "text/html",
+                "X-Requested-With": "fetch",
+            },
+            credentials: "same-origin",
+        })
+            .then((response) => response.text())
+            .then((html) => {
+                host.innerHTML = html;
+            })
+            .catch(() => {
+                const status = host.querySelector(".dashboard-refresh-status");
+                if (status) {
+                    status.classList.remove("dashboard-refresh-loading");
+                    status.classList.add("dashboard-refresh-error");
+                    status.innerHTML = "<div class=\"dashboard-refresh-status-main\"><span>No se pudo actualizar automáticamente. Se muestran los últimos datos disponibles.</span></div>";
+                }
+            });
+    }, 60);
+})();
+</script>
+{% endif %}
 {% endblock %}

@@ -354,6 +354,8 @@ def _build_weekly_fallback_output(context: Any, metrics: Mapping[str, Any]) -> W
     if totals.get("activity_count"):
         findings.append(f"Se registraron {totals['activity_count']} actividades en la semana.")
 
+    if flags.get("intensity_distribution_imbalance_flag"):
+        risks.insert(0, "La distribucion de intensidad quedo desequilibrada, con demasiada carga en zonas altas.")
     if not flags.get("undertraining_flag") and not flags.get("overload_flag"):
         positives.append("La carga semanal no muestra un desvio extremo respecto del contexto reciente.")
     if consistency_score is not None and consistency_score >= 70:
@@ -363,19 +365,14 @@ def _build_weekly_fallback_output(context: Any, metrics: Mapping[str, Any]) -> W
 
     if flags.get("overload_flag"):
         risks.append("La carga semanal parece alta en comparacion con las semanas previas.")
-        recommendations.append("Bajar ligeramente el volumen o proteger mejor los dias suaves en la proxima semana.")
     if flags.get("undertraining_flag"):
         risks.append("La semana quedo por debajo de la carga reciente o de lo planificado.")
-        recommendations.append("Recuperar continuidad sin compensar de golpe con una semana excesiva.")
     if flags.get("poor_distribution_flag"):
         risks.append("La carga quedo demasiado concentrada en pocos dias.")
-        recommendations.append("Distribuir mejor la carga para evitar acumulacion innecesaria.")
     if flags.get("high_fatigue_risk_flag"):
         risks.append("La combinacion de carga y fatiga sugiere vigilar la recuperacion.")
-        recommendations.append("Priorizar descanso, sueño y control de intensidad al inicio de la proxima semana.")
     if flags.get("low_consistency_flag"):
         risks.append("La consistencia semanal fue baja.")
-        recommendations.append("Buscar mas regularidad entre dias entrenados y dias vacios.")
 
     duration_delta = trends.get("duration_vs_prev_avg_pct")
     if duration_delta is not None:
@@ -385,13 +382,19 @@ def _build_weekly_fallback_output(context: Any, metrics: Mapping[str, Any]) -> W
         positives.append("La semana deja una base util, aunque con informacion parcial en algunos frentes.")
     if not risks:
         risks.append("No aparecen alertas mayores, pero conviene confirmar la tendencia con otra semana similar.")
+    dominant_issue = _detect_dominant_week_issue(flags)
+    next_week_recommendation, recommendation_reason = _build_week_recommendation(dominant_issue, flags)
+    if next_week_recommendation:
+        recommendations.insert(0, next_week_recommendation)
     if not recommendations:
-        recommendations.append("Mantener la progresion y revisar si el objetivo principal de la semana siguiente pide ajustar volumen o intensidad.")
+        recommendations.append(
+            "Mantener la progresion y revisar si el objetivo principal de la semana siguiente pide ajustar volumen o intensidad."
+        )
 
     summary_short = _weekly_summary_short(context, metrics, week_type)
     analysis_natural = _weekly_analysis_natural(context, metrics)
     coach_conclusion = _weekly_coach_conclusion(load_score, consistency_score, fatigue_score, week_type)
-    next_week_recommendation = recommendations[0]
+    next_week_recommendation = next_week_recommendation or recommendations[0]
 
     tags = _unique_items(
         [
@@ -409,6 +412,8 @@ def _build_weekly_fallback_output(context: Any, metrics: Mapping[str, Any]) -> W
         coach_conclusion=coach_conclusion,
         next_week_recommendation=next_week_recommendation,
         week_type_detected=week_type,
+        dominant_week_issue=dominant_issue,
+        recommendation_reason=recommendation_reason,
         main_findings=findings[:4],
         risks=risks[:4],
         positives=positives[:4],
@@ -422,8 +427,20 @@ def _merge_weekly_output_with_fallback(
     fallback_output: WeeklyNarrativeLLMOutput,
 ) -> WeeklyNarrativeLLMOutput:
     merged = llm_output.model_copy(deep=True)
-    for field_name in ("summary_short", "analysis_natural", "coach_conclusion", "next_week_recommendation", "week_type_detected"):
-        if not getattr(merged, field_name, "").strip():
+    for field_name in (
+        "summary_short",
+        "analysis_natural",
+        "coach_conclusion",
+        "next_week_recommendation",
+        "week_type_detected",
+        "dominant_week_issue",
+        "recommendation_reason",
+    ):
+        value = getattr(merged, field_name, None)
+        if value is None:
+            setattr(merged, field_name, getattr(fallback_output, field_name))
+            continue
+        if isinstance(value, str) and not value.strip():
             setattr(merged, field_name, getattr(fallback_output, field_name))
     for field_name in ("main_findings", "risks", "positives", "recommendations", "tags"):
         if not getattr(merged, field_name):
@@ -445,6 +462,8 @@ def _weekly_analysis_natural(context: Any, metrics: Mapping[str, Any]) -> str:
     totals = metrics.get("totals", {})
     scores = metrics.get("scores", {})
     trends = metrics.get("trends", {})
+    flags = metrics.get("derived_flags", {})
+    distribution = metrics.get("distribution", {})
     fragments = [
         f"La semana tuvo {totals.get('activity_count', 0)} actividades y "
         f"{round((totals.get('total_duration_sec') or 0) / 3600.0, 1)} horas totales.",
@@ -452,6 +471,14 @@ def _weekly_analysis_natural(context: Any, metrics: Mapping[str, Any]) -> str:
         f"consistencia {round(scores.get('consistency_score') or 0)}, "
         f"fatiga {round(scores.get('fatigue_score') or 0)} y balance {round(scores.get('balance_score') or 0)}.",
     ]
+    if flags.get("intensity_distribution_imbalance_flag"):
+        intensity_summary = distribution.get("intensity_zone_summary", {})
+        pct_z2 = intensity_summary.get("pct_z2")
+        pct_z4_plus = intensity_summary.get("pct_z4_plus")
+        fragments.append(
+            "La distribucion de intensidad quedo cargada en zonas altas"
+            + (f" (Z2 {pct_z2}%, Z4+ {pct_z4_plus}%)" if pct_z2 is not None and pct_z4_plus is not None else ".")
+        )
     if trends.get("duration_vs_prev_avg_pct") is not None:
         fragments.append(
             f"Contra el promedio reciente, la duracion cambio {trends['duration_vs_prev_avg_pct']:+.1f}% "
@@ -466,6 +493,8 @@ def _weekly_coach_conclusion(
     fatigue_score: float | None,
     week_type: str,
 ) -> str:
+    if week_type == "intensidad_alta":
+        return "La semana fue exigente por la alta proporción de intensidad, aunque el volumen no haya sido extremo."
     if week_type == "carga_excesiva":
         return "La semana fue exigente y conviene leerla como una semana de carga alta con riesgo de acumular fatiga."
     if week_type == "carga_baja":
@@ -480,6 +509,8 @@ def _weekly_coach_conclusion(
 def _detect_week_type(metrics: Mapping[str, Any]) -> str:
     flags = metrics.get("derived_flags", {})
     scores = metrics.get("scores", {})
+    if flags.get("intensity_distribution_imbalance_flag"):
+        return "intensidad_alta"
     if flags.get("overload_flag"):
         return "carga_excesiva"
     if flags.get("undertraining_flag"):
@@ -487,6 +518,66 @@ def _detect_week_type(metrics: Mapping[str, Any]) -> str:
     if (scores.get("consistency_score") or 0) >= 70 and not flags.get("poor_distribution_flag"):
         return "consistente"
     return "mixta"
+
+
+def _detect_dominant_week_issue(flags: Mapping[str, Any]) -> str | None:
+    priority = [
+        "intensity_distribution_imbalance_flag",
+        "high_fatigue_risk_flag",
+        "undertraining_flag",
+        "overload_flag",
+        "poor_distribution_flag",
+        "low_consistency_flag",
+    ]
+    for flag in priority:
+        if flags.get(flag):
+            return flag.replace("_flag", "")
+    return None
+
+
+def _build_week_recommendation(
+    dominant_issue: str | None,
+    flags: Mapping[str, Any],
+) -> tuple[str | None, str | None]:
+    if dominant_issue == "intensity_distribution_imbalance":
+        return (
+            "Bajar la intensidad relativa, recuperar base aerobica (Z1/Z2) y evitar acumular tantos minutos en Z3/Z4.",
+            "Se detecto un desbalance de intensidad con exceso de carga en zonas altas.",
+        )
+    if dominant_issue == "high_fatigue_risk":
+        return (
+            "Priorizar una semana de descarga con sueno y recuperacion activa antes de volver a cargar.",
+            "La combinacion de carga y senales de fatiga sugiere riesgo elevado.",
+        )
+    if dominant_issue == "undertraining":
+        return (
+            "Subir progresivamente volumen o frecuencia sin saltos bruscos, buscando regularidad.",
+            "La semana quedo por debajo de la carga reciente o lo planificado.",
+        )
+    if dominant_issue == "overload":
+        return (
+            "Reducir la carga global y proteger dias suaves para evitar acumulacion de fatiga.",
+            "La carga semanal fue alta respecto del contexto reciente.",
+        )
+    if dominant_issue == "poor_distribution":
+        return (
+            "Redistribuir mejor la carga entre dias para evitar concentraciones excesivas.",
+            "La carga se concentro en pocos dias.",
+        )
+    if dominant_issue == "low_consistency":
+        return (
+            "Priorizar regularidad semanal antes de subir la carga total.",
+            "La consistencia semanal fue baja.",
+        )
+    if flags:
+        return (
+            "Mantener la linea actual con ajustes finos segun el objetivo principal de la semana siguiente.",
+            "No se detecto un problema dominante claro.",
+        )
+    return (
+        "Mantener la progresion y revisar si el objetivo principal de la semana siguiente pide ajustar volumen o intensidad.",
+        "No hay senales suficientes para una recomendacion mas especifica.",
+    )
 
 
 def _collect_missing_data(context: Any, metrics: Mapping[str, Any]) -> list[str]:

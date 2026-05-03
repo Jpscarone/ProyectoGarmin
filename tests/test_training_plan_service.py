@@ -12,7 +12,13 @@ from app.db.models import goal  # noqa: F401
 from app.db.models import training_plan  # noqa: F401
 from app.db.models.athlete import Athlete
 from app.schemas.training_plan import PlanGoalInput, TrainingPlanCreate, TrainingPlanUpdate
-from app.services.training_plan_service import create_training_plan, get_training_plan_detail, update_training_plan
+from app.services.training_plan_service import (
+    auto_complete_expired_training_plans,
+    create_training_plan,
+    get_training_plan_detail,
+    select_default_training_plan,
+    update_training_plan,
+)
 
 
 class TrainingPlanServiceTests(unittest.TestCase):
@@ -91,6 +97,63 @@ class TrainingPlanServiceTests(unittest.TestCase):
         secondary_goals = [goal for goal in plan.goals if goal.goal_role == "secondary"]
         self.assertEqual(len(secondary_goals), 1)
         self.assertEqual(secondary_goals[0].name, "Tirada control")
+
+    def test_auto_complete_expired_active_training_plans(self) -> None:
+        expired = create_training_plan(
+            self.db,
+            TrainingPlanCreate(
+                athlete_id=self.athlete.id,
+                name="Plan vencido",
+                start_date=date(2026, 1, 1),
+                end_date=date(2026, 3, 1),
+                status="active",
+            ),
+        )
+        current = create_training_plan(
+            self.db,
+            TrainingPlanCreate(
+                athlete_id=self.athlete.id,
+                name="Plan vigente",
+                start_date=date(2026, 4, 1),
+                end_date=date(2026, 5, 1),
+                status="active",
+            ),
+        )
+
+        changed = auto_complete_expired_training_plans(self.db, date(2026, 4, 1))
+
+        self.assertEqual(changed, 1)
+        self.db.refresh(expired)
+        self.db.refresh(current)
+        self.assertEqual(expired.status, "completed")
+        self.assertEqual(current.status, "active")
+
+    def test_select_default_training_plan_prefers_current_active_plan(self) -> None:
+        old_plan = create_training_plan(
+            self.db,
+            TrainingPlanCreate(
+                athlete_id=self.athlete.id,
+                name="Plan anterior",
+                start_date=date(2026, 1, 1),
+                end_date=date(2026, 2, 1),
+                status="completed",
+            ),
+        )
+        active_plan = create_training_plan(
+            self.db,
+            TrainingPlanCreate(
+                athlete_id=self.athlete.id,
+                name="Plan actual",
+                start_date=date(2026, 4, 1),
+                end_date=date(2026, 5, 1),
+                status="active",
+            ),
+        )
+
+        selected = select_default_training_plan(self.db, athlete_id=self.athlete.id, today=date(2026, 4, 15))
+
+        self.assertEqual(selected.id, active_plan.id)
+        self.assertNotEqual(selected.id, old_plan.id)
 
 
 if __name__ == "__main__":

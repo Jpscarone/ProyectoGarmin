@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete
@@ -16,6 +16,7 @@ from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
 from app.services.garmin.auth import GarminServiceError, get_garmin_auth_context
 from app.services.garmin.client import GarminClient
+from app.services.weather.weather_service import upsert_weather_from_garmin_activity
 
 
 logger = logging.getLogger(__name__)
@@ -35,13 +36,40 @@ def sync_recent_activities(
     settings: Settings,
     limit: int = 20,
     mfa_code: str | None = None,
+    athlete_id: int | None = None,
 ) -> GarminSyncResult:
-    athlete = _get_sync_athlete(db)
+    recent_days_start = date.today() - timedelta(days=30)
+    return sync_activities_by_date(
+        db,
+        settings,
+        start_date=recent_days_start,
+        end_date=date.today(),
+        mfa_code=mfa_code,
+        athlete_id=athlete_id,
+        limit=limit,
+    )
+
+
+def sync_activities_by_date(
+    db: Session,
+    settings: Settings,
+    *,
+    start_date: date,
+    end_date: date,
+    mfa_code: str | None = None,
+    athlete_id: int | None = None,
+    limit: int | None = None,
+) -> GarminSyncResult:
+    athlete = _get_sync_athlete(db, athlete_id=athlete_id)
     auth_context = get_garmin_auth_context(settings, mfa_code=mfa_code)
     client = GarminClient(auth_context.client)
 
-    recent = client.get_recent_activities(limit=limit)
-    found = len(recent)
+    if start_date > end_date:
+        start_date, end_date = end_date, start_date
+    activities_in_range = client.get_activities_by_date(start_date, end_date, sortorder="asc")
+    if limit is not None:
+        activities_in_range = activities_in_range[: max(limit, 0)]
+    found = len(activities_in_range)
     inserted = 0
     existing = 0
     errors: list[str] = []
@@ -51,7 +79,7 @@ def sync_recent_activities(
         for activity in db.scalars(select(GarminActivity).where(GarminActivity.athlete_id == athlete.id))
     }
 
-    for activity_summary in recent:
+    for activity_summary in activities_in_range:
         garmin_activity_id = _to_int(_get_first(activity_summary, "activityId", "activity_id"))
         if garmin_activity_id is None:
             errors.append("An activity without activityId was skipped.")
@@ -96,6 +124,8 @@ def sync_recent_activities(
                     delete(GarminActivityLap).where(GarminActivityLap.garmin_activity_id_fk == activity.id)
                 )
                 db.flush()
+
+            upsert_weather_from_garmin_activity(db, activity, debug_payload)
 
             for index, lap in enumerate(splits, start=1):
                 lap_summary = _extract_lap_summary(lap)
@@ -147,8 +177,13 @@ def sync_recent_activities(
     )
 
 
-def _get_sync_athlete(db: Session) -> Athlete:
-    athlete = db.scalar(select(Athlete).order_by(Athlete.created_at.asc(), Athlete.id.asc()))
+def _get_sync_athlete(db: Session, athlete_id: int | None = None) -> Athlete:
+    if athlete_id is not None:
+        athlete = db.get(Athlete, athlete_id)
+        if athlete is None:
+            raise GarminServiceError("El atleta seleccionado no existe.")
+        return athlete
+    athlete = db.scalar(select(Athlete).where(Athlete.status == "active").order_by(Athlete.created_at.asc(), Athlete.id.asc()))
     if athlete is None:
         raise GarminServiceError("Create at least one athlete before syncing Garmin activities.")
     return athlete

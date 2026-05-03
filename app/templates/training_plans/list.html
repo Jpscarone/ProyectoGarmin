@@ -2,58 +2,67 @@
 
 {% block title %}Planes | training_app{% endblock %}
 
+{% macro plan_section(title, plans, muted=False) %}
+<section class="plan-list-section{% if muted %} plan-list-section-muted{% endif %}">
+    <div class="plan-list-section-header">
+        <p class="eyebrow">{{ title }}</p>
+    </div>
+    {% if plans %}
+    <div class="plan-card-grid">
+        {% for training_plan in plans %}
+        <article class="plan-card{% if muted %} plan-card-muted{% endif %}" id="training-plan-{{ training_plan.id }}">
+            <div class="plan-card-header">
+                <div>
+                    <h3>{{ training_plan.name }}</h3>
+                    <p class="text-muted">{{ training_plan.athlete.name }} | {{ sport_label(training_plan.sport_type) }}</p>
+                </div>
+                <span class="status-badge status-badge-plan-{{ training_plan.status_normalized }}">{{ training_plan.status_label }}</span>
+            </div>
+            <div class="plan-card-meta">
+                <span><strong>Objetivo:</strong> {{ training_plan.goal.name if training_plan.goal else "-" }}</span>
+                <span><strong>Fecha objetivo:</strong> {{ training_plan.goal.event_date if training_plan.goal and training_plan.goal.event_date else "-" }}</span>
+                <span><strong>Periodo:</strong> {{ training_plan.start_date or "-" }}{% if training_plan.end_date %} a {{ training_plan.end_date }}{% endif %}</span>
+                <span><strong>Secundarios:</strong> {{ training_plan.goals | selectattr('goal_role', 'equalto', 'secondary') | list | length }}</span>
+            </div>
+            <div class="actions-inline plan-actions-inline">
+                <a class="button button-nav" href="/training_plans/{{ training_plan.id }}/calendar?athlete_id={{ training_plan.athlete_id }}">Ver calendario</a>
+                <a class="button button-utility" href="/activities?athlete_id={{ training_plan.athlete_id }}&training_plan_id={{ training_plan.id }}">Ver actividades del plan</a>
+                <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}">Dias del plan</a>
+                <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/edit">Editar</a>
+                <button class="button button-danger" type="button" onclick='deleteTrainingPlan({{ training_plan.id }}, {{ training_plan.name | tojson }})'>Eliminar</button>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="empty-state plan-empty-state">No hay planes en esta seccion.</p>
+    {% endif %}
+</section>
+{% endmacro %}
+
 {% block content %}
 <section class="panel">
     <div class="section-heading">
         <div>
             <p class="eyebrow">Planes</p>
             <h1>Planes de entrenamiento</h1>
+            <p class="text-muted">
+                {% if current_athlete %}
+                Atleta seleccionado: {{ current_athlete.name }}.
+                {% else %}
+                Selecciona un atleta para evitar mezclar calendarios, actividades y analisis.
+                {% endif %}
+            </p>
         </div>
         <a class="button" href="/training_plans/create">Nuevo plan</a>
     </div>
 
     {% if training_plans %}
-    <div class="table-wrap">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Nombre</th>
-                    <th>Deporte</th>
-                    <th>Atleta</th>
-                    <th>Objetivo principal</th>
-                    <th>Fecha objetivo</th>
-                    <th>Periodo</th>
-                    <th>Estado</th>
-                    <th>Secundarios</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for training_plan in training_plans %}
-                <tr id="training-plan-{{ training_plan.id }}">
-                    <td>{{ training_plan.name }}</td>
-                    <td>{{ sport_label(training_plan.sport_type) }}</td>
-                    <td>{{ training_plan.athlete.name }}</td>
-                    <td>{{ training_plan.goal.name if training_plan.goal else "-" }}</td>
-                    <td>{{ training_plan.goal.event_date if training_plan.goal and training_plan.goal.event_date else "-" }}</td>
-                    <td>{{ training_plan.start_date or "-" }}{% if training_plan.end_date %} a {{ training_plan.end_date }}{% endif %}</td>
-                    <td>{{ training_plan.status or "-" }}</td>
-                    <td>{{ training_plan.goals | selectattr('goal_role', 'equalto', 'secondary') | list | length }}</td>
-                    <td>
-                        <div class="actions-inline table-actions-inline plan-actions-inline">
-                            <a class="button button-nav" href="/training_plans/{{ training_plan.id }}">Dias del plan</a>
-                            <a class="button button-nav" href="/training_plans/{{ training_plan.id }}/calendar">Calendario</a>
-                            <a class="button button-secondary" href="/training_plans/{{ training_plan.id }}/edit">Editar</a>
-                            <button class="button button-danger" type="button" onclick='deleteTrainingPlan({{ training_plan.id }}, {{ training_plan.name | tojson }})'>Eliminar</button>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
+        {{ plan_section("Planes activos", active_plans) }}
+        {{ plan_section("Planes completados", completed_plans, True) }}
+        {{ plan_section("Borradores, archivados y cancelados", other_plans, True) }}
     {% else %}
-    <p class="empty-state">Todavia no hay planes cargados.</p>
+        <p class="empty-state">Todavia no hay planes cargados.</p>
     {% endif %}
 </section>
 

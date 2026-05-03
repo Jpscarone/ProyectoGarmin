@@ -97,6 +97,8 @@ VARIANT_ALIASES: dict[str, str] = {
 class MatchCandidate:
     planned_session_id: int
     training_day_id: int
+    training_plan_id: int | None
+    training_plan_name: str | None
     session_name: str
     session_date: str
     sport_type: str | None
@@ -180,6 +182,7 @@ def find_candidate_sessions_for_activity(
     activity_id: int,
     *,
     days_window: int = 1,
+    training_plan_id: int | None = None,
 ) -> list[MatchCandidate]:
     activity = _get_activity_with_context(db, activity_id)
     if activity is None:
@@ -189,10 +192,77 @@ def find_candidate_sessions_for_activity(
     if activity.start_time is None:
         raise ValueError("La actividad no tiene fecha/hora de inicio.")
 
-    candidates = _get_candidate_sessions(db, activity, days_window=days_window)
+    candidates = _get_candidate_sessions(db, activity, days_window=days_window, training_plan_id=training_plan_id)
     scored = [score_activity_session_match(activity, session) for session in candidates]
     scored.sort(key=lambda item: (-item.score, item.date_diff_days or 999, item.planned_session_id))
     return scored
+
+
+def find_manual_sessions_for_activity(
+    db: Session,
+    activity_id: int,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    sport_type: str | None = None,
+    only_unmatched: bool = False,
+    training_plan_id: int | None = None,
+    limit: int = 5,
+) -> list[MatchCandidate]:
+    activity = _get_activity_with_context(db, activity_id)
+    if activity is None:
+        raise ValueError("Activity not found.")
+    if activity.athlete_id is None:
+        raise ValueError("La actividad no tiene atleta asociado.")
+    if activity.start_time is None:
+        raise ValueError("La actividad no tiene fecha/hora de inicio.")
+
+    activity_date = _activity_local_date(activity)
+    if date_from is None or date_to is None:
+        if activity_date is None:
+            raise ValueError("La actividad no tiene fecha/hora de inicio.")
+        date_from = date_from or (activity_date - timedelta(days=1))
+        date_to = date_to or (activity_date + timedelta(days=1))
+
+    statement = (
+        select(PlannedSession)
+        .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+        .where(
+            PlannedSession.athlete_id == activity.athlete_id,
+            TrainingDay.day_date >= date_from,
+            TrainingDay.day_date <= date_to,
+        )
+        .options(
+            selectinload(PlannedSession.training_day).selectinload(TrainingDay.training_plan),
+            selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity),
+            selectinload(PlannedSession.planned_session_steps),
+            selectinload(PlannedSession.session_group),
+        )
+    )
+    if sport_type:
+        statement = statement.where(PlannedSession.sport_type == sport_type)
+
+    sessions = list(db.scalars(statement).all())
+    filtered: list[PlannedSession] = []
+    for session in sessions:
+        if only_unmatched and session.activity_match is not None:
+            continue
+        if session.activity_match and session.activity_match.garmin_activity_id_fk != activity.id:
+            if session.activity_match.match_method == "manual":
+                continue
+        filtered.append(session)
+
+    scored = [score_activity_session_match(activity, session) for session in filtered]
+    scored.sort(
+        key=lambda item: (
+            0 if training_plan_id is not None and item.training_plan_id == training_plan_id else 1,
+            -item.score,
+            item.has_existing_match,
+            item.date_diff_days or 999,
+            item.planned_session_id,
+        )
+    )
+    return scored[:limit]
 
 
 def score_activity_session_match(activity: GarminActivity, planned_session: PlannedSession) -> MatchCandidate:
@@ -288,6 +358,8 @@ def score_activity_session_match(activity: GarminActivity, planned_session: Plan
     return MatchCandidate(
         planned_session_id=planned_session.id,
         training_day_id=planned_session.training_day_id,
+        training_plan_id=planned_session.training_day.training_plan_id if planned_session.training_day else None,
+        training_plan_name=planned_session.training_day.training_plan.name if planned_session.training_day and planned_session.training_day.training_plan else None,
         session_name=planned_session.name,
         session_date=session_date.isoformat() if session_date else "-",
         sport_type=planned_session.sport_type,
@@ -306,6 +378,7 @@ def auto_match_activity(
     activity_id: int,
     *,
     preserve_manual: bool = True,
+    training_plan_id: int | None = None,
 ) -> MatchDecision:
     activity = _get_activity_with_context(db, activity_id)
     if activity is None:
@@ -331,7 +404,7 @@ def auto_match_activity(
             preserved_manual_match=True,
         )
 
-    candidates = find_candidate_sessions_for_activity(db, activity.id)
+    candidates = find_candidate_sessions_for_activity(db, activity.id, training_plan_id=training_plan_id)
     decision = _decide_match(activity.id, candidates)
 
     if decision.status == "matched" and decision.matched_session_id is not None:
@@ -361,6 +434,7 @@ def auto_match_unlinked_activities(
     date_from: date | None = None,
     date_to: date | None = None,
     only_unmatched: bool = True,
+    training_plan_id: int | None = None,
 ) -> BatchMatchDecision:
     statement = (
         select(GarminActivity)
@@ -384,7 +458,7 @@ def auto_match_unlinked_activities(
 
     decisions: list[MatchDecision] = []
     for activity in filtered:
-        decisions.append(auto_match_activity(db, activity.id))
+        decisions.append(auto_match_activity(db, activity.id, training_plan_id=training_plan_id))
 
     return BatchMatchDecision(
         processed=len(decisions),
@@ -404,6 +478,24 @@ def manual_match_activity(
     activity = _get_activity_with_context(db, activity_id)
     if activity is None:
         raise ValueError("Activity not found.")
+    if activity.activity_match and activity.activity_match.planned_session_id_fk == planned_session_id:
+        return MatchDecision(
+            activity_id=activity.id,
+            status="matched",
+            matched_session_id=planned_session_id,
+            score=None,
+            confidence=activity.activity_match.match_confidence,
+            explanations=["La actividad ya estaba vinculada con esta sesion."],
+            reasons=[activity.activity_match.match_notes or "Vinculacion existente."],
+            candidate_sessions=[],
+            match_method=activity.activity_match.match_method,
+        )
+    if (
+        activity.activity_match
+        and activity.activity_match.planned_session_id_fk != planned_session_id
+        and activity.activity_match.match_method == "manual"
+    ):
+        raise ValueError("La actividad ya esta vinculada a otra sesion. Desvinculala antes de cambiar.")
     planned_session = _get_planned_session_with_context(db, planned_session_id)
     if planned_session is None:
         raise ValueError("Planned session not found.")
@@ -411,6 +503,8 @@ def manual_match_activity(
         raise ValueError("La actividad y la sesion no pertenecen al mismo atleta.")
     if planned_session.training_day is None:
         raise ValueError("La sesion no tiene training day asociado.")
+    if planned_session.activity_match and planned_session.activity_match.garmin_activity_id_fk != activity.id:
+        raise ValueError("La sesion elegida ya tiene otra actividad vinculada.")
 
     candidate = score_activity_session_match(activity, planned_session)
     _persist_match(
@@ -439,7 +533,7 @@ def manual_match_activity(
     )
 
 
-def preview_activity_match(db: Session, activity_id: int) -> MatchDecision:
+def preview_activity_match(db: Session, activity_id: int, *, training_plan_id: int | None = None) -> MatchDecision:
     activity = _get_activity_with_context(db, activity_id)
     if activity is None:
         raise ValueError("Activity not found.")
@@ -456,7 +550,7 @@ def preview_activity_match(db: Session, activity_id: int) -> MatchDecision:
             candidate_sessions=[current_candidate] if current_candidate else [],
             match_method=activity.activity_match.match_method,
         )
-    candidates = find_candidate_sessions_for_activity(db, activity.id)
+    candidates = find_candidate_sessions_for_activity(db, activity.id, training_plan_id=training_plan_id)
     return _decide_match(activity.id, candidates)
 
 
@@ -662,7 +756,7 @@ def _delete_existing_auto_match(db: Session, activity: GarminActivity) -> None:
     db.commit()
 
 
-def _get_candidate_sessions(db: Session, activity: GarminActivity, *, days_window: int) -> list[PlannedSession]:
+def _get_candidate_sessions(db: Session, activity: GarminActivity, *, days_window: int, training_plan_id: int | None = None) -> list[PlannedSession]:
     activity_date = _activity_local_date(activity)
     if activity_date is None:
         return []
@@ -676,17 +770,20 @@ def _get_candidate_sessions(db: Session, activity: GarminActivity, *, days_windo
             TrainingDay.day_date <= activity_date + timedelta(days=days_window),
         )
         .options(
-            selectinload(PlannedSession.training_day),
+            selectinload(PlannedSession.training_day).selectinload(TrainingDay.training_plan),
             selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity),
             selectinload(PlannedSession.planned_session_steps),
             selectinload(PlannedSession.session_group),
         )
     )
+    if training_plan_id is not None:
+        statement = statement.where(TrainingDay.training_plan_id == training_plan_id)
     sessions = list(db.scalars(statement).all())
     filtered: list[PlannedSession] = []
     for session in sessions:
         if session.activity_match and session.activity_match.garmin_activity_id_fk != activity.id:
-            continue
+            if session.activity_match.match_method == "manual":
+                continue
         filtered.append(session)
     return filtered
 
@@ -709,7 +806,7 @@ def _get_planned_session_with_context(db: Session, planned_session_id: int) -> P
         select(PlannedSession)
         .where(PlannedSession.id == planned_session_id)
         .options(
-            selectinload(PlannedSession.training_day),
+            selectinload(PlannedSession.training_day).selectinload(TrainingDay.training_plan),
             selectinload(PlannedSession.activity_match),
             selectinload(PlannedSession.planned_session_steps),
             selectinload(PlannedSession.session_group),

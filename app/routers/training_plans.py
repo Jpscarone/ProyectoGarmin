@@ -16,14 +16,24 @@ from app.schemas.training_day import TrainingDayCreate
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanRead, TrainingPlanUpdate
 from app.services.analysis_v2.weekly_analysis_service import ANALYSIS_VERSION as WEEKLY_ANALYSIS_VERSION
 from app.services.athlete_service import get_athletes
-from app.services.planning.presentation import derive_session_metrics, describe_session_structure_short
+from app.services.athlete_context import get_current_athlete, get_current_training_plan, set_current_training_plan
+from app.services.planning.presentation import (
+    build_session_summary,
+    build_session_summary_with_ranges,
+    build_session_compact_outline,
+    derive_session_metrics,
+    describe_session_structure_short,
+)
 from app.services.training_day_service import create_training_day
 from app.services.training_plan_service import (
+    auto_complete_expired_training_plans,
     create_training_plan,
     delete_training_plan,
     get_training_plan,
     get_training_plan_detail,
     get_training_plans,
+    get_training_plans_for_athlete,
+    normalize_training_plan_status,
     update_training_plan,
 )
 from app.web.templates import build_templates
@@ -38,14 +48,54 @@ def _wants_html(request: Request) -> bool:
     return "text/html" in accept and "application/json" not in accept
 
 
+def _group_training_plans_for_view(training_plans: list) -> dict[str, list]:
+    grouped = {"active": [], "completed": [], "other": []}
+    for plan in training_plans:
+        status_value = normalize_training_plan_status(plan.status)
+        setattr(plan, "status_normalized", status_value)
+        setattr(plan, "status_label", _training_plan_status_label(status_value))
+        if status_value == "active":
+            grouped["active"].append(plan)
+        elif status_value == "completed":
+            grouped["completed"].append(plan)
+        else:
+            grouped["other"].append(plan)
+    return grouped
+
+
+def _training_plan_status_label(status_value: str) -> str:
+    return {
+        "draft": "Borrador",
+        "active": "Activo",
+        "completed": "Completado",
+        "archived": "Archivado",
+        "cancelled": "Cancelado",
+    }.get(status_value, status_value)
+
+
 @router.get("", response_model=list[TrainingPlanRead])
-def list_training_plans(request: Request, db: Session = Depends(get_db)):
-    training_plans = get_training_plans(db)
+def list_training_plans(
+    request: Request,
+    athlete_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    auto_complete_expired_training_plans(db, date.today())
+    current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
+    if current_athlete is None and _wants_html(request):
+        return RedirectResponse(url="/athletes/select", status_code=303)
+    training_plans = get_training_plans_for_athlete(db, current_athlete.id) if current_athlete is not None else get_training_plans(db)
     if _wants_html(request):
+        grouped = _group_training_plans_for_view(training_plans)
         return templates.TemplateResponse(
             request=request,
             name="training_plans/list.html",
-            context={"training_plans": training_plans},
+            context={
+                "training_plans": training_plans,
+                "active_plans": grouped["active"],
+                "completed_plans": grouped["completed"],
+                "other_plans": grouped["other"],
+                "current_athlete": current_athlete,
+            },
         )
     return training_plans
 
@@ -68,6 +118,10 @@ def read_training_plan(training_plan_id: int, request: Request, db: Session = De
         training_plan = get_training_plan_detail(db, training_plan_id)
         if training_plan is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+        current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
+        if current_athlete is None or training_plan.athlete_id != current_athlete.id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
+        set_current_training_plan(request, training_plan.id)
         return templates.TemplateResponse(
             request=request,
             name="training_plans/detail.html",
@@ -88,15 +142,21 @@ def read_training_plan_calendar(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    auto_complete_expired_training_plans(db, date.today())
     training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
+    if current_athlete is None or training_plan.athlete_id != current_athlete.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
+    set_current_training_plan(request, training_plan.id)
 
     visible_month = _resolve_visible_month(training_plan, month)
     selected_day_date = _resolve_selected_date(selected_date, visible_month, training_plan)
     calendar_context = _build_calendar_context(training_plan, visible_month, selected_day_date)
     selected_week_analysis = _build_selected_week_analysis_context(db, training_plan, selected_day_date, visible_month)
     weekly_analysis_lookup = _build_weekly_analysis_lookup(db, training_plan, calendar_context["weeks"], visible_month)
+    plan_options = get_training_plans_for_athlete(db, training_plan.athlete_id)
 
     return templates.TemplateResponse(
         request=request,
@@ -114,6 +174,7 @@ def read_training_plan_calendar(
             "next_month": calendar_context["next_month"],
             "selected_week_analysis": selected_week_analysis,
             "weekly_analysis_lookup": weekly_analysis_lookup,
+            "plan_options": plan_options,
             "status_message": request.query_params.get("status"),
         },
     )
@@ -122,6 +183,7 @@ def read_training_plan_calendar(
 @router.post("/{training_plan_id}/calendar/create-day")
 def create_training_day_from_calendar(
     training_plan_id: int,
+    request: Request,
     day_date: str = Form(...),
     next_action: str = Form(default="calendar"),
     db: Session = Depends(get_db),
@@ -129,6 +191,9 @@ def create_training_day_from_calendar(
     training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
+    if current_athlete is None or training_plan.athlete_id != current_athlete.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
 
     try:
         parsed_day_date = date.fromisoformat(day_date)
@@ -159,6 +224,10 @@ def edit_training_plan_page(training_plan_id: int, request: Request, db: Session
     training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
+    if current_athlete is None or training_plan.athlete_id != current_athlete.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
+    set_current_training_plan(request, training_plan.id)
 
     return templates.TemplateResponse(
         request=request,
@@ -380,6 +449,18 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                     has_analysis = bool(planned_session.analysis_reports)
                     matched_count += 1 if has_match else 0
                     analyzed_count += 1 if has_analysis else 0
+                    short_description = (
+                        build_session_summary(planned_session)
+                        or describe_session_structure_short(planned_session)
+                        or derived_metrics.title
+                        or planned_session.name
+                    )
+                    long_description = build_session_summary_with_ranges(planned_session, html=False) or short_description
+                    long_description_html = build_session_summary_with_ranges(planned_session, html=True) or long_description
+                    setattr(planned_session, "short_description", short_description)
+                    setattr(planned_session, "long_description", long_description)
+                    setattr(planned_session, "long_description_html", long_description_html)
+                    compact_outline = build_session_compact_outline(planned_session) or _calendar_short_title(planned_session)
                     session_summaries.append(
                         {
                             "id": planned_session.id,
@@ -387,14 +468,17 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                             "sport_type": planned_session.sport_type,
                             "session_type": planned_session.session_type,
                             "summary_title": describe_session_structure_short(planned_session) or derived_metrics.title or planned_session.name,
-                            "compact_label": _calendar_session_compact_label(planned_session, derived_metrics),
+                            "compact_label": compact_outline,
+                            "sport_icon": _calendar_sport_icon(planned_session.sport_type),
                             "expected_duration_min": planned_session.expected_duration_min,
                             "has_steps": bool(planned_session.planned_session_steps),
                             "has_group": planned_session.session_group is not None,
                             "group_name": planned_session.session_group.name if planned_session.session_group else None,
                             "has_match": has_match,
                             "has_analysis": has_analysis,
-                            "description": (planned_session.description_text or planned_session.target_notes or "").strip(),
+                            "short_description": short_description,
+                            "description": long_description or (planned_session.description_text or planned_session.target_notes or "").strip(),
+                            "description_html": long_description_html,
                         }
                     )
                 for goal in training_plan.goals:
@@ -496,14 +580,8 @@ def _resolve_calendar_day_status(training_day) -> tuple[str, str]:
 
 
 def _calendar_session_compact_label(planned_session, derived_metrics) -> str:
-    sport = _calendar_sport_icon(planned_session.sport_type)
-    title = _calendar_short_title(planned_session)
-    metric = "-"
-    if derived_metrics.duration_sec:
-        metric = _duration_from_seconds_short(derived_metrics.duration_sec)
-    elif derived_metrics.distance_m:
-        metric = _distance_from_meters_short(derived_metrics.distance_m)
-    return f"{sport} {title} - {metric}".strip()
+    title = build_session_compact_outline(planned_session) or _calendar_short_title(planned_session)
+    return title
 
 
 def _calendar_sport_icon(sport_type: str | None) -> str:

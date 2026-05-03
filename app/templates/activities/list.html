@@ -4,17 +4,25 @@
 
 {% block content %}
 <section class="panel">
-    <div class="section-heading">
-        <div>
+    <div class="planned-session-header activity-page-header">
+        <div class="planned-session-header-main">
             <p class="eyebrow">Actividades</p>
-            <h1>Actividades en Garmin</h1>
+            <h1 class="planned-session-title">Actividades Garmin</h1>
+            <p class="planned-session-activity-subtitle">
+                {% if request.state.current_athlete %}
+                {{ request.state.current_athlete.name }}
+                {% if selected_plan %} | {{ selected_plan.name }}{% endif %}
+                {% else %}
+                Historial sincronizado
+                {% endif %}
+            </p>
         </div>
-        <div class="actions-inline">
-            <form method="post" action="/activities/auto-match-pending">
+        <div class="actions-inline planned-session-header-actions">
+            <form method="post" action="/activities/auto-match-pending{% if selected_training_plan_id %}?training_plan_id={{ selected_training_plan_id }}{% endif %}">
                 <button class="button button-utility" type="submit">Vincular recientes</button>
             </form>
             <form method="post" action="/sync/garmin/activities/from-list">
-                <button class="button" type="submit">Sincronizar Actividades</button>
+                <button class="button" type="submit">Sincronizar actividades</button>
             </form>
         </div>
     </div>
@@ -28,59 +36,127 @@
     {% if match_status %}
     <div class="alert alert-info">{{ match_status }}</div>
     {% endif %}
+    {% if activity_auto_sync_status and activity_auto_sync_status.message %}
+    <div class="alert {% if activity_auto_sync_status.synced %}alert-info{% elif activity_auto_sync_status.reason == 'error' %}alert-warning{% else %}alert-info{% endif %}">
+        {{ activity_auto_sync_status.message }}
+    </div>
+    {% endif %}
+    {% if has_pending_candidates %}
+    <div class="alert alert-warning alert-inline">
+        Hay actividades con sesiones candidatas no confirmadas.
+        <a class="button button-utility" href="#activities-table">Revisar vinculos</a>
+    </div>
+    {% endif %}
+
+    <div class="planned-session-inline-list activity-summary-pills">
+        <span class="planned-session-inline-pill"><strong>{{ activity_summary.count }}</strong>&nbsp;actividades</span>
+        <span class="planned-session-inline-pill"><strong>{{ activity_summary.linked_count }}</strong>&nbsp;vinculadas</span>
+        <span class="planned-session-inline-pill"><strong>{{ activity_summary.unlinked_count }}</strong>&nbsp;sin vincular</span>
+        <span class="planned-session-inline-pill"><strong>{{ activity_summary.weather_count }}</strong>&nbsp;con clima</span>
+        {% if activity_summary.plan_date_range %}
+        <span class="planned-session-inline-pill">{{ activity_summary.plan_date_range }}</span>
+        {% endif %}
+    </div>
+
+    <form class="plan-context-filter activity-filter-panel" method="get" action="/activities">
+        <label>
+            Plan
+            <select name="training_plan_id">
+                {% for plan in plan_options %}
+                <option value="{{ plan.id }}" {% if selected_training_plan_id == plan.id %}selected{% endif %}>
+                    {{ plan.name }}
+                </option>
+                {% endfor %}
+            </select>
+        </label>
+        <label>
+            Desde
+            <input type="date" name="date_from" value="{{ selected_date_from.isoformat() if selected_date_from else '' }}">
+        </label>
+        <label>
+            Hasta
+            <input type="date" name="date_to" value="{{ selected_date_to.isoformat() if selected_date_to else '' }}">
+        </label>
+        <label>
+            Vinculo
+            <select name="link_filter">
+                <option value="" {% if not selected_link_filter %}selected{% endif %}>Todas</option>
+                <option value="unlinked" {% if selected_link_filter == 'unlinked' %}selected{% endif %}>Sin vincular</option>
+                <option value="linked_this_plan" {% if selected_link_filter == 'linked_this_plan' %}selected{% endif %}>Vinculadas a este plan</option>
+                <option value="linked_other_plan" {% if selected_link_filter == 'linked_other_plan' %}selected{% endif %}>Vinculadas a otro plan</option>
+            </select>
+        </label>
+        <button class="button button-utility" type="submit">Aplicar filtros</button>
+    </form>
 
     {% if activities %}
-    <div class="table-wrap">
-        <table class="data-table">
+    <div class="table-wrap activity-table-wrap">
+        <table class="data-table" id="activities-table">
             <thead>
                 <tr>
                     <th>Fecha</th>
-                    <th>Deporte</th>
-                    <th>Nombre</th>
-                    <th>Duracion</th>
-                    <th>Distancia</th>
-                    <th>Match</th>
-                    <th>Clima</th>
+                    <th>Actividad</th>
+                    <th>Carga</th>
+                    <th>Estado</th>
                     <th>Acciones</th>
                 </tr>
             </thead>
             <tbody>
                 {% for activity in activities %}
+                {% set plan_context = activity_plan_context.get(activity.id) if activity_plan_context else none %}
                 <tr>
-                    <td>{{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</td>
-                    <td>{{ sport_label(activity.sport_type) }}</td>
-                    <td>{{ activity.activity_name or '-' }}</td>
-                    <td>{{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</td>
-                    <td>{{ distance_label_meters(activity.distance_m) }}</td>
-                    <td class="table-icon-cell">
-                        {% if activity.activity_match and activity.activity_match.planned_session %}
-                        <span class="table-check-indicator" title="Actividad vinculada con una sesion" aria-label="Actividad vinculada">&#10003;</span>
-                        {% else %}
-                        <span class="table-check-indicator table-check-indicator-empty" aria-hidden="true"></span>
-                        {% endif %}
+                    <td class="activity-table-date">
+                        <strong>{{ activity.start_time.strftime('%d/%m/%Y') if activity.start_time else '-' }}</strong>
+                        <span>{{ activity.start_time.strftime('%H:%M') if activity.start_time else '' }}</span>
                     </td>
-                    <td class="table-icon-cell">
-                        {% if activity.weather %}
-                        <span class="table-check-indicator" title="Clima disponible" aria-label="Clima disponible">&#10003;</span>
-                        {% else %}
-                        <span class="table-check-indicator table-check-indicator-empty" aria-hidden="true"></span>
-                        {% endif %}
+                    <td class="activity-table-main">
+                        <strong>{{ activity.activity_name or '-' }}</strong>
+                        <span>{{ sport_label(activity.sport_type) }}</span>
+                    </td>
+                    <td class="activity-table-metrics">
+                        <span>{{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</span>
+                        <span>{{ distance_label_meters(activity.distance_m) }}</span>
+                    </td>
+                    <td class="activity-table-status">
+                        <div class="activity-status-stack">
+                            {% if activity.activity_match and activity.activity_match.planned_session %}
+                            <span class="status-badge status-badge-garmin">
+                                {{ plan_context.label if plan_context else 'Vinculada' }}
+                            </span>
+                            {% else %}
+                            <span class="status-badge status-badge-empty">Sin vincular</span>
+                            {% endif %}
+                            <span class="status-badge {% if activity.weather %}status-badge-garmin{% else %}status-badge-empty{% endif %}">
+                                {% if activity.weather and activity.weather.weather_source == 'garmin_activity' %}Clima Garmin{% elif activity.weather and activity.weather.weather_source == 'open_meteo' %}Clima estimado{% elif activity.weather %}Clima listo{% else %}Sin clima{% endif %}
+                            </span>
+                            {% if match_previews and match_previews.get(activity.id) and match_previews.get(activity.id).status in ['candidate', 'ambiguous'] %}
+                            <span class="candidate-pill">
+                                {{ 'Ambigua' if match_previews.get(activity.id).status == 'ambiguous' else 'Candidata' }}
+                                {{ match_previews.get(activity.id).score | round(1) }}
+                            </span>
+                            {% endif %}
+                        </div>
                     </td>
                     <td>
                         <div class="actions-inline table-actions-inline activity-actions-inline">
                             <a class="button button-nav" href="/activities/{{ activity.id }}">Ver detalle</a>
-                            {% if activity.weather %}
-                            <button class="button button-utility" type="button" disabled>Sincronizar clima</button>
+                            {% if activity.weather and activity.weather.weather_source == 'garmin_activity' %}
+                            <button class="button button-utility" type="button" disabled>Clima Garmin</button>
+                            {% elif activity.weather and activity.weather.weather_source == 'open_meteo' %}
+                            <button class="button button-utility" type="button" disabled>Clima estimado</button>
+                            {% elif activity.weather %}
+                            <button class="button button-utility" type="button" disabled>Clima listo</button>
                             {% else %}
-                            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}?return_to=list">Sincronizar clima</a>
+                            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}?return_to=list">Clima</a>
                             {% endif %}
                             {% if activity.activity_match and activity.activity_match.planned_session %}
                             <button class="button button-utility" type="button" disabled>Auto-match</button>
                             {% else %}
-                            <form method="post" action="/activities/{{ activity.id }}/auto-match?return_to=list">
+                            <form method="post" action="/activities/{{ activity.id }}/auto-match?return_to=list{% if selected_training_plan_id %}&training_plan_id={{ selected_training_plan_id }}{% endif %}">
                                 <button class="button button-utility" type="submit">Auto-match</button>
                             </form>
                             {% endif %}
+                            <button class="button button-utility js-manual-link" type="button" data-activity-id="{{ activity.id }}">Vincular</button>
                         </div>
                     </td>
                 </tr>
@@ -89,7 +165,226 @@
         </table>
     </div>
     {% else %}
-    <p class="empty-state">Todavia no hay actividades sincronizadas.</p>
+    <div class="planned-session-empty-report activity-empty-state">
+        <p class="empty-state">
+            {% if selected_plan %}
+            No hay actividades sincronizadas para este plan en el rango elegido.
+            {% else %}
+            Todavia no hay actividades sincronizadas para este atleta.
+            {% endif %}
+        </p>
+    </div>
     {% endif %}
 </section>
+
+<div class="modal-backdrop" id="manual-link-backdrop" hidden></div>
+<div class="modal" id="manual-link-modal" hidden>
+    <div class="modal-panel" id="manual-link-panel">
+        <div class="modal-header">
+            <div>
+                <p class="eyebrow">Vincular actividad</p>
+                <h3>Elegir sesion planificada</h3>
+            </div>
+            <button class="button button-utility js-close-modal" type="button">Cerrar</button>
+        </div>
+
+        <div class="modal-body">
+            <div class="detail-item detail-item-full" id="manual-link-activity-summary">Cargando...</div>
+
+            <div class="manual-link-search">
+                <div class="manual-link-search-row">
+                    <label>
+                        Desde
+                        <input type="date" id="manual-link-date-from">
+                    </label>
+                    <label>
+                        Hasta
+                        <input type="date" id="manual-link-date-to">
+                    </label>
+                    <label>
+                        Deporte
+                        <input type="text" id="manual-link-sport" placeholder="running, cycling...">
+                    </label>
+                    <button class="button button-utility js-search-candidates" type="button">Buscar sesiones</button>
+                </div>
+                <p class="text-muted">Se muestran hasta 5 sesiones. Usa filtros si queres ampliar la busqueda.</p>
+            </div>
+
+            <div id="manual-link-candidates">
+                <p class="empty-state">Cargando sesiones candidatas...</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+window.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('manual-link-modal');
+    const backdrop = document.getElementById('manual-link-backdrop');
+    const candidatesContainer = document.getElementById('manual-link-candidates');
+    const activitySummary = document.getElementById('manual-link-activity-summary');
+    const dateFromInput = document.getElementById('manual-link-date-from');
+    const dateToInput = document.getElementById('manual-link-date-to');
+    const sportInput = document.getElementById('manual-link-sport');
+    if (!modal || !backdrop || !candidatesContainer || !activitySummary) {
+        return;
+    }
+    let currentActivityId = null;
+
+    function openModal(activityId) {
+        if (!activityId) {
+            return;
+        }
+        currentActivityId = activityId;
+        modal.hidden = false;
+        backdrop.hidden = false;
+        activitySummary.textContent = 'Cargando...';
+        candidatesContainer.innerHTML = '<p class="empty-state">Cargando sesiones candidatas...</p>';
+        dateFromInput.value = '';
+        dateToInput.value = '';
+        sportInput.value = '';
+        fetchCandidates();
+    }
+
+    function closeModal() {
+        modal.hidden = true;
+        backdrop.hidden = true;
+        currentActivityId = null;
+    }
+
+    function buildCandidateRow(candidate) {
+        const button = `<button class="button button-nav js-link-session" data-session-id="${candidate.planned_session_id}">Vincular</button>`;
+        const sessionLink = candidate.session_url
+            ? `<a class="button button-utility" href="${candidate.session_url}" target="_blank" rel="noopener">Ver sesion</a>`
+            : '';
+        const expectedDuration = candidate.expected_duration_min ? `${candidate.expected_duration_min} min` : '-';
+        const expectedDistance = candidate.expected_distance_km != null
+            ? `${parseFloat(candidate.expected_distance_km).toFixed(2)} km`
+            : '-';
+        const scoreLabel = candidate.score != null ? candidate.score : '-';
+        const sportLabel = formatSportLabel(candidate.sport_type);
+        const planLabel = candidate.training_plan_name
+            ? `<div class="text-muted">Plan: ${candidate.training_plan_name}${candidate.is_current_plan ? ' (plan seleccionado)' : ''}</div>`
+            : '';
+        return `
+            <div class="candidate-row">
+                <div>
+                    <strong>${candidate.session_name}</strong>
+                    <div class="text-muted">${candidate.session_date} | ${sportLabel}</div>
+                    ${planLabel}
+                    <div class="text-muted">Duracion esperada ${expectedDuration} | Distancia esperada ${expectedDistance}</div>
+                    <div class="text-muted">Score ${scoreLabel}</div>
+                </div>
+                <div class="actions-inline">
+                    ${sessionLink}
+                    ${button}
+                </div>
+            </div>
+        `;
+    }
+
+    function renderCandidates(payload) {
+        const activity = payload.activity || {};
+        activitySummary.innerHTML = `
+            <strong>${activity.activity_name || 'Actividad Garmin'}</strong><br>
+            ${activity.start_time ? activity.start_time.replace('T', ' ') : '-'} |
+            ${formatSportLabel(activity.sport_type)} |
+            Duracion ${activity.duration_sec ? Math.round(activity.duration_sec / 60) + ' min' : '-'} |
+            Distancia ${activity.distance_m ? (activity.distance_m / 1000).toFixed(2) + ' km' : '-'}
+        `;
+
+        if (!payload.candidates || !payload.candidates.length) {
+            candidatesContainer.innerHTML = '<p class="empty-state">No se encontraron sesiones candidatas.</p>';
+            return;
+        }
+
+        candidatesContainer.innerHTML = payload.candidates.map(buildCandidateRow).join('');
+        candidatesContainer.querySelectorAll('.js-link-session').forEach(button => {
+            button.addEventListener('click', () => linkSession(button.dataset.sessionId));
+        });
+    }
+
+    async function fetchCandidates() {
+        if (!currentActivityId) return;
+        const params = new URLSearchParams();
+        if (dateFromInput.value) params.append('date_from', dateFromInput.value);
+        if (dateToInput.value) params.append('date_to', dateToInput.value);
+        if (sportInput.value) params.append('sport_type', sportInput.value);
+        params.append('only_unmatched', 'false');
+        {% if selected_training_plan_id %}
+        params.append('training_plan_id', '{{ selected_training_plan_id }}');
+        {% endif %}
+        const url = `/activities/${currentActivityId}/match-candidates?${params.toString()}`;
+        const response = await fetch(url);
+        if (!response.ok) {
+            candidatesContainer.innerHTML = '<p class="empty-state">No se pudo cargar la lista de candidatas.</p>';
+            return;
+        }
+        const payload = await response.json();
+        renderCandidates(payload);
+    }
+
+    async function linkSession(sessionId) {
+        if (!currentActivityId || !sessionId) return;
+        const activeButton = candidatesContainer.querySelector(`[data-session-id="${sessionId}"]`);
+        if (activeButton) {
+            activeButton.disabled = true;
+            activeButton.textContent = 'Vinculando...';
+        }
+        const response = await fetch(`/activities/${currentActivityId}/link-session`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ planned_session_id: sessionId }),
+        });
+        if (response.ok) {
+            window.location.reload();
+            return;
+        }
+        let errorMessage = 'No se pudo vincular la sesion.';
+        try {
+            const payload = await response.json();
+            if (payload && payload.detail) {
+                errorMessage = payload.detail;
+            }
+        } catch (err) {
+            errorMessage = 'No se pudo vincular la sesion.';
+        }
+        if (activeButton) {
+            activeButton.disabled = false;
+            activeButton.textContent = 'Vincular';
+        }
+        candidatesContainer.insertAdjacentHTML('afterbegin', `<div class="alert alert-warning">${errorMessage}</div>`);
+    }
+
+    function formatSportLabel(value) {
+        if (!value) return '-';
+        const mapping = {
+            running: 'Running',
+            cycling: 'Cycling',
+            swimming: 'Swimming',
+            strength: 'Strength',
+            walking: 'Walking',
+            mtb: 'MTB',
+            trail_running: 'Trail',
+        };
+        const key = value.toString().toLowerCase();
+        return mapping[key] || value;
+    }
+
+    document.querySelectorAll('.js-manual-link').forEach(button => {
+        button.addEventListener('click', () => openModal(button.dataset.activityId));
+    });
+    document.querySelectorAll('.js-close-modal').forEach(button => {
+        button.addEventListener('click', closeModal);
+    });
+    backdrop.addEventListener('click', closeModal);
+    const panel = document.getElementById('manual-link-panel');
+    if (panel) {
+        panel.addEventListener('click', (event) => event.stopPropagation());
+    }
+    document.querySelectorAll('.js-search-candidates').forEach(button => {
+        button.addEventListener('click', fetchCandidates);
+    });
+});
+</script>
 {% endblock %}

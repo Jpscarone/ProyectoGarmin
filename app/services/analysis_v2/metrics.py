@@ -5,24 +5,40 @@ from typing import Any
 
 from app.services.analysis_v2 import rules
 from app.services.analysis_v2.scoring import average_scores, closeness_score_from_delta_pct, range_target_score, stability_score_from_cv
+from app.services.analysis_v2.structured import (
+    apply_block_short_notes,
+    build_block_analysis,
+    build_block_structure,
+    build_expected_repeats_summary,
+    build_primary_targets,
+    compute_execution_score_structured,
+    detect_session_intent,
+    derive_structured_flags,
+    expand_planned_steps,
+    match_steps_to_laps,
+)
 
 
 def compute_session_metrics(context: Any) -> dict[str, Any]:
+    structured_plan = _build_structured_plan(context)
     planned_vs_actual = _build_planned_vs_actual(context)
     elevation = _build_elevation_metrics(context, planned_vs_actual)
     heart_rate = _build_heart_rate_metrics(context)
     pace = _build_pace_metrics(context)
     power = _build_power_metrics(context)
     cadence = _build_cadence_metrics(context)
-    laps = _build_lap_metrics(context)
-    intensity = _build_intensity_metrics(context)
+    laps = _build_lap_metrics(context, structured_plan)
+    block_analysis = build_block_analysis(laps.get("structured_match", {})) if laps.get("structured_match") else []
+    intensity = _build_intensity_metrics(context, structured_plan)
     recent_comparisons = _build_recent_similar_comparisons(context)
     weekly_context = _build_weekly_context(context)
     compliance = _build_compliance_metrics(planned_vs_actual, laps)
-    derived_flags = _build_flags(context, planned_vs_actual, heart_rate, pace, intensity, laps)
-    scores = _build_scores(context, compliance, heart_rate, pace, power, cadence, intensity, laps)
+    derived_flags = _build_flags(context, planned_vs_actual, heart_rate, pace, intensity, laps, structured_plan, block_analysis)
+    block_analysis = apply_block_short_notes(block_analysis, derived_flags.get("recovery_block_not_effective_flag", False))
+    scores = _build_scores(context, compliance, heart_rate, pace, power, cadence, intensity, laps, structured_plan, block_analysis)
 
     return {
+        "session_intent": structured_plan["session_intent"],
         "planned_vs_actual": planned_vs_actual,
         "intensity": intensity,
         "heart_rate": heart_rate,
@@ -31,6 +47,14 @@ def compute_session_metrics(context: Any) -> dict[str, Any]:
         "cadence": cadence,
         "elevation": elevation,
         "laps": laps,
+        "block_analysis": block_analysis,
+        "structure": {
+            "session_intent": structured_plan["session_intent"],
+            "primary_targets": structured_plan["primary_targets"],
+            "block_structure": structured_plan["block_structure"],
+            "expected_repeats_summary": structured_plan["expected_repeats_summary"],
+            "expanded_steps": structured_plan["expanded_steps"],
+        },
         "compliance": compliance,
         "comparisons": {
             "sport_match": _normalized(context.activity.sport_type) == _normalized(context.planned_session.sport_type),
@@ -41,6 +65,53 @@ def compute_session_metrics(context: Any) -> dict[str, Any]:
         "scores": scores,
         "rule_thresholds": rules.exported_thresholds(),
     }
+
+
+def _build_structured_plan(context: Any) -> dict[str, Any]:
+    planned_steps = list(context.planned_session.steps or [])
+    expanded_steps = expand_planned_steps(planned_steps)
+    expanded_steps = _apply_inferred_targets(expanded_steps, context)
+    return {
+        "session_intent": detect_session_intent(context.planned_session, planned_steps),
+        "expanded_steps": expanded_steps[:80],
+        "primary_targets": build_primary_targets(expanded_steps),
+        "block_structure": build_block_structure(expanded_steps)[:80],
+        "expected_repeats_summary": build_expected_repeats_summary(planned_steps),
+    }
+
+
+def _apply_inferred_targets(expanded_steps: list[dict[str, Any]], context: Any) -> list[dict[str, Any]]:
+    zone_rows = _zone_rows(context.athlete.hr_zones, context.planned_session.sport_type)
+    for step in expanded_steps:
+        if step.get("target_type"):
+            continue
+        inferred_zone = _infer_zone_from_notes(step.get("target_notes"), context.planned_session.target_notes, context.planned_session.description)
+        if not inferred_zone:
+            continue
+        step["target_type"] = "hr"
+        step["target_zone"] = inferred_zone
+        step["target_source"] = "inferred"
+        zone_range = _zone_range_by_name(zone_rows, inferred_zone)
+        if zone_range:
+            step["target_hr_min"] = zone_range["min"]
+            step["target_hr_max"] = zone_range["max"]
+            step["target_min"] = zone_range["min"]
+            step["target_max"] = zone_range["max"]
+    for step in expanded_steps:
+        if step.get("target_type") and not step.get("target_source"):
+            step["target_source"] = "explicit"
+    return expanded_steps
+
+
+def _infer_zone_from_notes(*notes: str | None) -> str | None:
+    for note in notes:
+        if not note:
+            continue
+        for token in note.replace(",", " ").replace("/", " ").split():
+            normalized = token.strip().lower()
+            if normalized.startswith("z") and len(normalized) >= 2 and normalized[1].isdigit():
+                return f"Z{normalized[1]}"
+    return None
 
 
 def _build_planned_vs_actual(context: Any) -> dict[str, Any]:
@@ -183,79 +254,108 @@ def _build_elevation_metrics(context: Any, planned_vs_actual: dict[str, Any]) ->
     }
 
 
-def _build_lap_metrics(context: Any) -> dict[str, Any]:
+def _build_lap_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[str, Any]:
     planned_steps = context.planned_session.steps
     laps = context.activity_laps
-    matched_count = min(len(planned_steps), len(laps))
-    total_reference = max(len(planned_steps), len(laps), 1)
-    alignment_score = round((matched_count / total_reference) * 100.0, 1) if planned_steps or laps else None
+    expanded_steps = structured_plan["expanded_steps"]
+    structured_match = match_steps_to_laps(expanded_steps, laps) if expanded_steps or laps else {
+        "matched_pairs": [],
+        "unmatched_laps": [],
+        "unmatched_steps": [],
+        "matched_count": 0,
+        "alignment_score": None,
+        "interval_structure_detected": False,
+        "structural_confidence": None,
+    }
+
+    matched_count = structured_match["matched_count"]
+    alignment_score = structured_match.get("alignment_score")
 
     pairings: list[dict[str, Any]] = []
-    for idx in range(matched_count):
-        step = planned_steps[idx]
-        lap = laps[idx]
+    for pairing in structured_match.get("matched_pairs", []):
+        step = pairing["step"]
+        lap = pairing["lap_summary"]
         pairings.append(
             {
-                "planned_step_order": step.order,
-                "activity_lap_index": lap.index,
-                "planned_duration_sec": step.duration_sec,
-                "actual_duration_sec": lap.duration_sec,
-                "duration_delta_sec": _delta(step.duration_sec, lap.duration_sec),
-                "duration_delta_pct": _delta_pct(step.duration_sec, lap.duration_sec),
-                "planned_distance_m": step.distance_m,
-                "actual_distance_m": lap.distance_m,
-                "distance_delta_m": _delta(step.distance_m, lap.distance_m),
-                "distance_delta_pct": _delta_pct(step.distance_m, lap.distance_m),
-                "target_type": step.target_type,
+                "planned_step_order": step["order"],
+                "activity_lap_index": lap.get("index"),
+                "planned_duration_sec": step["duration_sec"],
+                "actual_duration_sec": lap.get("duration_sec"),
+                "duration_delta_sec": _delta(step["duration_sec"], lap.get("duration_sec")),
+                "duration_delta_pct": _delta_pct(step["duration_sec"], lap.get("duration_sec")),
+                "planned_distance_m": step["distance_m"],
+                "actual_distance_m": lap.get("distance_m"),
+                "distance_delta_m": _delta(step["distance_m"], lap.get("distance_m")),
+                "distance_delta_pct": _delta_pct(step["distance_m"], lap.get("distance_m")),
+                "target_type": step["target_type"],
+                "target_zone": step.get("target_zone"),
+                "target_source": step.get("target_source"),
+                "target_range": {"min": step.get("target_min"), "max": step.get("target_max")} if step.get("target_min") is not None or step.get("target_max") is not None else None,
                 "target_evaluation": _evaluate_step_target(step, lap),
-                "avg_hr": lap.avg_hr,
-                "avg_pace_sec_km": lap.avg_pace_sec_km,
-                "avg_power": lap.avg_power,
-                "avg_cadence": lap.avg_cadence,
+                "avg_hr": lap.get("avg_hr"),
+                "avg_pace_sec_km": lap.get("avg_pace_sec_km"),
+                "avg_power": lap.get("avg_power"),
+                "avg_cadence": lap.get("avg_cadence"),
+                "chosen_match_reason": pairing.get("chosen_match_reason"),
+                "rejected_candidates": pairing.get("rejected_candidates"),
+                "duration_penalty": pairing.get("duration_penalty"),
+                "role_penalty": pairing.get("role_penalty"),
+                "intensity_penalty": pairing.get("intensity_penalty"),
+                "jump_penalty": pairing.get("jump_penalty"),
             }
         )
 
     return {
         "matched_count": matched_count,
-        "missing_planned_steps": max(0, len(planned_steps) - matched_count),
+        "missing_planned_steps": max(0, len(expanded_steps) - matched_count),
         "extra_laps": max(0, len(laps) - matched_count),
         "alignment_score": alignment_score,
         "pairs": pairings,
+        "structured_match": structured_match,
     }
 
 
-def _build_intensity_metrics(context: Any) -> dict[str, Any]:
+def _build_intensity_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[str, Any]:
     target_type = context.planned_session.target_type
+    target_zone = _session_target_zone_name(context)
+    session_intent = structured_plan["session_intent"]
+    structured_intent = session_intent in {"interval_training", "mixed_structured"}
     result = {
-        "target_type": target_type,
-        "target_zone": _session_target_zone_name(context),
+        "target_type": None if structured_intent else target_type,
+        "target_zone": None if structured_intent else target_zone,
         "target_range": None,
         "actual_value": None,
         "actual_block": None,
         "target_compliance": None,
+        "primary_targets": structured_plan["primary_targets"],
+        "block_structure": structured_plan["block_structure"],
+        "session_intent": session_intent,
+        "global_target": "mixed" if structured_intent else target_type,
+        "legacy_target_type": target_type,
+        "legacy_target_zone": target_zone,
     }
-    if target_type == "hr":
+    if not structured_intent and target_type == "hr":
         zone_rows = _zone_rows(context.athlete.hr_zones, context.planned_session.sport_type)
         target_range = _zone_range_by_name(zone_rows, context.planned_session.target_hr_zone)
         result["target_range"] = target_range
         result["actual_value"] = context.activity.avg_hr
         result["actual_block"] = "heart_rate"
         result["target_compliance"] = range_target_score(context.activity.avg_hr, target_range["min"], target_range["max"], rules.TARGET_MARGIN_HR) if target_range else None
-    elif target_type == "pace":
+    elif not structured_intent and target_type == "pace":
         zone_rows = _zone_rows(context.athlete.pace_zones, context.planned_session.sport_type)
         target_range = _zone_range_by_name(zone_rows, context.planned_session.target_pace_zone)
         result["target_range"] = target_range
         result["actual_value"] = context.activity.avg_pace_sec_km
         result["actual_block"] = "pace"
         result["target_compliance"] = range_target_score(context.activity.avg_pace_sec_km, target_range["min"], target_range["max"], rules.TARGET_MARGIN_PACE_SEC) if target_range else None
-    elif target_type == "power":
+    elif not structured_intent and target_type == "power":
         zone_rows = _zone_rows(context.athlete.power_zones, context.planned_session.sport_type)
         target_range = _zone_range_by_name(zone_rows, context.planned_session.target_power_zone)
         result["target_range"] = target_range
         result["actual_value"] = context.activity.avg_power
         result["actual_block"] = "power"
         result["target_compliance"] = range_target_score(context.activity.avg_power, target_range["min"], target_range["max"], rules.TARGET_MARGIN_POWER) if target_range else None
-    elif target_type == "rpe":
+    elif not structured_intent and target_type == "rpe":
         result["actual_block"] = "rpe"
     return result
 
@@ -325,7 +425,16 @@ def _build_weekly_context(context: Any) -> dict[str, Any]:
     }
 
 
-def _build_flags(context: Any, planned_vs_actual: dict[str, Any], heart_rate: dict[str, Any] | None, pace: dict[str, Any] | None, intensity: dict[str, Any], laps: dict[str, Any]) -> dict[str, Any]:
+def _build_flags(
+    context: Any,
+    planned_vs_actual: dict[str, Any],
+    heart_rate: dict[str, Any] | None,
+    pace: dict[str, Any] | None,
+    intensity: dict[str, Any],
+    laps: dict[str, Any],
+    structured_plan: dict[str, Any],
+    block_analysis: list[dict[str, Any]],
+) -> dict[str, Any]:
     duration_ratio = planned_vs_actual["duration"]["actual_to_planned_ratio"]
     distance_ratio = planned_vs_actual["distance"]["actual_to_planned_ratio"]
     elevation_ratio = planned_vs_actual["elevation"]["actual_to_planned_ratio"]
@@ -344,6 +453,9 @@ def _build_flags(context: Any, planned_vs_actual: dict[str, Any], heart_rate: di
         heart_rate_high_flag = heart_rate_high_flag or intensity["target_compliance"]["status"] == "above_range"
 
     pace_instability_flag = bool(pace and pace.get("stability_cv") is not None and pace["stability_cv"] >= rules.PACE_INSTABILITY_CV_THRESHOLD)
+    structured_flags = derive_structured_flags(structured_plan["session_intent"], laps.get("structured_match", {}), block_analysis)
+    if structured_flags.get("expected_variability"):
+        pace_instability_flag = False
     possible_heat_impact_flag = bool(context.activity.avg_temperature_c is not None and context.activity.avg_temperature_c >= rules.HEAT_IMPACT_TEMP_C)
     hydration_risk_flag = bool(
         (context.activity.duration_sec or 0) >= rules.HYDRATION_RISK_DURATION_SEC
@@ -367,19 +479,34 @@ def _build_flags(context: Any, planned_vs_actual: dict[str, Any], heart_rate: di
         "cardiac_drift_flag": cardiac_drift_flag,
         "hydration_risk_flag": hydration_risk_flag,
         "manual_review_needed": manual_review_needed,
+        **structured_flags,
     }
 
 
-def _build_scores(context: Any, compliance: dict[str, Any], heart_rate: dict[str, Any] | None, pace: dict[str, Any] | None, power: dict[str, Any] | None, cadence: dict[str, Any] | None, intensity: dict[str, Any], laps: dict[str, Any]) -> dict[str, Any]:
+def _build_scores(
+    context: Any,
+    compliance: dict[str, Any],
+    heart_rate: dict[str, Any] | None,
+    pace: dict[str, Any] | None,
+    power: dict[str, Any] | None,
+    cadence: dict[str, Any] | None,
+    intensity: dict[str, Any],
+    laps: dict[str, Any],
+    structured_plan: dict[str, Any],
+    block_analysis: list[dict[str, Any]],
+) -> dict[str, Any]:
     compliance_score = compliance["global_score"]
-    execution_score = average_scores(
-        [
-            laps.get("alignment_score"),
-            pace.get("stability_score") if pace else None,
-            power.get("stability_score") if power else None,
-            cadence.get("stability_score") if cadence else None,
-        ]
-    )
+    structured_execution = compute_execution_score_structured(laps.get("structured_match", {}), block_analysis)
+    execution_score = structured_execution["execution_score"]
+    if execution_score is None:
+        execution_score = average_scores(
+            [
+                laps.get("alignment_score"),
+                pace.get("stability_score") if pace else None,
+                power.get("stability_score") if power else None,
+                cadence.get("stability_score") if cadence else None,
+            ]
+        )
 
     hr_control_component = None
     if heart_rate and heart_rate.get("avg_hr_pct_of_max") is not None:
@@ -399,14 +526,25 @@ def _build_scores(context: Any, compliance: dict[str, Any], heart_rate: dict[str
     heat_component = 75.0 if (context.activity.avg_temperature_c or 0) >= rules.HEAT_IMPACT_TEMP_C else None
     fatigue_score = average_scores([duration_component, elevation_component, training_load_component, training_effect_total, heat_component])
 
+    structural_adherence_score = average_scores(
+        [
+            laps.get("alignment_score"),
+            (laps.get("structured_match") or {}).get("structural_confidence"),
+        ]
+    )
+    physiological_adherence_score = average_scores([block.get("score") for block in block_analysis if block.get("score") is not None])
+
     return {
         "compliance_score": compliance_score,
         "execution_score": execution_score,
+        "execution_score_details": structured_execution,
+        "structural_adherence_score": structural_adherence_score,
+        "physiological_adherence_score": physiological_adherence_score,
         "control_score": control_score,
         "fatigue_score": fatigue_score,
         "formula": {
             "compliance_score": "promedio entre cumplimiento basico y alineacion por laps cuando exista",
-            "execution_score": "promedio de estabilidad por laps (ritmo/potencia/cadencia) y alineacion de bloques",
+            "execution_score": "estabilidad por roles (trabajo/recuperacion) y alineacion de estructura si aplica",
             "control_score": "promedio entre control de FC, cumplimiento de target e indicador simple de drift",
             "fatigue_score": "promedio de duracion, desnivel, carga, training effect y calor/temperatura si existen",
         },
@@ -494,15 +632,34 @@ def _first_last_third_delta(values: list[float]) -> dict[str, float | None]:
 
 
 def _evaluate_step_target(step: Any, lap: Any) -> dict[str, Any] | None:
-    if step.target_type == "hr":
-        return range_target_score(lap.avg_hr, step.target_hr_min, step.target_hr_max, rules.TARGET_MARGIN_HR)
-    if step.target_type == "pace":
-        return range_target_score(lap.avg_pace_sec_km, step.target_pace_min_sec_km, step.target_pace_max_sec_km, rules.TARGET_MARGIN_PACE_SEC)
-    if step.target_type == "power":
-        return range_target_score(lap.avg_power, step.target_power_min, step.target_power_max, rules.TARGET_MARGIN_POWER)
-    if step.target_type == "rpe":
+    target_type = step["target_type"] if isinstance(step, dict) else step.target_type
+    if target_type == "hr":
+        return range_target_score(_get_lap_value(lap, "avg_hr"), _get_step_value(step, "target_hr_min"), _get_step_value(step, "target_hr_max"), rules.TARGET_MARGIN_HR)
+    if target_type == "pace":
+        return range_target_score(
+            _get_lap_value(lap, "avg_pace_sec_km"),
+            _get_step_value(step, "target_pace_min_sec_km"),
+            _get_step_value(step, "target_pace_max_sec_km"),
+            rules.TARGET_MARGIN_PACE_SEC,
+            higher_is_better=True,
+        )
+    if target_type == "power":
+        return range_target_score(_get_lap_value(lap, "avg_power"), _get_step_value(step, "target_power_min"), _get_step_value(step, "target_power_max"), rules.TARGET_MARGIN_POWER)
+    if target_type == "rpe":
         return {"score": None, "status": "not_evaluable", "within_range": None, "delta_to_range": None}
     return None
+
+
+def _get_step_value(step: Any, field: str) -> Any:
+    if isinstance(step, dict):
+        return step.get(field)
+    return getattr(step, field, None)
+
+
+def _get_lap_value(lap: Any, field: str) -> Any:
+    if isinstance(lap, dict):
+        return lap.get(field)
+    return getattr(lap, field, None)
 
 
 def _session_target_zone_name(context: Any) -> str | None:

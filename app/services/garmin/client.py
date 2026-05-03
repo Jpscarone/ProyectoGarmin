@@ -19,6 +19,23 @@ class GarminClient:
             return data
         return list(data or [])
 
+    def get_activities_by_date(
+        self,
+        start_date: date,
+        end_date: date,
+        activitytype: str | None = None,
+        sortorder: str | None = None,
+    ) -> list[dict]:
+        data = self.api.get_activities_by_date(
+            start_date.isoformat(),
+            end_date.isoformat(),
+            activitytype=activitytype,
+            sortorder=sortorder,
+        )
+        if isinstance(data, list):
+            return data
+        return list(data or [])
+
     def get_activity_summary(self, activity_id: int | str) -> dict:
         return self.api.get_activity(str(activity_id)) or {}
 

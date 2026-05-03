@@ -8,9 +8,12 @@ from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
+from app.db.models.garmin_account import GarminAccount
 from app.db.models.goal import Goal
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
+from app.db.models.health_ai_analysis import HealthAiAnalysis
+from app.db.models.health_sync_state import HealthSyncState
 from app.db.models.session_group import SessionGroup
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.session_template import SessionTemplate
@@ -28,7 +31,10 @@ __all__ = [
     "DailyHealthMetric",
     "GarminActivity",
     "GarminActivityLap",
+    "GarminAccount",
     "Goal",
+    "HealthAiAnalysis",
+    "HealthSyncState",
     "TrainingPlan",
     "TrainingDay",
     "PlannedSession",

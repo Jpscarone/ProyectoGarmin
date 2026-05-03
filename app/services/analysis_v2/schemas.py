@@ -155,6 +155,7 @@ class NarrativeResult(BaseModel):
     analysis_natural: str = ""
     coach_conclusion: str = ""
     next_recommendation: str = ""
+    quick_takeaway: str = ""
     structured_output: NarrativeStructuredOutput = Field(default_factory=NarrativeStructuredOutput)
     llm_json: dict[str, Any] = Field(default_factory=dict)
     error_message: str | None = None
@@ -168,6 +169,7 @@ class NarrativeResult(BaseModel):
         provider: str | None,
         model: str | None,
         llm_json: dict[str, Any],
+        quick_takeaway: str = "",
         error_message: str | None = None,
     ) -> "NarrativeResult":
         return cls(
@@ -178,6 +180,7 @@ class NarrativeResult(BaseModel):
             analysis_natural=output.analysis_natural,
             coach_conclusion=output.coach_conclusion,
             next_recommendation=output.next_recommendation,
+            quick_takeaway=quick_takeaway,
             structured_output=output.to_structured_output(),
             llm_json=llm_json,
             error_message=error_message,

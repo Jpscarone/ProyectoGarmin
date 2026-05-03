@@ -33,8 +33,9 @@ def sync_recent_health(
     settings: Settings,
     days: int = 7,
     mfa_code: str | None = None,
+    athlete_id: int | None = None,
 ) -> GarminHealthSyncResult:
-    athlete = _get_sync_athlete(db)
+    athlete = _get_sync_athlete(db, athlete_id=athlete_id)
     auth_context = get_garmin_auth_context(settings, mfa_code=mfa_code)
     client = GarminClient(auth_context.client)
 
@@ -84,7 +85,12 @@ def sync_recent_health(
     )
 
 
-def _get_sync_athlete(db: Session) -> Athlete:
+def _get_sync_athlete(db: Session, athlete_id: int | None = None) -> Athlete:
+    if athlete_id is not None:
+        athlete = db.get(Athlete, athlete_id)
+        if athlete is None:
+            raise GarminServiceError("Selected athlete was not found for Garmin health sync.")
+        return athlete
     athlete = db.scalar(select(Athlete).order_by(Athlete.created_at.asc(), Athlete.id.asc()))
     if athlete is None:
         raise GarminServiceError("Create at least one athlete before syncing Garmin health metrics.")
@@ -136,6 +142,7 @@ def _build_health_values(
     return {
         "athlete_id": athlete_id,
         "metric_date": metric_date,
+        "sleep_duration_minutes": _seconds_to_minutes(sleep_seconds),
         "sleep_hours": round(sleep_seconds / 3600, 2) if sleep_seconds is not None else None,
         "sleep_score": _to_int(
             _first_nested(
@@ -171,11 +178,16 @@ def _build_health_values(
         "high_stress_duration_min": _seconds_to_minutes(
             _first_nested(stress, keys=("highStressDuration", "highStressDurationInSeconds"))
         ) or _minutes_value(_first_nested(stress, keys=("highStressDurationInMinutes",))),
+        "body_battery_morning": _to_int(body_battery_values[0]) if body_battery_values else None,
         "body_battery_start": _to_int(body_battery_values[0]) if body_battery_values else None,
         "body_battery_min": min(body_battery_values) if body_battery_values else None,
+        "body_battery_max": max(body_battery_values) if body_battery_values else None,
         "body_battery_end": _to_int(body_battery_values[-1]) if body_battery_values else None,
         "hrv_status": _to_str(
             _first_nested(hrv, hrv_summary, keys=("status", "hrvStatus", "weeklyStatus"))
+        ),
+        "hrv_value": _to_float(
+            _first_nested(hrv, hrv_summary, keys=("lastNightAvg", "average", "avg", "value"))
         ),
         "hrv_avg_ms": _to_float(
             _first_nested(hrv, hrv_summary, keys=("lastNightAvg", "average", "avg", "value"))
@@ -190,6 +202,7 @@ def _build_health_values(
         "avg_daily_hr": _to_int(
             _first_nested(daily_summary, keys=("averageHeartRate", "avgHeartRate", "averageHR"))
         ),
+        "training_load": _extract_training_load(training_readiness, daily_summary),
         "recovery_time_hours": _extract_recovery_time_hours(training_readiness, recovery_metrics),
         "vo2max": _extract_vo2max(max_metrics, max_metric_values),
         "spo2_avg": _to_float(
@@ -198,6 +211,8 @@ def _build_health_values(
         "respiration_avg": _to_float(
             _first_nested(respiration, keys=("avgWakingRespirationValue", "averageRespirationValue", "respirationAvg"))
         ),
+        "notes": None,
+        "source": "garmin",
         "raw_health_json": json.dumps(raw_payload, ensure_ascii=True, default=str) if raw_payload else None,
     }
 
@@ -384,5 +399,37 @@ def _extract_vo2max(max_metrics: dict[str, Any], metric_values: list[Any]) -> fl
         _first_nested(
             max_metrics,
             keys=("vo2MaxPreciseValue", "vo2MaxValue", "cyclingVo2Max", "runningVo2Max"),
+        )
+    )
+
+
+def _extract_training_load(training_readiness: object, daily_summary: dict[str, Any]) -> float | None:
+    if isinstance(training_readiness, dict):
+        value = _to_float(
+            _first_nested(
+                training_readiness,
+                keys=("trainingLoad", "acuteLoad", "load", "exerciseLoad"),
+            )
+        )
+        if value is not None:
+            return value
+
+    if isinstance(training_readiness, list):
+        for item in training_readiness:
+            if not isinstance(item, dict):
+                continue
+            value = _to_float(
+                _first_nested(
+                    item,
+                    keys=("trainingLoad", "acuteLoad", "load", "exerciseLoad"),
+                )
+            )
+            if value is not None:
+                return value
+
+    return _to_float(
+        _first_nested(
+            daily_summary,
+            keys=("trainingLoad", "acuteTrainingLoad", "load"),
         )
     )

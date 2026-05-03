@@ -285,7 +285,7 @@ def compute_week_metrics(context: WeeklyContext) -> dict[str, Any]:
     consistency = _build_week_consistency(context, totals)
     health_context = _build_week_health_metrics(context)
     session_aggregate = _build_session_analysis_aggregate(context)
-    derived_flags = _build_week_flags(context, totals, compliance, trends, consistency, health_context, session_aggregate)
+    derived_flags = _build_week_flags(context, totals, distribution, compliance, trends, consistency, health_context, session_aggregate)
     scores = _build_week_scores(context, totals, distribution, compliance, trends, consistency, health_context, session_aggregate)
 
     return {
@@ -761,6 +761,8 @@ def _build_week_distribution(context: WeeklyContext) -> dict[str, Any]:
         intensity_distribution[bucket] = intensity_distribution.get(bucket, 0) + 1
 
         analysis = analyses_by_activity.get(activity.activity_id)
+        if analysis is None:
+            continue
         zone_map = (((analysis.metrics_json or {}).get("metrics") or {}).get("heart_rate") or {}).get("estimated_time_in_zones_sec")
         if isinstance(zone_map, dict):
             for zone_name, seconds in zone_map.items():
@@ -769,6 +771,7 @@ def _build_week_distribution(context: WeeklyContext) -> dict[str, Any]:
                 except (TypeError, ValueError):
                     continue
 
+    intensity_zone_summary = _build_week_intensity_zone_summary(time_in_zones_sec)
     return {
         "sessions_by_sport": {
             "counts": sport_counts,
@@ -776,8 +779,42 @@ def _build_week_distribution(context: WeeklyContext) -> dict[str, Any]:
         },
         "session_types": session_types,
         "time_in_zones_sec": time_in_zones_sec,
+        "intensity_zone_summary": intensity_zone_summary,
         "intensity_distribution": intensity_distribution,
     }
+
+
+def _build_week_intensity_zone_summary(time_in_zones_sec: dict[str, int]) -> dict[str, Any]:
+    total_time = sum(int(value) for value in time_in_zones_sec.values() if value)
+    z1 = _zone_seconds(time_in_zones_sec, {"z1"})
+    z2 = _zone_seconds(time_in_zones_sec, {"z2"})
+    z3 = _zone_seconds(time_in_zones_sec, {"z3"})
+    z4 = _zone_seconds(time_in_zones_sec, {"z4"})
+    z5 = _zone_seconds(time_in_zones_sec, {"z5"})
+    z4_plus = z4 + z5
+
+    def pct(value: int) -> float | None:
+        if total_time <= 0:
+            return None
+        return round((value / total_time) * 100.0, 1)
+
+    return {
+        "total_time_sec": total_time,
+        "pct_z1": pct(z1),
+        "pct_z2": pct(z2),
+        "pct_z3": pct(z3),
+        "pct_z4_plus": pct(z4_plus),
+        "pct_z4": pct(z4),
+    }
+
+
+def _zone_seconds(time_in_zones_sec: dict[str, int], zone_names: set[str]) -> int:
+    total = 0
+    for zone_name, seconds in time_in_zones_sec.items():
+        normalized = str(zone_name).strip().lower()
+        if normalized in zone_names:
+            total += int(seconds or 0)
+    return total
 
 
 def _build_week_compliance(context: WeeklyContext) -> dict[str, Any]:
@@ -876,6 +913,7 @@ def _build_session_analysis_aggregate(context: WeeklyContext) -> dict[str, Any]:
 def _build_week_flags(
     context: WeeklyContext,
     totals: dict[str, Any],
+    distribution: dict[str, Any],
     compliance: dict[str, Any],
     trends: dict[str, Any],
     consistency: dict[str, Any],
@@ -901,6 +939,10 @@ def _build_week_flags(
         ]
     )
 
+    intensity_imbalance_flag = _weekly_intensity_imbalance_flag(
+        distribution.get("intensity_zone_summary", {})
+    )
+
     return {
         "overload_flag": bool(duration_ratio is not None and duration_ratio > OVERLOAD_DURATION_RATIO),
         "undertraining_flag": bool(
@@ -916,6 +958,7 @@ def _build_week_flags(
         "low_consistency_flag": bool(
             provisional_consistency is not None and provisional_consistency < LOW_CONSISTENCY_SCORE_THRESHOLD
         ),
+        "intensity_distribution_imbalance_flag": intensity_imbalance_flag,
     }
 
 
@@ -958,11 +1001,16 @@ def _build_week_scores(
         ]
     )
 
+    weekly_intensity_balance_score = _weekly_intensity_balance_score(
+        distribution.get("intensity_zone_summary", {})
+    )
+
     return {
         "load_score": load_score,
         "consistency_score": consistency_score,
         "fatigue_score": fatigue_score,
         "balance_score": balance_score,
+        "weekly_intensity_balance_score": weekly_intensity_balance_score,
     }
 
 
@@ -1026,6 +1074,41 @@ def _fatigue_load_component(total_duration_sec: int | None, prev_avg_duration_se
         return clamp_score(50.0 + delta_pct * 1.2)
     hours = total_duration_sec / 3600.0
     return clamp_score((hours / 10.0) * 100.0)
+
+
+def _weekly_intensity_balance_score(intensity_summary: dict[str, Any]) -> float | None:
+    if not intensity_summary:
+        return None
+    pct_z2 = intensity_summary.get("pct_z2")
+    pct_z3 = intensity_summary.get("pct_z3")
+    pct_z4_plus = intensity_summary.get("pct_z4_plus")
+    pct_z4 = intensity_summary.get("pct_z4")
+    if pct_z2 is None and pct_z3 is None and pct_z4_plus is None:
+        return None
+    score = 100.0
+    if pct_z2 is not None and pct_z2 < 20:
+        score -= 30.0
+    if pct_z3 is not None and pct_z4_plus is not None and (pct_z3 + pct_z4_plus) > 60:
+        score -= 35.0
+    if pct_z4 is not None and pct_z4 > 25:
+        score -= 25.0
+    return clamp_score(score)
+
+
+def _weekly_intensity_imbalance_flag(intensity_summary: dict[str, Any]) -> bool:
+    if not intensity_summary:
+        return False
+    pct_z2 = intensity_summary.get("pct_z2")
+    pct_z3 = intensity_summary.get("pct_z3")
+    pct_z4_plus = intensity_summary.get("pct_z4_plus")
+    pct_z4 = intensity_summary.get("pct_z4")
+    if pct_z2 is not None and pct_z2 < 20:
+        return True
+    if pct_z3 is not None and pct_z4_plus is not None and (pct_z3 + pct_z4_plus) > 60:
+        return True
+    if pct_z4 is not None and pct_z4 > 25:
+        return True
+    return False
 
 
 def _health_fatigue_component(health_context: dict[str, Any]) -> float | None:
@@ -1110,6 +1193,9 @@ def _weekly_thresholds() -> dict[str, float]:
         "poor_distribution_peak_share_pct": POOR_DISTRIBUTION_PEAK_SHARE_PCT,
         "low_consistency_score_threshold": LOW_CONSISTENCY_SCORE_THRESHOLD,
         "high_fatigue_score_threshold": HIGH_FATIGUE_SCORE_THRESHOLD,
+        "intensity_min_z2_pct": 20.0,
+        "intensity_max_z3_z4_pct": 60.0,
+        "intensity_max_z4_pct": 25.0,
     }
 
 

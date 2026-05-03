@@ -61,6 +61,7 @@
             <button class="quick-mode-tab{% if initial_mode == 'simple' %} is-active{% endif %}" type="button" data-mode-target="simple" onclick="switchQuickMode('simple')">Sesion simple</button>
             <button class="quick-mode-tab{% if initial_mode == 'text' %} is-active{% endif %}" type="button" data-mode-target="text" onclick="switchQuickMode('text')">Texto libre</button>
             <button class="quick-mode-tab{% if initial_mode == 'builder' %} is-active{% endif %}" type="button" data-mode-target="builder" onclick="switchQuickMode('builder')">Sesion por bloques</button>
+            <button class="quick-mode-tab{% if initial_mode == 'import' %} is-active{% endif %}" type="button" data-mode-target="import" onclick="switchQuickMode('import')">Importar sesiones</button>
             {% if training_day %}
             <a class="quick-mode-tab" id="quick-library-link" href="/session_templates?training_day_id={{ training_day.id }}&return_to={{ return_to or 'day' }}&month={{ return_month or training_day.day_date.strftime('%Y-%m') }}">Biblioteca de sesiones</a>
             {% elif training_plan %}
@@ -332,6 +333,124 @@
                     </div>
                 </div>
             </section>
+
+            <section class="panel panel-subtle quick-mode-panel{% if initial_mode == 'import' %} is-active{% endif %}" data-mode-panel="import">
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">Importar sesiones</p>
+                        <div class="inline-title-with-help">
+                            <h2>Pegar estructura</h2>
+                            <button
+                                class="button button-secondary button-icon import-help-trigger"
+                                type="button"
+                                onclick="openImportExampleModal()"
+                                title="Ver formato de ejemplo"
+                                aria-label="Ver formato de ejemplo"
+                            >?</button>
+                        </div>
+                        <p class="text-muted">Pegá el formato v1 y generá sesiones o grupos completos en un paso.</p>
+                    </div>
+                </div>
+
+                <div class="form-grid">
+                    <label class="field field-full">
+                        <span>Texto estructurado</span>
+                        <textarea id="import-raw-text" rows="12" placeholder="SESSION&#10;DATE: 2026-04-05&#10;SPORT: running&#10;NAME: Fondo progresivo&#10;NOTES: base aerobica&#10;&#10;BLOCK&#10;VALUE: 15&#10;UNIT: min&#10;INTENSITY: hr&#10;ZONE: z1&#10;&#10;END"></textarea>
+                    </label>
+
+                    <div class="form-actions field-full">
+                        <button class="button button-secondary" type="button" onclick="previewImportSessions()">Vista previa</button>
+                    </div>
+                </div>
+
+                <div id="import-error-panel" class="alert alert-error" hidden></div>
+                <div id="import-preview-panel" class="panel panel-subtle" hidden></div>
+            </section>
+        </div>
+
+        <div class="modal-backdrop" id="import-example-backdrop" hidden onclick="closeImportExampleModal()"></div>
+        <div class="modal" id="import-example-modal" hidden onclick="closeImportExampleModal()">
+            <div class="modal-panel import-example-modal-panel" onclick="event.stopPropagation()">
+                <div class="modal-header">
+                    <div>
+                        <p class="eyebrow">Importar sesiones</p>
+                        <h3>Formato de ejemplo</h3>
+                    </div>
+                    <button class="button button-secondary" type="button" onclick="closeImportExampleModal()">Cerrar</button>
+                </div>
+
+                <div class="modal-body import-example-modal-body">
+                    <div class="panel panel-subtle">
+                        <div class="section-heading">
+                            <div>
+                                <h3>Sesion simple</h3>
+                            </div>
+                        </div>
+                        <pre class="raw-json">SESSION
+DATE: 2026-04-05
+SPORT: running
+NAME: Fondo progresivo
+NOTES: base aerobica
+
+BLOCK
+VALUE: 15
+UNIT: min
+INTENSITY: hr
+ZONE: z1
+
+BLOCK
+VALUE: 40
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+
+END</pre>
+                    </div>
+
+                    <div class="panel panel-subtle">
+                        <div class="section-heading">
+                            <div>
+                                <h3>Con repeticion</h3>
+                            </div>
+                        </div>
+                        <pre class="raw-json">SESSION
+DATE: 2026-04-06
+SPORT: running
+NAME: Series 6x400
+
+BLOCK
+VALUE: 15
+UNIT: min
+INTENSITY: hr
+ZONE: z1
+
+REPEAT
+COUNT: 6
+
+BLOCK
+VALUE: 400
+UNIT: m
+INTENSITY: pace
+ZONE: z4
+
+BLOCK
+VALUE: 1
+UNIT: min
+INTENSITY: hr
+ZONE: z1
+
+END_REPEAT
+
+BLOCK
+VALUE: 10
+UNIT: min
+INTENSITY: hr
+ZONE: z1
+
+END</pre>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="advanced-panel field-full quick-advanced-panel" id="quick-advanced-panel">
@@ -552,15 +671,50 @@ function switchQuickMode(mode) {
     const advancedPanel = document.getElementById("quick-advanced-panel");
     const advancedIntensityGrid = document.getElementById("advanced-intensity-grid");
     if (advancedPanel) {
-        advancedPanel.hidden = mode === "simple";
+        advancedPanel.hidden = mode === "simple" || mode === "import";
     }
     if (advancedIntensityGrid) {
-        advancedIntensityGrid.hidden = mode === "builder";
-        advancedIntensityGrid.classList.toggle("is-hidden", mode === "builder");
+        const hideAdvancedIntensity = mode === "builder" || mode === "import";
+        advancedIntensityGrid.hidden = hideAdvancedIntensity;
+        advancedIntensityGrid.classList.toggle("is-hidden", hideAdvancedIntensity);
     }
-    syncBuilderAdvancedMode(mode);
+    if (mode === "builder") {
+        syncBuilderAdvancedMode(mode);
+    }
+    syncFormFieldsForMode(mode);
     window.history.replaceState({}, "", `#${mode}`);
     updateCreationWarnings();
+}
+
+function syncFormFieldsForMode(mode) {
+    document.querySelectorAll(".quick-mode-panel").forEach((panel) => {
+        const isActive = panel.dataset.modePanel === mode;
+        panel.querySelectorAll("input, select, textarea, button").forEach((field) => {
+            if (field.type === "hidden") return;
+            if (field.closest(".quick-submit-bar")) return;
+            if (field.closest("#import-example-modal")) return;
+            field.disabled = !isActive;
+        });
+    });
+
+    const advancedPanel = document.getElementById("quick-advanced-panel");
+    if (advancedPanel) {
+        const enableAdvanced = mode === "builder" || mode === "text";
+        advancedPanel.querySelectorAll("input, select, textarea, button").forEach((field) => {
+            if (field.type === "hidden") return;
+            field.disabled = !enableAdvanced;
+        });
+    }
+
+    syncTargetTypeUi("simple");
+    syncTargetTypeUi("advanced");
+
+    const advancedIntensityGrid = document.getElementById("advanced-intensity-grid");
+    if (advancedIntensityGrid && advancedIntensityGrid.hidden) {
+        advancedIntensityGrid.querySelectorAll("input, select, textarea, button").forEach((field) => {
+            field.disabled = true;
+        });
+    }
 }
 
 function syncAdvancedSport(value) {
@@ -1255,7 +1409,13 @@ document.getElementById("unified-session-form").addEventListener("input", (event
 });
 
 document.getElementById("unified-session-form").addEventListener("submit", (event) => {
+    const form = event.currentTarget;
     const mode = quickModeInput.value;
+    if (mode === "import") {
+        event.preventDefault();
+        createImportedSessions();
+        return;
+    }
     if (mode === "builder") {
         refreshBuilderPreview();
         if (builderBlocksJson) {
@@ -1292,9 +1452,154 @@ document.getElementById("unified-session-form").addEventListener("submit", (even
         if (!simpleName && !simpleDuration && !simpleDistance) {
             event.preventDefault();
             window.alert("Completa al menos un nombre, duracion o distancia para crear la sesion simple.");
+            return;
         }
     }
+
+    event.preventDefault();
+    HTMLFormElement.prototype.submit.call(form);
 });
+
+function buildImportPayload() {
+    const form = document.getElementById("unified-session-form");
+    const payload = new URLSearchParams();
+    const rawText = document.getElementById("import-raw-text")?.value || "";
+    payload.set("raw_text", rawText);
+
+    const addIfValue = (name) => {
+        const value = form.querySelector(`[name="${name}"]`)?.value || "";
+        if (value) payload.set(name, value);
+    };
+
+    addIfValue("training_day_id");
+    addIfValue("training_plan_id");
+    addIfValue("planned_day_date");
+    addIfValue("return_to");
+    addIfValue("return_month");
+    addIfValue("return_selected_date");
+    return payload;
+}
+
+function showImportErrors(errors) {
+    const panel = document.getElementById("import-error-panel");
+    if (!panel) return;
+    if (!errors || !errors.length) {
+        panel.hidden = true;
+        panel.innerHTML = "";
+        return;
+    }
+    const items = errors.map((item) => `<li>Linea ${item.line}: ${item.message}</li>`).join("");
+    panel.innerHTML = `<strong>Errores encontrados</strong><ul>${items}</ul>`;
+    panel.hidden = false;
+}
+
+function renderImportPreview(preview) {
+    const panel = document.getElementById("import-preview-panel");
+    if (!panel) return;
+    if (!preview) {
+        panel.hidden = true;
+        panel.innerHTML = "";
+        return;
+    }
+
+    const renderSession = (session) => {
+        const duration = session.duration_estimated ? `${session.duration} (estimado)` : session.duration;
+        const distance = session.distance_estimated ? `${session.distance} (estimado)` : session.distance;
+        const blocks = session.blocks.map((block) => {
+            if (block.kind === "repeat") {
+                const repeatItems = block.items.map((item) => {
+                    const itemDuration = item.duration_estimated ? `${item.duration} (est.)` : item.duration;
+                    const itemDistance = item.distance_estimated ? `${item.distance} (est.)` : item.distance;
+                    const target = item.target_label || [item.intensity, item.zone].filter(Boolean).join(" ");
+                    return `<li>${item.value}${item.unit} ${target} | ${itemDuration} · ${itemDistance}</li>`;
+                }).join("");
+                return `<li><strong>Repetir ${block.count}x</strong><ul>${repeatItems}</ul></li>`;
+            }
+            const target = block.target_label || [block.intensity, block.zone].filter(Boolean).join(" ");
+            const blockDuration = block.duration_estimated ? `${block.duration} (est.)` : block.duration;
+            const blockDistance = block.distance_estimated ? `${block.distance} (est.)` : block.distance;
+            return `<li>${block.value}${block.unit} ${target} | ${blockDuration} · ${blockDistance}</li>`;
+        }).join("");
+
+        return `
+            <div class="planned-session-inline-card">
+                <strong>${session.name}</strong>
+                <p class="text-muted">${session.date} · ${session.sport}</p>
+                ${session.notes ? `<p>${session.notes}</p>` : ""}
+                <div class="planned-session-inline-list">
+                    <span class="planned-session-inline-pill">Duracion: ${duration}</span>
+                    <span class="planned-session-inline-pill">Distancia: ${distance}</span>
+                </div>
+                <ul>${blocks}</ul>
+            </div>
+        `;
+    };
+
+    const groupHtml = (preview.groups || []).map((group) => {
+        const sessionsHtml = group.sessions.map(renderSession).join("");
+        return `
+            <article class="planned-session-inline-card">
+                <strong>${group.name}</strong>
+                <p class="text-muted">${group.date}</p>
+                ${group.notes ? `<p>${group.notes}</p>` : ""}
+                ${sessionsHtml}
+            </article>
+        `;
+    }).join("");
+
+    const sessionHtml = (preview.sessions || []).map(renderSession).join("");
+    panel.innerHTML = `
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Vista previa</p>
+                <h3>Sesiones detectadas</h3>
+            </div>
+        </div>
+        ${groupHtml}
+        ${sessionHtml}
+    `;
+    panel.hidden = false;
+}
+
+async function previewImportSessions() {
+    const payload = buildImportPayload();
+    const response = await fetch("/planned_sessions/import/preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: payload.toString(),
+    });
+    if (!response.ok) {
+        showImportErrors([{ line: "-", message: "No se pudo generar la vista previa." }]);
+        renderImportPreview(null);
+        return;
+    }
+    const data = await response.json();
+    showImportErrors(data.errors || []);
+    renderImportPreview(data.preview || null);
+}
+
+async function createImportedSessions() {
+    const payload = buildImportPayload();
+    const response = await fetch("/planned_sessions/import/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: payload.toString(),
+    });
+    if (!response.ok) {
+        showImportErrors([{ line: "-", message: "No se pudo importar la sesion." }]);
+        return;
+    }
+    const data = await response.json();
+    if (!data.ok) {
+        showImportErrors(data.errors || []);
+        return;
+    }
+    if (data.redirect_url) {
+        window.location.href = data.redirect_url;
+        return;
+    }
+    window.location.href = "/training_plans";
+}
 
 window.addEventListener("load", () => {
     const initialMode = window.location.hash.replace("#", "") || "{{ initial_mode }}";
@@ -1322,6 +1627,7 @@ window.addEventListener("load", () => {
     document.getElementById("advanced-target-type")?.addEventListener("change", () => syncTargetTypeUi("advanced"));
     syncTargetTypeUi("simple");
     syncTargetTypeUi("advanced");
+    syncFormFieldsForMode(initialMode);
     updateCreationWarnings();
     syncBuilderAdvancedMode(initialMode);
 
@@ -1388,6 +1694,16 @@ function setFieldValue(name, value) {
     const field = document.querySelector(`[name="${name}"]`);
     if (!field || value === undefined || value === null || value === "") return;
     field.value = value;
+}
+
+function openImportExampleModal() {
+    document.getElementById("import-example-modal")?.removeAttribute("hidden");
+    document.getElementById("import-example-backdrop")?.removeAttribute("hidden");
+}
+
+function closeImportExampleModal() {
+    document.getElementById("import-example-modal")?.setAttribute("hidden", "hidden");
+    document.getElementById("import-example-backdrop")?.setAttribute("hidden", "hidden");
 }
 </script>
 {% endblock %}

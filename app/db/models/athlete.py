@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from app.db.models.analysis_report import AnalysisReport
     from app.db.models.daily_health_metric import DailyHealthMetric
     from app.db.models.garmin_activity import GarminActivity
+    from app.db.models.garmin_account import GarminAccount
+    from app.db.models.health_ai_analysis import HealthAiAnalysis
     from app.db.models.goal import Goal
     from app.db.models.planned_session import PlannedSession
     from app.db.models.session_analysis import SessionAnalysis
@@ -26,6 +28,7 @@ class Athlete(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active", default="active", index=True)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -77,9 +80,18 @@ class Athlete(Base):
         back_populates="athlete",
         cascade="all, delete-orphan",
     )
+    garmin_accounts: Mapped[list["GarminAccount"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+    )
     daily_health_metrics: Mapped[list["DailyHealthMetric"]] = relationship(
         back_populates="athlete",
         cascade="all, delete-orphan",
+    )
+    health_ai_analyses: Mapped[list["HealthAiAnalysis"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+        order_by="HealthAiAnalysis.created_at.desc()",
     )
     activity_session_matches: Mapped[list["ActivitySessionMatch"]] = relationship(
         back_populates="athlete",

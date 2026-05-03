@@ -8,7 +8,7 @@ from urllib.parse import quote, urlsplit
 from typing import Any
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
@@ -19,13 +19,18 @@ from app.schemas.planned_session import PlannedSessionCreate, PlannedSessionRead
 from app.schemas.planned_session_step import PlannedSessionStepCreate
 from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION, re_run_session_analysis
 from app.services.intensity_target_service import normalize_step_target_fields
-from app.services.planning.presentation import build_session_display_blocks_for_session, derive_session_metrics
+from app.services.planning.presentation import (
+    build_session_display_blocks,
+    build_session_display_blocks_for_session,
+    build_session_summary,
+    build_session_summary_with_ranges,
+    derive_session_metrics,
+)
 from app.services.planning.quick_session_service import (
     SessionAdvancedData,
     create_session_from_quick_mode,
 )
 from app.services.planning.parser import parse_session_text
-from app.services.planning.presentation import build_session_display_blocks
 from app.services.planned_session_service import (
     create_planned_session,
     delete_planned_session,
@@ -37,6 +42,7 @@ from app.services.planned_session_step_service import replace_steps_for_session
 from app.services.session_group_service import create_inline_group
 from app.services.training_day_service import create_training_day, get_training_day, get_training_day_by_plan_and_date
 from app.services.training_plan_service import get_training_plan
+from app.services.session_import_service import preview_session_import, create_session_import
 from app.schemas.training_day import TrainingDayCreate
 from app.ui.catalogs import INTENSITY_TARGET_LABELS, MATCH_METHOD_LABELS, SPORT_LABELS, STEP_TYPE_LABELS, label_for
 from app.web.templates import build_templates
@@ -298,6 +304,8 @@ def _build_planned_session_back_link(request: Request, planned_session) -> dict[
 
 def _build_session_analysis_v2_view_model(planned_session, linked_activity, analysis: SessionAnalysis | None) -> dict[str, Any]:
     status_value = analysis.status if analysis else "missing"
+    session_metrics = derive_session_metrics(planned_session)
+    short_description = build_session_summary(planned_session) or session_metrics.title or planned_session.name
     metrics_payload = analysis.metrics_json if analysis and isinstance(analysis.metrics_json, dict) else {}
     metrics = metrics_payload.get("metrics", {}) if isinstance(metrics_payload, dict) else {}
     context_payload = metrics_payload.get("context", {}) if isinstance(metrics_payload, dict) else {}
@@ -308,7 +316,7 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
     )
 
     header = {
-        "title": planned_session.name,
+        "title": short_description,
         "date_label": planned_session.training_day.day_date.strftime("%d/%m/%Y") if planned_session.training_day and planned_session.training_day.day_date else "-",
         "sport_label": _sport_label(planned_session.sport_type),
         "duration_label": _duration_minutes_label(planned_session.expected_duration_min),
@@ -321,6 +329,17 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
         "coach_conclusion": analysis.coach_conclusion if analysis and analysis.coach_conclusion else _empty_conclusion_copy(status_value),
         "summary_short": analysis.summary_short if analysis and analysis.summary_short else _empty_summary_copy(status_value),
     }
+    is_ai_generated = (
+        analysis.llm_json.get("provider") == "openai" and analysis.llm_json.get("status") == "completed"
+        if analysis and isinstance(analysis.llm_json, dict)
+        else False
+    )
+    conclusion["is_ai_generated"] = is_ai_generated
+    quick_takeaway = (
+        analysis.llm_json.get("quick_takeaway")
+        if analysis and isinstance(analysis.llm_json, dict)
+        else None
+    )
 
     scores = [
         _score_card("Cumplimiento", analysis.compliance_score if analysis else None),
@@ -344,10 +363,12 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
         },
         "header": header,
         "conclusion": conclusion,
+        "quick_takeaway": quick_takeaway or "",
         "scores": scores,
         "positives": structured_output.get("key_positive_points") or [],
         "risks": structured_output.get("key_risk_points") or [],
         "recommendation": analysis.next_recommendation if analysis and analysis.next_recommendation else _empty_recommendation_copy(status_value, linked_activity is not None),
+        "recommendation_is_ai_generated": is_ai_generated,
         "session_type_detected": structured_output.get("session_type_detected") or "-",
         "overall_assessment": structured_output.get("overall_assessment") or "-",
         "tags": structured_output.get("tags") or [],
@@ -512,6 +533,9 @@ def _build_recent_comparison_view(metrics: dict[str, Any], context_payload: dict
 
 def _build_technical_view(metrics_payload: dict[str, Any], context_payload: dict[str, Any], analysis: SessionAnalysis | None) -> dict[str, Any]:
     laps = context_payload.get("activity_laps") or []
+    structured_pairs = (((metrics_payload.get("metrics") or {}).get("laps") or {}).get("pairs")) if metrics_payload else []
+    metrics_json_data = metrics_payload.get("metrics", {}) if metrics_payload else {}
+    llm_json_data = analysis.llm_json if analysis and analysis.llm_json else {}
     lap_rows = [
         {
             "index": lap.get("index"),
@@ -525,10 +549,29 @@ def _build_technical_view(metrics_payload: dict[str, Any], context_payload: dict
         }
         for lap in laps
     ]
+    matching_rows = [
+        {
+            "step_order": pair.get("planned_step_order") or "-",
+            "lap_index": pair.get("activity_lap_index") or "-",
+            "planned": _technical_matching_planned_label(pair),
+            "actual": _technical_matching_actual_label(pair),
+            "status": _technical_matching_status_label(pair),
+            "status_class": _technical_matching_status_class(pair),
+            "row_class": _technical_matching_row_class(pair),
+            "reason": pair.get("chosen_match_reason") or "-",
+            "penalties": _technical_matching_penalties_label(pair),
+            "total_penalty": pair.get("total_penalty"),
+            "rejected": _technical_matching_rejected_label(pair.get("rejected_candidates")),
+        }
+        for pair in structured_pairs
+    ]
     return {
-        "metrics_pretty": json.dumps(metrics_payload.get("metrics", {}), indent=2, ensure_ascii=False) if metrics_payload else "{}",
-        "llm_pretty": json.dumps((analysis.llm_json if analysis and analysis.llm_json else {}), indent=2, ensure_ascii=False),
+        "metrics_json": metrics_json_data,
+        "llm_json": llm_json_data,
+        "metrics_pretty": json.dumps(metrics_json_data, indent=2, ensure_ascii=False),
+        "llm_pretty": json.dumps(llm_json_data, indent=2, ensure_ascii=False),
         "lap_rows": lap_rows,
+        "matching_rows": matching_rows,
         "error_message": analysis.error_message if analysis else None,
     }
 
@@ -540,6 +583,9 @@ def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalys
         else None
     )
     session_metrics = derive_session_metrics(planned_session)
+    short_description = build_session_summary(planned_session) or session_metrics.title or planned_session.name
+    long_description = build_session_summary_with_ranges(planned_session, html=False)
+    long_description_html = build_session_summary_with_ranges(planned_session, html=True)
     objective_duration_sec = (
         planned_session.expected_duration_min * 60
         if planned_session.expected_duration_min is not None
@@ -573,7 +619,7 @@ def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalys
 
     return {
         "header": {
-            "title": session_metrics.title or planned_session.name,
+            "title": short_description,
             "sport_label": _sport_label(planned_session.sport_type),
             "duration_label": _duration_seconds_compact(objective_duration_sec),
             "distance_label": _distance_meters_compact(objective_distance_m),
@@ -599,8 +645,10 @@ def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalys
             block_rows=block_rows,
         ),
         "notes": {
-            "description": planned_session.description_text,
+            "description": long_description or planned_session.description_text,
+            "description_html": long_description_html or long_description or planned_session.description_text,
             "target_notes": planned_session.target_notes,
+            "description_plain": long_description or planned_session.description_text,
         },
         "steps": {
             "has_steps": bool(build_session_display_blocks_for_session(planned_session)),
@@ -710,10 +758,18 @@ def _build_step_cards_view(planned_session, block_rows: list[dict[str, Any]]) ->
     for display_index, block in enumerate(blocks, start=1):
         if getattr(block, "kind", None) == "repeat":
             nested_items = []
-            for nested_index, step in enumerate(block.steps, start=1):
-                row = block_rows[row_index] if row_index < len(block_rows) else None
-                row_index += 1
-                nested_items.append(_build_step_item_view(step, row, nested_index))
+            for iteration in range(1, block.repeat_count + 1):
+                for nested_index, step in enumerate(block.steps, start=1):
+                    row = block_rows[row_index] if row_index < len(block_rows) else None
+                    row_index += 1
+                    nested_items.append(
+                        _build_step_item_view(
+                            step,
+                            row,
+                            nested_index,
+                            repeat_iteration=iteration,
+                        )
+                    )
             cards.append(
                 {
                     "kind": "repeat",
@@ -737,7 +793,13 @@ def _build_step_cards_view(planned_session, block_rows: list[dict[str, Any]]) ->
     return cards
 
 
-def _build_step_item_view(step: Any, row: dict[str, Any] | None, nested_index: int | None) -> dict[str, Any]:
+def _build_step_item_view(
+    step: Any,
+    row: dict[str, Any] | None,
+    nested_index: int | None,
+    *,
+    repeat_iteration: int | None = None,
+) -> dict[str, Any]:
     summary_parts = []
     duration_label = _duration_seconds_compact(getattr(step, "duration_sec", None))
     distance_label = _distance_meters_compact(getattr(step, "distance_m", None))
@@ -767,8 +829,12 @@ def _build_step_item_view(step: Any, row: dict[str, Any] | None, nested_index: i
     row_status = row.get("status") if row else None
     comment = row.get("comment") if row else None
     actual_text = row.get("actual") if row else None
+    if nested_index:
+        label = f"Vuelta {repeat_iteration} · Paso {nested_index}" if repeat_iteration else f"Paso {nested_index}"
+    else:
+        label = label_for(STEP_TYPE_LABELS, getattr(step, "step_type", None), "Bloque")
     return {
-        "label": f"Paso {nested_index}" if nested_index else label_for(STEP_TYPE_LABELS, getattr(step, "step_type", None), "Bloque"),
+        "label": label,
         "summary": " | ".join(summary_parts) if summary_parts else "-",
         "intensity": " | ".join(intensity_parts) if intensity_parts else None,
         "notes": getattr(step, "target_notes", None),
@@ -929,7 +995,96 @@ def _v2_pair_actual_summary(pair: dict[str, Any]) -> str | None:
     return " | ".join(parts) if parts else None
 
 
+def _technical_matching_planned_label(pair: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if pair.get("planned_duration_sec") is not None:
+        parts.append(_duration_seconds_compact(pair.get("planned_duration_sec")))
+    if pair.get("planned_distance_m") is not None:
+        parts.append(_distance_meters_compact(pair.get("planned_distance_m")))
+    if pair.get("target_type"):
+        parts.append(str(pair.get("target_type")).upper() if pair.get("target_type") == "hr" else str(pair.get("target_type")))
+    if pair.get("target_zone"):
+        parts.append(str(pair.get("target_zone")).upper())
+    return " | ".join(parts) if parts else "-"
+
+
+def _technical_matching_actual_label(pair: dict[str, Any]) -> str:
+    parts: list[str] = []
+    if pair.get("actual_duration_sec") is not None:
+        parts.append(_duration_seconds_compact(pair.get("actual_duration_sec")))
+    if pair.get("actual_distance_m") is not None:
+        parts.append(_distance_meters_compact(pair.get("actual_distance_m")))
+    if pair.get("avg_hr") is not None:
+        parts.append(f"HR {pair.get('avg_hr')}")
+    if pair.get("avg_pace_sec_km") is not None:
+        parts.append(f"pace {_pace_seconds_compact(pair.get('avg_pace_sec_km'))}")
+    return " | ".join(parts) if parts else "-"
+
+
+def _technical_matching_status_label(pair: dict[str, Any]) -> str:
+    target_evaluation = pair.get("target_evaluation") or {}
+    if target_evaluation.get("within_range") is True:
+        return "Correcto"
+    if target_evaluation.get("status") == "above_range":
+        return "Por encima"
+    if target_evaluation.get("status") == "below_range":
+        return "Por debajo"
+    return "Sin target"
+
+
+def _technical_matching_status_class(pair: dict[str, Any]) -> str:
+    target_evaluation = pair.get("target_evaluation") or {}
+    if target_evaluation.get("within_range") is True:
+        return "status-badge-garmin"
+    if target_evaluation.get("status") in {"above_range", "below_range"}:
+        return "status-badge-active"
+    return "status-badge-empty"
+
+
+def _technical_matching_penalties_label(pair: dict[str, Any]) -> str:
+    values = []
+    if pair.get("duration_penalty") is not None:
+        values.append(f"dur {pair.get('duration_penalty')}")
+    if pair.get("role_penalty") is not None:
+        values.append(f"rol {pair.get('role_penalty')}")
+    if pair.get("intensity_penalty") is not None:
+        values.append(f"int {pair.get('intensity_penalty')}")
+    if pair.get("jump_penalty") is not None:
+        values.append(f"seq {pair.get('jump_penalty')}")
+    return " · ".join(values) if values else "-"
+
+
+def _technical_matching_row_class(pair: dict[str, Any]) -> str:
+    total_penalty = pair.get("total_penalty")
+    if total_penalty is None:
+        return ""
+    try:
+        total_penalty = float(total_penalty)
+    except (TypeError, ValueError):
+        return ""
+    if total_penalty >= 60:
+        return "analysis-v2-match-row-critical"
+    if total_penalty >= 30:
+        return "analysis-v2-match-row-warning"
+    return ""
+
+
+def _technical_matching_rejected_label(candidates: Any) -> str:
+    if not isinstance(candidates, list) or not candidates:
+        return "-"
+    compact = []
+    for item in candidates[:2]:
+        lap_index = item.get("lap_index")
+        reason = item.get("reason") or "peor costo"
+        compact.append(f"lap {lap_index}: {reason}")
+    return " | ".join(compact)
+
+
 def _v2_pair_comment(pair: dict[str, Any], target_evaluation: dict[str, Any] | None) -> str | None:
+    target_zone = pair.get("target_zone")
+    target_source = pair.get("target_source")
+    if target_zone and target_source == "inferred":
+        return f"Target {target_zone} (inferido)."
     if target_evaluation and target_evaluation.get("status") == "above_range":
         return "La intensidad real quedo por encima del objetivo del bloque."
     if target_evaluation and target_evaluation.get("status") == "below_range":
@@ -1157,6 +1312,12 @@ def create_quick_session_endpoint(
                 is_key_session=advanced_is_key_session,
                 advanced_data=advanced_data,
             )
+            if normalized_mode == "builder":
+                replace_steps_for_session(
+                    db,
+                    result.planned_session,
+                    _build_builder_steps_for_updated_session(result.planned_session, builder_blocks_json),
+                )
         created_training_day = get_training_day(db, effective_training_day_id)
         normalized_return_to = (return_to or "").strip().lower()
         if normalized_return_to == "calendar" and created_training_day is not None:
@@ -1172,6 +1333,11 @@ def create_quick_session_endpoint(
         if normalized_return_to == "plan" and created_training_day is not None:
             return RedirectResponse(
                 url=f"/training_plans/{created_training_day.training_plan.id}#training-day-{created_training_day.id}",
+                status_code=303,
+            )
+        if normalized_return_to == "day" and created_training_day is not None:
+            return RedirectResponse(
+                url=f"/training_days/{created_training_day.id}?ui_status={quote('Sesion creada')}",
                 status_code=303,
             )
         if editing_session is not None:
@@ -1226,6 +1392,66 @@ def create_session_from_text_endpoint(
             url=f"/planned_sessions/quick?training_day_id={training_day_id}&mode=text&error={quote(str(exc))}#text",
             status_code=303,
         )
+
+
+@router.post("/import/preview")
+def preview_session_import_endpoint(
+    raw_text: str = Form(...),
+    training_day_id: str | None = Form(default=None),
+    training_plan_id: str | None = Form(default=None),
+    planned_day_date: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    resolved_training_day_id = _parse_int_field(training_day_id, "training_day_id invalido.")
+    resolved_training_plan_id = _parse_int_field(training_plan_id, "training_plan_id invalido.")
+    result = preview_session_import(
+        db,
+        training_day_id=resolved_training_day_id,
+        training_plan_id=resolved_training_plan_id,
+        base_date_str=planned_day_date,
+        raw_text=raw_text,
+    )
+    return JSONResponse(
+        {
+            "ok": result.ok,
+            "errors": result.errors,
+            "preview": result.preview,
+        }
+    )
+
+
+@router.post("/import/create")
+def create_session_import_endpoint(
+    raw_text: str = Form(...),
+    training_day_id: str | None = Form(default=None),
+    training_plan_id: str | None = Form(default=None),
+    planned_day_date: str | None = Form(default=None),
+    return_to: str | None = Form(default=None),
+    return_month: str | None = Form(default=None),
+    return_selected_date: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    resolved_training_day_id = _parse_int_field(training_day_id, "training_day_id invalido.")
+    resolved_training_plan_id = _parse_int_field(training_plan_id, "training_plan_id invalido.")
+    result = create_session_import(
+        db,
+        training_day_id=resolved_training_day_id,
+        training_plan_id=resolved_training_plan_id,
+        base_date_str=planned_day_date,
+        raw_text=raw_text,
+        return_to=return_to,
+        return_month=return_month,
+        return_selected_date=return_selected_date,
+    )
+    return JSONResponse(
+        {
+            "ok": result.ok,
+            "errors": result.errors,
+            "created_sessions": result.created_sessions,
+            "created_groups": result.created_groups,
+            "redirect_url": result.redirect_url,
+        }
+    )
 
 
 @router.get("/{planned_session_id}/edit", response_class=HTMLResponse)

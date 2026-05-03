@@ -1,0 +1,212 @@
+<section class="panel dashboard-main-card">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Situación de hoy</p>
+            <h2 class="dashboard-headline">{{ dashboard.today_status.headline }}</h2>
+        </div>
+        <div class="dashboard-kpi-row">
+            <span class="dashboard-status-badge dashboard-status-{{ dashboard.today_status.status }}">{{ dashboard.today_status.status_label }}</span>
+            <span class="planned-session-inline-pill"><strong>Readiness:</strong> {{ dashboard.today_status.score if dashboard.today_status.score is not none else '-' }}</span>
+        </div>
+    </div>
+    <div class="detail-grid">
+        <div class="detail-item detail-item-full dashboard-summary-copy">
+            <p>{{ dashboard.today_status.summary }}</p>
+        </div>
+        <div class="detail-item detail-item-full dashboard-recommendation-block">
+            <strong>Recomendación</strong>
+            <p>{{ dashboard.today_status.recommendation }}</p>
+        </div>
+        <div class="detail-item detail-item-full dashboard-decision-block">
+            <strong>Decisión recomendada</strong>
+            <p>{{ dashboard.today_status.decision }}</p>
+        </div>
+    </div>
+</section>
+
+{% if dashboard.critical_alerts %}
+<section class="panel dashboard-critical-panel">
+    <p class="eyebrow">Alerta crítica</p>
+    <div class="dashboard-critical-list">
+        {% for alert in dashboard.critical_alerts %}
+        <div class="dashboard-alert dashboard-alert-danger dashboard-alert-critical">
+            <strong>{{ alert.title }}</strong>
+            <p>{{ alert.message }}</p>
+            {% if alert.url and alert.action_label %}
+            <a class="button" href="{{ alert.url }}">{{ alert.action_label }}</a>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<section class="dashboard-grid">
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Entrenamiento de hoy</p>
+                <h2>{{ dashboard.today_session.title }}</h2>
+                {% if dashboard.today_session.status_line %}
+                <p class="text-muted dashboard-card-subtitle">{{ dashboard.today_session.status_line }}</p>
+                {% endif %}
+            </div>
+            {% if dashboard.today_session.status_badges %}
+            <div class="dashboard-pill-row">
+                {% for badge in dashboard.today_session.status_badges %}
+                <span class="dashboard-pill {% if badge == 'Realizada' %}dashboard-pill-success{% elif badge == 'Analizada' %}dashboard-pill-info{% elif badge == 'Actividad sin vincular' %}dashboard-pill-warning{% else %}dashboard-pill-muted{% endif %}">{{ badge }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% if dashboard.today_session.exists %}
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Deporte:</strong> {{ sport_label(dashboard.today_session.sport) }}</div>
+            <div class="detail-item"><strong>Duración:</strong> {{ dashboard.today_session.duration_label or '-' }}</div>
+            {% if dashboard.today_session.distance_label %}
+            <div class="detail-item"><strong>Distancia:</strong> {{ dashboard.today_session.distance_label }}</div>
+            {% endif %}
+            {% if dashboard.today_session.has_more %}
+            <div class="detail-item"><strong>Extra:</strong> Hay {{ dashboard.today_session.count }} sesiones este día.</div>
+            {% endif %}
+            <div class="detail-item detail-item-full"><strong>Objetivo:</strong> {{ dashboard.today_session.objective }}</div>
+        </div>
+        {% else %}
+        <p class="empty-state">No hay sesión planificada para esta fecha.</p>
+        {% endif %}
+        <div class="dashboard-action-row">
+            {% if dashboard.today_session.exists %}
+            <a class="button" href="{{ dashboard.today_session.url }}">Ver sesión</a>
+            {% endif %}
+            {% if dashboard.training_plan %}
+            <a class="button button-utility" href="/training_plans/{{ dashboard.training_plan.id }}/calendar?selected_date={{ dashboard.selected_date_iso }}&month={{ dashboard.selected_date.strftime('%Y-%m') }}&athlete_id={{ dashboard.athlete.id }}">Ver calendario</a>
+            {% else %}
+            <a class="button button-utility" href="/training_plans">Ver calendario</a>
+            {% endif %}
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Actividad de hoy</p>
+                <h2>{{ dashboard.today_activity.title }}</h2>
+            </div>
+            {% if dashboard.today_activity.exists %}
+            <div class="dashboard-pill-row">
+                <span class="dashboard-pill {% if dashboard.today_activity.is_linked %}dashboard-pill-success{% else %}dashboard-pill-warning{% endif %}">{{ dashboard.today_activity.link_status_label }}</span>
+                <span class="dashboard-pill {% if dashboard.today_activity.has_analysis %}dashboard-pill-info{% else %}dashboard-pill-muted{% endif %}">{{ dashboard.today_activity.analysis_status_label }}</span>
+            </div>
+            {% endif %}
+        </div>
+        {% if dashboard.today_activity.exists %}
+        <div class="detail-grid">
+            <div class="detail-item detail-item-full dashboard-activity-summary">{{ dashboard.today_activity.summary }}</div>
+            <div class="detail-item"><strong>Vínculo:</strong> {{ dashboard.today_activity.link_status_label }}</div>
+            <div class="detail-item"><strong>Análisis:</strong> {{ dashboard.today_activity.analysis_status_label }}</div>
+        </div>
+        {% else %}
+        <p class="empty-state">Todavía no hay actividad registrada.</p>
+        {% endif %}
+        <div class="dashboard-action-row">
+            {% if dashboard.today_activity.exists %}
+            <a class="button" href="{{ dashboard.today_activity.url }}">Ver actividad</a>
+            {% if dashboard.today_activity.analysis_url %}
+            <a class="button button-utility" href="{{ dashboard.today_activity.analysis_url }}">Ver análisis</a>
+            {% endif %}
+            {% else %}
+            <a class="button button-utility" href="/activities">Ir a actividades</a>
+            {% endif %}
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Salud</p>
+                <h2>{{ dashboard.health.readiness_label }}</h2>
+            </div>
+            <div class="dashboard-kpi-row">
+                <span class="planned-session-inline-pill"><strong>Score:</strong> {{ dashboard.health.readiness_score if dashboard.health.readiness_score is not none else '-' }}</span>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Sueño:</strong> {{ dashboard.health.sleep_hours if dashboard.health.sleep_hours is not none else '-' }}</div>
+            <div class="detail-item"><strong>HRV:</strong> {{ dashboard.health.hrv_value if dashboard.health.hrv_value is not none else '-' }}</div>
+            <div class="detail-item"><strong>Body Battery:</strong> {{ dashboard.health.body_battery if dashboard.health.body_battery is not none else '-' }}</div>
+            <div class="detail-item"><strong>Principal limitante:</strong> {{ dashboard.health.main_limiter or '-' }}</div>
+            <div class="detail-item detail-item-full"><strong>Lectura:</strong> {{ dashboard.health.dashboard_summary }}</div>
+        </div>
+        <div class="dashboard-action-row">
+            <a class="button" href="{{ dashboard.health.url }}">Ver salud</a>
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Próxima sesión</p>
+                <h2>{{ dashboard.next_session.title }}</h2>
+            </div>
+        </div>
+        {% if dashboard.next_session.exists %}
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Fecha:</strong> {{ dashboard.next_session.date.strftime('%d/%m/%Y') if dashboard.next_session.date else '-' }}</div>
+            <div class="detail-item"><strong>Deporte:</strong> {{ sport_label(dashboard.next_session.sport) }}</div>
+            <div class="detail-item"><strong>Duración:</strong> {{ dashboard.next_session.duration_label or '-' }}</div>
+            <div class="detail-item detail-item-full"><strong>Objetivo:</strong> {{ dashboard.next_session.objective }}</div>
+        </div>
+        {% else %}
+        <p class="empty-state">No hay otra sesión cargada después de esta fecha.</p>
+        {% endif %}
+        <div class="dashboard-action-row">
+            {% if dashboard.next_session.exists %}
+            <a class="button" href="{{ dashboard.next_session.url }}">Ver sesión</a>
+            {% else %}
+            <a class="button button-utility" href="/training_plans">Ver planes</a>
+            {% endif %}
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Resumen semanal</p>
+                <h2>{{ dashboard.weekly_summary.intensity_label|capitalize }}</h2>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Sesiones:</strong> {{ dashboard.weekly_summary.completed_count }} / {{ dashboard.weekly_summary.planned_count }}</div>
+            <div class="detail-item"><strong>Duración:</strong> {{ dashboard.weekly_summary.total_duration_label if dashboard.weekly_summary.total_duration_label else '-' }}</div>
+            <div class="detail-item"><strong>Distancia:</strong> {% if dashboard.weekly_summary.total_distance_km is not none %}{{ dashboard.weekly_summary.total_distance_km }} km{% else %}-{% endif %}</div>
+            <div class="detail-item detail-item-full"><strong>Resumen:</strong> {{ dashboard.weekly_summary.summary }}</div>
+        </div>
+        <div class="dashboard-action-row">
+            <a class="button" href="{{ dashboard.weekly_summary.url }}">Ver análisis semanal</a>
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Alertas</p>
+                <h2>{{ dashboard.alerts|length }} pendientes</h2>
+            </div>
+        </div>
+        {% if dashboard.alerts %}
+        <div class="dashboard-alert-list">
+            {% for alert in dashboard.alerts %}
+            <div class="dashboard-alert dashboard-alert-{{ alert.level }}">
+                <strong>{{ alert.title }}</strong>
+                <p>{{ alert.message }}</p>
+                {% if alert.url and alert.action_label %}
+                <a class="button button-utility" href="{{ alert.url }}">{{ alert.action_label }}</a>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">Sin alertas importantes.</p>
+        {% endif %}
+    </article>
+</section>

@@ -91,6 +91,44 @@ class SessionMatchServiceTests(unittest.TestCase):
         self.assertEqual(decision.status, "matched")
         self.assertEqual(decision.matched_session_id, session.id)
 
+    def test_auto_match_with_plan_context_does_not_jump_to_other_plan(self) -> None:
+        other_plan = TrainingPlan(
+            athlete_id=self.athlete.id,
+            name="Otro plan",
+            sport_type="running",
+            start_date=date(2026, 4, 1),
+            end_date=date(2026, 4, 30),
+            status="active",
+        )
+        self.db.add(other_plan)
+        self.db.commit()
+        self.db.refresh(other_plan)
+
+        other_day = TrainingDay(training_plan_id=other_plan.id, athlete_id=self.athlete.id, day_date=date(2026, 4, 6))
+        self.db.add(other_day)
+        self.db.commit()
+        self.db.refresh(other_day)
+        other_session = PlannedSession(
+            training_day_id=other_day.id,
+            athlete_id=self.athlete.id,
+            sport_type="running",
+            name="Sesion de otro plan",
+            session_order=1,
+            planned_start_time=time(7, 0),
+            expected_duration_min=60,
+            expected_distance_km=10.0,
+        )
+        self.db.add(other_session)
+        self.db.commit()
+        self.db.refresh(other_session)
+
+        activity = self._create_activity(date(2026, 4, 6), "Rodaje Garmin", "running", 6, 55, 3600, 10000)
+
+        decision = auto_match_activity(self.db, activity.id, training_plan_id=self.training_plan.id)
+
+        self.assertNotEqual(decision.matched_session_id, other_session.id)
+        self.assertIn(decision.status, {"unmatched", "candidate"})
+
     def test_manual_match_overwrites_auto(self) -> None:
         session_a = self._create_session(date(2026, 4, 6), "Rodaje A", "running", time(7, 0), 60, 10.0)
         session_b = self._create_session(date(2026, 4, 6), "Rodaje B", "running", time(18, 0), 60, 10.0)

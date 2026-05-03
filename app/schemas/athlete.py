@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 class AthleteBase(BaseModel):
     name: str
+    status: str = "active"
     height_cm: float | None = None
     weight_kg: float | None = None
     max_hr: int | None = None
@@ -24,6 +25,7 @@ class AthleteCreate(AthleteBase):
 
 class AthleteUpdate(BaseModel):
     name: str | None = None
+    status: str | None = None
     height_cm: float | None = None
     weight_kg: float | None = None
     max_hr: int | None = None

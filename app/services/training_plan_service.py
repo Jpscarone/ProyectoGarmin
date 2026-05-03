@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -12,6 +14,47 @@ from app.db.models.session_group import SessionGroup
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanUpdate
 
 
+TRAINING_PLAN_STATUS_DRAFT = "draft"
+TRAINING_PLAN_STATUS_ACTIVE = "active"
+TRAINING_PLAN_STATUS_COMPLETED = "completed"
+TRAINING_PLAN_STATUS_ARCHIVED = "archived"
+TRAINING_PLAN_STATUS_CANCELLED = "cancelled"
+
+TRAINING_PLAN_STATUSES = {
+    TRAINING_PLAN_STATUS_DRAFT,
+    TRAINING_PLAN_STATUS_ACTIVE,
+    TRAINING_PLAN_STATUS_COMPLETED,
+    TRAINING_PLAN_STATUS_ARCHIVED,
+    TRAINING_PLAN_STATUS_CANCELLED,
+}
+
+
+def normalize_training_plan_status(value: str | None) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in TRAINING_PLAN_STATUSES:
+        return normalized
+    return TRAINING_PLAN_STATUS_DRAFT
+
+
+def auto_complete_expired_training_plans(db: Session, today: date | None = None) -> int:
+    reference_date = today or date.today()
+    expired_plans = list(
+        db.scalars(
+            select(TrainingPlan).where(
+                TrainingPlan.status == TRAINING_PLAN_STATUS_ACTIVE,
+                TrainingPlan.end_date.is_not(None),
+                TrainingPlan.end_date < reference_date,
+            )
+        ).all()
+    )
+    for plan in expired_plans:
+        plan.status = TRAINING_PLAN_STATUS_COMPLETED
+        db.add(plan)
+    if expired_plans:
+        db.commit()
+    return len(expired_plans)
+
+
 def get_training_plans(db: Session) -> list[TrainingPlan]:
     statement = (
         select(TrainingPlan)
@@ -19,6 +62,46 @@ def get_training_plans(db: Session) -> list[TrainingPlan]:
         .order_by(TrainingPlan.start_date.desc(), TrainingPlan.id.desc())
     )
     return list(db.scalars(statement).all())
+
+
+def get_training_plans_for_athlete(db: Session, athlete_id: int) -> list[TrainingPlan]:
+    statement = (
+        select(TrainingPlan)
+        .where(TrainingPlan.athlete_id == athlete_id)
+        .options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal), selectinload(TrainingPlan.goals))
+        .order_by(TrainingPlan.start_date.desc(), TrainingPlan.id.desc())
+    )
+    return list(db.scalars(statement).all())
+
+
+def select_default_training_plan(db: Session, athlete_id: int | None = None, today: date | None = None) -> TrainingPlan | None:
+    reference_date = today or date.today()
+    statement = select(TrainingPlan).options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal))
+    if athlete_id is not None:
+        statement = statement.where(TrainingPlan.athlete_id == athlete_id)
+    plans = list(db.scalars(statement).all())
+    if not plans:
+        return None
+
+    active_current = [
+        plan
+        for plan in plans
+        if normalize_training_plan_status(plan.status) == TRAINING_PLAN_STATUS_ACTIVE
+        and (plan.start_date is None or plan.start_date <= reference_date)
+        and (plan.end_date is None or plan.end_date >= reference_date)
+    ]
+    if active_current:
+        return sorted(active_current, key=lambda plan: (plan.start_date or date.min, plan.id), reverse=True)[0]
+
+    active_any = [plan for plan in plans if normalize_training_plan_status(plan.status) == TRAINING_PLAN_STATUS_ACTIVE]
+    if active_any:
+        return sorted(active_any, key=lambda plan: (plan.start_date or date.min, plan.id), reverse=True)[0]
+
+    completed = [plan for plan in plans if normalize_training_plan_status(plan.status) == TRAINING_PLAN_STATUS_COMPLETED]
+    if completed:
+        return sorted(completed, key=lambda plan: (plan.end_date or plan.start_date or date.min, plan.id), reverse=True)[0]
+
+    return sorted(plans, key=lambda plan: (plan.start_date or date.min, plan.id), reverse=True)[0]
 
 
 def get_training_plan(db: Session, training_plan_id: int) -> TrainingPlan | None:
@@ -57,6 +140,7 @@ def get_training_plan_detail(db: Session, training_plan_id: int) -> TrainingPlan
 
 def create_training_plan(db: Session, training_plan_in: TrainingPlanCreate) -> TrainingPlan:
     payload = training_plan_in.model_dump(exclude={"primary_goal", "secondary_goals"})
+    payload["status"] = normalize_training_plan_status(payload.get("status"))
     if payload.get("goal_id") is not None:
         goal = db.get(Goal, payload["goal_id"])
         if goal is None or goal.athlete_id != training_plan_in.athlete_id:
@@ -73,6 +157,8 @@ def create_training_plan(db: Session, training_plan_in: TrainingPlanCreate) -> T
 
 def update_training_plan(db: Session, training_plan: TrainingPlan, training_plan_in: TrainingPlanUpdate) -> TrainingPlan:
     data = training_plan_in.model_dump(exclude_unset=True, exclude={"primary_goal", "secondary_goals"})
+    if "status" in data:
+        data["status"] = normalize_training_plan_status(data.get("status"))
     athlete_id = data.get("athlete_id", training_plan.athlete_id)
     goal_id = data.get("goal_id", training_plan.goal_id)
 

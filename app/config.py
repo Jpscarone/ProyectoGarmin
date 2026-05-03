@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     openai_timeout_sec: float = 30.0
     openai_max_output_tokens_session: int = 800
     openai_max_output_tokens_week: int = 1500
+    session_secret_key: str = "training-app-dev-session-key"
 
     @field_validator("debug", "garmin_enabled", mode="before")
     @classmethod

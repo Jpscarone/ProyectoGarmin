@@ -1,0 +1,17 @@
+{% if refresh_status %}
+<div class="dashboard-refresh-status dashboard-refresh-{{ refresh_status.phase }}">
+    <div class="dashboard-refresh-status-main">
+        {% if refresh_status.phase == "loading" %}
+        <span class="dashboard-refresh-spinner" aria-hidden="true"></span>
+        {% endif %}
+        <span>{{ refresh_status.message }}</span>
+    </div>
+    {% if refresh_status.steps %}
+    <div class="dashboard-refresh-step-list">
+        {% for step in refresh_status.steps %}
+        <span class="dashboard-refresh-step dashboard-refresh-step-{{ step.status }}">{{ step.message }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}

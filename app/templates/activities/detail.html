@@ -12,6 +12,13 @@
         </div>
         <div class="actions-inline">
             <a class="button button-nav" href="/activities">Volver a actividades</a>
+            {% if activity.weather and activity.weather.weather_source == 'garmin_activity' %}
+            <span class="status-badge status-badge-garmin">Clima Garmin</span>
+            {% elif activity.weather and activity.weather.weather_source == 'open_meteo' %}
+            <span class="status-badge status-badge-estimated">Clima estimado</span>
+            {% else %}
+            <span class="status-badge status-badge-empty">Sin datos de clima</span>
+            {% endif %}
         </div>
     </div>
 
@@ -23,6 +30,11 @@
     {% endif %}
     {% if analysis_status %}
     <div class="alert alert-info">{{ analysis_status }}</div>
+    {% endif %}
+    {% if activity.weather and activity.weather.weather_source == 'open_meteo' %}
+    <div class="alert alert-warning">
+        El clima de esta actividad es estimado con Open-Meteo.
+    </div>
     {% endif %}
 
     <div class="detail-item detail-item-full activity-match-hero">
@@ -112,7 +124,7 @@
         <div class="detail-item"><strong>Temperatura media:</strong> {{ activity.avg_temperature_c or '-' }}</div>
         <div class="detail-item"><strong>Inicio lat/lon:</strong> {{ activity.start_lat or '-' }} / {{ activity.start_lon or '-' }}</div>
         <div class="detail-item"><strong>Dispositivo:</strong> {{ activity.device_name or '-' }}</div>
-        <div class="detail-item"><strong>Clima:</strong> {{ 'Disponible' if activity.weather else 'No sincronizado' }}</div>
+        <div class="detail-item"><strong>Clima:</strong> {% if activity.weather and activity.weather.weather_source == 'garmin_activity' %}Garmin Activity{% elif activity.weather and activity.weather.weather_source == 'open_meteo' %}Open-Meteo estimado{% elif activity.weather %}Disponible{% else %}Sin datos{% endif %}</div>
         <div class="detail-item"><strong>Vinculacion:</strong> {{ match_method_label(activity.activity_match.match_method) if activity.activity_match else 'Sin vinculacion' }}</div>
         <div class="detail-item"><strong>Confianza:</strong> {{ activity.activity_match.match_confidence if activity.activity_match else '-' }}</div>
         <div class="detail-item"><strong>Metodo:</strong> {{ activity.activity_match.match_method if activity.activity_match else '-' }}</div>
@@ -141,6 +153,12 @@
 
     {% if analysis_v2_summary.exists %}
     <div class="planned-session-report-card">
+        {% if activity.weather and activity.weather.weather_source == 'open_meteo' %}
+        <div class="detail-item detail-item-full planned-session-inline-card activity-weather-analysis-note">
+            <strong>Contexto del clima</strong>
+            <p>Este analisis usa clima estimado desde Open-Meteo, no un dato nativo de Garmin.</p>
+        </div>
+        {% endif %}
         <div class="analysis-ai-highlight analysis-ai-highlight-compact">
             <p class="eyebrow">Analisis de Inteligencia Artificial</p>
             <h3>Lectura principal de la sesion</h3>
@@ -196,11 +214,19 @@
             <p class="eyebrow">Clima</p>
             <h2>Clima historico</h2>
         </div>
+        <div class="actions-inline">
+            {% if not activity.weather or activity.weather.weather_source == 'missing' %}
+            <a class="button button-utility" href="/sync/weather/activity/{{ activity.id }}">Sincronizar clima</a>
+            {% endif %}
+        </div>
     </div>
 
     {% if activity.weather %}
     <div class="detail-grid">
+        <div class="detail-item"><strong>Fuente:</strong> {% if activity.weather.weather_source == 'garmin_activity' %}Garmin Activity{% elif activity.weather.weather_source == 'open_meteo' %}Open-Meteo estimado{% else %}{{ activity.weather.provider_name }}{% endif %}</div>
         <div class="detail-item"><strong>Proveedor:</strong> {{ activity.weather.provider_name }}</div>
+        <div class="detail-item"><strong>Condicion:</strong> {{ activity.weather.condition_summary or '-' }}</div>
+        <div class="detail-item"><strong>Sincronizado:</strong> {{ activity.weather.synced_at.strftime('%Y-%m-%d %H:%M:%S') if activity.weather.synced_at else '-' }}</div>
         <div class="detail-item"><strong>Temp inicio:</strong> {{ activity.weather.temperature_start_c or '-' }} C</div>
         <div class="detail-item"><strong>Sensacion termica:</strong> {{ activity.weather.apparent_temperature_start_c or '-' }} C</div>
         <div class="detail-item"><strong>Humedad:</strong> {{ activity.weather.humidity_start_pct or '-' }} %</div>
