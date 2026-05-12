@@ -18,6 +18,13 @@ depends_on = None
 
 
 def upgrade() -> None:
+    dialect = op.get_bind().dialect.name
+    max_expression = (
+        "GREATEST(COALESCE(body_battery_start, 0), COALESCE(body_battery_end, 0), COALESCE(body_battery_min, 0))"
+        if dialect == "postgresql"
+        else "max(COALESCE(body_battery_start, 0), COALESCE(body_battery_end, 0), COALESCE(body_battery_min, 0))"
+    )
+
     with op.batch_alter_table("daily_health_metrics", schema=None) as batch_op:
         batch_op.add_column(sa.Column("sleep_duration_minutes", sa.Integer(), nullable=True))
         batch_op.add_column(sa.Column("body_battery_morning", sa.Integer(), nullable=True))
@@ -29,7 +36,7 @@ def upgrade() -> None:
 
     op.execute(
         sa.text(
-            """
+            f"""
             UPDATE daily_health_metrics
             SET
                 sleep_duration_minutes = CASE
@@ -39,11 +46,7 @@ def upgrade() -> None:
                 body_battery_morning = body_battery_start,
                 body_battery_max = CASE
                     WHEN body_battery_start IS NULL AND body_battery_end IS NULL AND body_battery_min IS NULL THEN NULL
-                    ELSE max(
-                        COALESCE(body_battery_start, 0),
-                        COALESCE(body_battery_end, 0),
-                        COALESCE(body_battery_min, 0)
-                    )
+                    ELSE {max_expression}
                 END,
                 hrv_value = hrv_avg_ms,
                 source = COALESCE(source, 'garmin')

@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.create_table('garmin_activities',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('athlete_id', sa.Integer(), nullable=False),
-    sa.Column('garmin_activity_id', sa.Integer(), nullable=False),
+    sa.Column('garmin_activity_id', sa.BigInteger(), nullable=False),
     sa.Column('activity_name', sa.String(length=255), nullable=True),
     sa.Column('sport_type', sa.String(length=100), nullable=True),
     sa.Column('discipline_variant', sa.String(length=100), nullable=True),

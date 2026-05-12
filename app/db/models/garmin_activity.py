@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -25,7 +25,7 @@ class GarminActivity(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     athlete_id: Mapped[int] = mapped_column(ForeignKey("athletes.id"), nullable=False, index=True)
-    garmin_activity_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    garmin_activity_id: Mapped[int] = mapped_column(BigInteger, nullable=False, unique=True, index=True)
     activity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sport_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     discipline_variant: Mapped[str | None] = mapped_column(String(100), nullable=True)

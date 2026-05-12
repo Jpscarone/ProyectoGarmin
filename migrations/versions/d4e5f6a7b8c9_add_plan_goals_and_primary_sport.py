@@ -40,6 +40,10 @@ def _index_names(table_name: str) -> set[str]:
     return {index["name"] for index in inspector.get_indexes(table_name)}
 
 
+def _is_sqlite() -> bool:
+    return op.get_bind().dialect.name == "sqlite"
+
+
 def upgrade() -> None:
     training_plan_columns = _column_names("training_plans")
     if "sport_type" not in training_plan_columns:
@@ -57,16 +61,32 @@ def upgrade() -> None:
     )
 
     if needs_goal_batch:
-        with op.batch_alter_table("goals", recreate="always") as batch_op:
+        if _is_sqlite():
+            with op.batch_alter_table("goals", recreate="always") as batch_op:
+                if "training_plan_id" not in goal_columns:
+                    batch_op.add_column(sa.Column("training_plan_id", sa.Integer(), nullable=True))
+                if "goal_role" not in goal_columns:
+                    batch_op.add_column(sa.Column("goal_role", sa.String(length=20), nullable=True))
+                if "ix_goals_training_plan_id" not in goal_indexes:
+                    batch_op.create_index(batch_op.f("ix_goals_training_plan_id"), ["training_plan_id"], unique=False)
+                if "fk_goals_training_plan_id_training_plans" not in goal_foreign_keys:
+                    batch_op.create_foreign_key(
+                        "fk_goals_training_plan_id_training_plans",
+                        "training_plans",
+                        ["training_plan_id"],
+                        ["id"],
+                    )
+        else:
             if "training_plan_id" not in goal_columns:
-                batch_op.add_column(sa.Column("training_plan_id", sa.Integer(), nullable=True))
+                op.add_column("goals", sa.Column("training_plan_id", sa.Integer(), nullable=True))
             if "goal_role" not in goal_columns:
-                batch_op.add_column(sa.Column("goal_role", sa.String(length=20), nullable=True))
+                op.add_column("goals", sa.Column("goal_role", sa.String(length=20), nullable=True))
             if "ix_goals_training_plan_id" not in goal_indexes:
-                batch_op.create_index(batch_op.f("ix_goals_training_plan_id"), ["training_plan_id"], unique=False)
+                op.create_index(op.f("ix_goals_training_plan_id"), "goals", ["training_plan_id"], unique=False)
             if "fk_goals_training_plan_id_training_plans" not in goal_foreign_keys:
-                batch_op.create_foreign_key(
+                op.create_foreign_key(
                     "fk_goals_training_plan_id_training_plans",
+                    "goals",
                     "training_plans",
                     ["training_plan_id"],
                     ["id"],
@@ -118,15 +138,25 @@ def downgrade() -> None:
     )
 
     if needs_goal_batch:
-        with op.batch_alter_table("goals", recreate="always") as batch_op:
+        if _is_sqlite():
+            with op.batch_alter_table("goals", recreate="always") as batch_op:
+                if "fk_goals_training_plan_id_training_plans" in goal_foreign_keys:
+                    batch_op.drop_constraint("fk_goals_training_plan_id_training_plans", type_="foreignkey")
+                if "ix_goals_training_plan_id" in goal_indexes:
+                    batch_op.drop_index(batch_op.f("ix_goals_training_plan_id"))
+                if "goal_role" in goal_columns:
+                    batch_op.drop_column("goal_role")
+                if "training_plan_id" in goal_columns:
+                    batch_op.drop_column("training_plan_id")
+        else:
             if "fk_goals_training_plan_id_training_plans" in goal_foreign_keys:
-                batch_op.drop_constraint("fk_goals_training_plan_id_training_plans", type_="foreignkey")
+                op.drop_constraint("fk_goals_training_plan_id_training_plans", "goals", type_="foreignkey")
             if "ix_goals_training_plan_id" in goal_indexes:
-                batch_op.drop_index(batch_op.f("ix_goals_training_plan_id"))
+                op.drop_index(op.f("ix_goals_training_plan_id"), table_name="goals")
             if "goal_role" in goal_columns:
-                batch_op.drop_column("goal_role")
+                op.drop_column("goals", "goal_role")
             if "training_plan_id" in goal_columns:
-                batch_op.drop_column("training_plan_id")
+                op.drop_column("goals", "training_plan_id")
 
     training_plan_columns = _column_names("training_plans")
     if "sport_type" in training_plan_columns:

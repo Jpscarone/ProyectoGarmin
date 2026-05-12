@@ -1,3 +1,3 @@
-from app.routers.api_mcp import router
+from app.routes.mcp_api import router
 
 __all__ = ["router"]

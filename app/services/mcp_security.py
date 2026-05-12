@@ -10,7 +10,7 @@ def verify_mcp_bearer_token(authorization: str | None = Header(default=None)) ->
     expected_token = settings.mcp_api_token
     if not expected_token:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="MCP_API_TOKEN no esta configurado.",
         )
 

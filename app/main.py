@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.session import SessionLocal, get_db
+from app.routes.mcp_api import router as api_mcp_router
 from app.routers.activities import router as activities_router
 from app.routers.activity_matching import router as activity_matching_router
-from app.routers.api_mcp import router as api_mcp_router
 from app.routers.analysis import router as analysis_router
 from app.routers.athletes import router as athletes_router
 from app.routers.garmin_health_sync import router as garmin_health_sync_router

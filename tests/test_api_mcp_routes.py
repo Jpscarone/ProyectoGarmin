@@ -23,6 +23,7 @@ from app.db.models import training_day  # noqa: F401
 from app.db.models import training_plan  # noqa: F401
 from app.db.models import weekly_analysis  # noqa: F401
 from app.db.models.athlete import Athlete
+from app.db.models.garmin_activity import GarminActivity
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.session import get_db
@@ -100,6 +101,38 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "mcp_session_feedback_v1")
         self.assertIsNone(payload["completed_activity"])
         self.assertIsNone(payload["analysis"])
+
+    def test_ping_with_correct_token_returns_ok(self) -> None:
+        response = self.client.get("/api/mcp/ping", headers=self.headers)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["app"], "training_app")
+
+    def test_recent_activities_with_token_returns_200(self) -> None:
+        self.db.add(
+            GarminActivity(
+                athlete_id=self.athlete.id,
+                garmin_activity_id=555001,
+                activity_name="Rodaje MCP",
+                sport_type="running",
+                duration_sec=3600,
+                distance_m=10000,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/activities/recent?athlete_id={self.athlete.id}&limit=10",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual(payload["activities"][0]["activity_name"], "Rodaje MCP")
 
     def test_week_context_returns_schema_version(self) -> None:
         response = self.client.get("/api/mcp/week-context", headers=self.headers)

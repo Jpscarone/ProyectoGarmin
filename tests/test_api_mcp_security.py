@@ -53,7 +53,7 @@ class ApiMcpSecurityTests(unittest.TestCase):
         os.environ["MCP_API_TOKEN"] = "secret-token"
         get_settings.cache_clear()
 
-        response = self.client.get("/api/mcp/week-context")
+        response = self.client.get("/api/mcp/ping")
 
         self.assertEqual(response.status_code, 401)
 
@@ -62,7 +62,7 @@ class ApiMcpSecurityTests(unittest.TestCase):
         get_settings.cache_clear()
 
         response = self.client.get(
-            "/api/mcp/week-context",
+            "/api/mcp/ping",
             headers={"Authorization": "Bearer wrong-token"},
         )
 
@@ -73,19 +73,19 @@ class ApiMcpSecurityTests(unittest.TestCase):
         get_settings.cache_clear()
 
         response = self.client.get(
-            "/api/mcp/week-context",
+            "/api/mcp/ping",
             headers={"Authorization": "Bearer secret-token"},
         )
 
         self.assertEqual(response.status_code, 200)
 
-    def test_missing_env_token_returns_500(self) -> None:
-        os.environ.pop("MCP_API_TOKEN", None)
+    def test_missing_env_token_returns_503(self) -> None:
+        os.environ["MCP_API_TOKEN"] = ""
         get_settings.cache_clear()
 
         response = self.client.get(
-            "/api/mcp/week-context",
+            "/api/mcp/ping",
             headers={"Authorization": "Bearer anything"},
         )
 
-        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.status_code, 503)
