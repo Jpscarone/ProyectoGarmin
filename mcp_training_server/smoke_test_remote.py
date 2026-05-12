@@ -25,16 +25,18 @@ async def _run() -> None:
             print("TOOLS", tool_names)
 
             required = {
-                "get_session_feedback_by_date",
-                "get_week_context",
-                "get_last_activity_feedback",
-                "get_next_session_context",
+                "get_athletes",
+                "get_recent_activities",
+                "get_activity_detail",
+                "get_health_summary",
+                "get_latest_weekly_analysis",
+                "get_training_status",
             }
             missing = sorted(required.difference(tool_names))
             if missing:
                 raise RuntimeError(f"Faltan tools: {missing}")
 
-            result = await session.call_tool("get_session_feedback_by_date", {"date": "02/05/26"})
+            result = await session.call_tool("get_athletes", {})
             is_error = result.isError if hasattr(result, "isError") else getattr(result, "is_error", None)
             print("IS_ERROR", is_error)
             if is_error:

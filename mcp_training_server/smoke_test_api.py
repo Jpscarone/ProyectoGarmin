@@ -5,16 +5,19 @@ from typing import Any
 
 import httpx
 
-from settings import get_settings
+try:
+    from .settings import get_settings
+except ImportError:
+    from settings import get_settings
 
 
 def _build_headers(token: str | None) -> dict[str, str]:
     if not token:
-        raise RuntimeError("TRAINING_API_TOKEN no esta configurado.")
+        raise RuntimeError("TRAINING_APP_MCP_TOKEN no esta configurado.")
     return {"Authorization": f"Bearer {token}"}
 
 
-def _request(client: httpx.Client, path: str, headers: dict[str, str]) -> dict[str, Any]:
+def _request(client: httpx.Client, path: str, headers: dict[str, str]) -> dict[str, Any] | list[dict[str, Any]]:
     response = client.get(path, headers=headers)
     try:
         payload = response.json()
@@ -23,36 +26,29 @@ def _request(client: httpx.Client, path: str, headers: dict[str, str]) -> dict[s
 
     if response.status_code != 200:
         raise RuntimeError(f"{path} -> HTTP {response.status_code}: {payload}")
-    if not isinstance(payload, dict):
+    if not isinstance(payload, (dict, list)):
         raise RuntimeError(f"{path} -> payload inesperado: {type(payload).__name__}")
     return payload
 
 
 def main() -> int:
     settings = get_settings()
-    headers = _build_headers(settings.training_api_token)
-    athlete_query = (
-        f"athlete_id={settings.training_api_athlete_id}"
-        if settings.training_api_athlete_id is not None
-        else "athlete_id=1"
-    )
+    headers = _build_headers(settings.training_app_mcp_token)
 
     targets = [
-        (f"/api/mcp/week-context?{athlete_query}", "mcp_week_context_v1"),
-        (f"/api/mcp/last-activity-feedback?{athlete_query}", "mcp_last_activity_feedback_v1"),
-        (f"/api/mcp/next-session-context?{athlete_query}", "mcp_next_session_context_v1"),
-        (f"/api/mcp/session-feedback?{athlete_query}&date=2026-05-02", "mcp_session_feedback_v1"),
+        "/api/mcp/ping",
+        "/api/mcp/athletes",
+        "/api/mcp/activities/recent?athlete_id=1&limit=5",
+        "/api/mcp/health/summary?athlete_id=1",
+        "/api/mcp/weekly/latest?athlete_id=1",
+        "/api/mcp/training/status?athlete_id=1",
     ]
 
-    with httpx.Client(base_url=settings.training_api_url, timeout=20.0) as client:
-        for path, expected_schema in targets:
+    with httpx.Client(base_url=settings.training_app_base_url, timeout=20.0) as client:
+        for path in targets:
             payload = _request(client, path, headers)
-            actual_schema = payload.get("schema_version")
-            if actual_schema != expected_schema:
-                raise RuntimeError(
-                    f"{path} -> schema_version inesperado: {actual_schema!r} (esperado {expected_schema!r})"
-                )
-            print(f"OK {path} -> {actual_schema}")
+            shape = type(payload).__name__
+            print(f"OK {path} -> {shape}")
 
     print("Smoke test API MCP completado correctamente.")
     return 0

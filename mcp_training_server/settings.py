@@ -17,9 +17,8 @@ SupportedTransport = Literal["stdio", "http", "sse"]
 
 @dataclass(frozen=True, slots=True)
 class Settings:
-    training_api_url: str
-    training_api_token: str | None
-    training_api_athlete_id: int | None
+    training_app_base_url: str
+    training_app_mcp_token: str | None
     mcp_transport: SupportedTransport
     mcp_host: str
     mcp_port: int
@@ -29,17 +28,17 @@ class Settings:
 
 
 def _normalize_transport(raw_value: str | None) -> SupportedTransport:
-    normalized = (raw_value or "stdio").strip().lower()
-    if normalized in {"stdio"}:
+    normalized = (raw_value or "http").strip().lower()
+    if normalized == "stdio":
         return "stdio"
     if normalized in {"http", "streamable-http", "streamable_http"}:
         return "http"
-    if normalized in {"sse"}:
+    if normalized == "sse":
         return "sse"
     raise ValueError("MCP_TRANSPORT invalido. Usa stdio, http o sse.")
 
 
-def _normalize_path(raw_value: str, *, default: str, trailing_slash: bool = False) -> str:
+def _normalize_path(raw_value: str | None, *, default: str, trailing_slash: bool = False) -> str:
     normalized = (raw_value or default).strip() or default
     if not normalized.startswith("/"):
         normalized = "/" + normalized
@@ -52,23 +51,27 @@ def _normalize_path(raw_value: str, *, default: str, trailing_slash: bool = Fals
 
 @lru_cache
 def get_settings() -> Settings:
-    raw_url = os.getenv("TRAINING_API_URL", "http://localhost:8000").strip()
-    raw_athlete_id = (os.getenv("TRAINING_API_ATHLETE_ID") or "").strip()
-    athlete_id: int | None = None
-    if raw_athlete_id:
-        athlete_id = int(raw_athlete_id)
+    base_url = (
+        os.getenv("TRAINING_APP_BASE_URL")
+        or os.getenv("TRAINING_API_URL")
+        or "http://127.0.0.1:8000"
+    ).strip()
+    token = (
+        os.getenv("TRAINING_APP_MCP_TOKEN")
+        or os.getenv("TRAINING_API_TOKEN")
+        or ""
+    ).strip() or None
 
     return Settings(
-        training_api_url=raw_url.rstrip("/"),
-        training_api_token=(os.getenv("TRAINING_API_TOKEN") or "").strip() or None,
-        training_api_athlete_id=athlete_id,
+        training_app_base_url=base_url.rstrip("/"),
+        training_app_mcp_token=token,
         mcp_transport=_normalize_transport(os.getenv("MCP_TRANSPORT")),
         mcp_host=(os.getenv("MCP_HOST") or "127.0.0.1").strip() or "127.0.0.1",
         mcp_port=int((os.getenv("MCP_PORT") or "9000").strip() or "9000"),
-        mcp_http_path=_normalize_path(os.getenv("MCP_HTTP_PATH", "/mcp"), default="/mcp"),
-        mcp_sse_path=_normalize_path(os.getenv("MCP_SSE_PATH", "/sse"), default="/sse"),
+        mcp_http_path=_normalize_path(os.getenv("MCP_HTTP_PATH"), default="/mcp"),
+        mcp_sse_path=_normalize_path(os.getenv("MCP_SSE_PATH"), default="/sse"),
         mcp_message_path=_normalize_path(
-            os.getenv("MCP_MESSAGE_PATH", "/messages/"),
+            os.getenv("MCP_MESSAGE_PATH"),
             default="/messages/",
             trailing_slash=True,
         ),
