@@ -24,6 +24,7 @@ class ImportBlock:
     power_max: str | None = None
     rpe_min: str | None = None
     rpe_max: str | None = None
+    incline_pct: str | None = None
     notes: str | None = None
 
 
@@ -39,6 +40,7 @@ class ImportSession:
     line: int
     date: str | None = None
     sport: str | None = None
+    modality: str | None = None
     name: str | None = None
     notes: str | None = None
     blocks: list[ImportBlock | ImportRepeat] = field(default_factory=list)
@@ -193,6 +195,7 @@ def parse_session_import_text(raw_text: str) -> ImportParseResult:
             "POWER_MAX",
             "RPE_MIN",
             "RPE_MAX",
+            "INCLINE_PCT",
             "NOTES",
         }:
             if key == "VALUE":
@@ -219,6 +222,8 @@ def parse_session_import_text(raw_text: str) -> ImportParseResult:
                 current_block.rpe_min = value
             elif key == "RPE_MAX":
                 current_block.rpe_max = value
+            elif key == "INCLINE_PCT":
+                current_block.incline_pct = value
             elif key == "NOTES":
                 current_block.notes = value
             continue
@@ -227,11 +232,13 @@ def parse_session_import_text(raw_text: str) -> ImportParseResult:
             current_repeat.count = _parse_optional_int(value)
             continue
 
-        if current_session is not None and key in {"DATE", "SPORT", "NAME", "NOTES"}:
+        if current_session is not None and key in {"DATE", "SPORT", "MODALITY", "NAME", "NOTES"}:
             if key == "DATE":
                 current_session.date = value
             elif key == "SPORT":
                 current_session.sport = value
+            elif key == "MODALITY":
+                current_session.modality = value
             elif key == "NAME":
                 current_session.name = value
             elif key == "NOTES":

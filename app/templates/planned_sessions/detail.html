@@ -37,12 +37,93 @@
     <div class="alert alert-info">{{ analysis_status }}</div>
     {% endif %}
 
+    {% if session_view.manual_completion.available %}
+    <article class="detail-item detail-item-full planned-session-inline-card">
+        <div class="planned-session-card-heading">
+            <div>
+                <p class="eyebrow">Registro manual</p>
+                <h2 class="planned-session-activity-title">
+                    {% if session_view.manual_completion.completed %}
+                    Sesion de gimnasio realizada
+                    {% else %}
+                    Marcar como realizada
+                    {% endif %}
+                </h2>
+            </div>
+            <div class="actions-inline">
+                {% if session_view.manual_completion.completed %}
+                <span class="status-badge status-badge-garmin">Realizada manualmente</span>
+                {% else %}
+                <span class="status-badge status-badge-empty">Pendiente</span>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if session_view.manual_completion.completed %}
+        <div class="planned-session-inline-list">
+            <span class="planned-session-inline-pill"><strong>Duracion real:</strong> {{ session_view.manual_completion.duration_min or '-' }} min</span>
+            <span class="planned-session-inline-pill"><strong>RPE real:</strong> {{ session_view.manual_completion.strength_rpe or '-' }}</span>
+            <span class="planned-session-inline-pill"><strong>Focus real:</strong> {{ strength_focus_label(session_view.manual_completion.strength_focus) if session_view.manual_completion.strength_focus else '-' }}</span>
+        </div>
+        {% if session_view.manual_completion.notes %}
+        <p><strong>Notas:</strong> {{ session_view.manual_completion.notes }}</p>
+        {% endif %}
+        <form method="post" action="/planned_sessions/{{ planned_session.id }}/clear-completion">
+            <input type="hidden" name="return_to" value="{{ request.query_params.get('return_to', '') }}">
+            <input type="hidden" name="month" value="{{ request.query_params.get('month', '') }}">
+            <input type="hidden" name="selected_date" value="{{ request.query_params.get('selected_date', '') }}">
+            <button class="button button-secondary" type="submit">Marcar como pendiente</button>
+        </form>
+        {% else %}
+        <details>
+            <summary class="button button-utility">Marcar como realizada</summary>
+            <form method="post" action="/planned_sessions/{{ planned_session.id }}/mark-complete" class="stack-form" style="margin-top: 1rem;">
+                <input type="hidden" name="return_to" value="{{ request.query_params.get('return_to', '') }}">
+                <input type="hidden" name="month" value="{{ request.query_params.get('month', '') }}">
+                <input type="hidden" name="selected_date" value="{{ request.query_params.get('selected_date', '') }}">
+                <div class="field">
+                    <label for="manual-duration-min">Duracion real (min)</label>
+                    <input id="manual-duration-min" name="manual_duration_min" type="number" min="1" step="1" value="{{ session_view.manual_completion.duration_min or '' }}">
+                </div>
+                <div class="field">
+                    <label for="manual-strength-rpe">RPE real</label>
+                    <input id="manual-strength-rpe" name="manual_strength_rpe" type="number" min="1" max="10" step="1" value="{{ session_view.manual_completion.strength_rpe or '' }}">
+                </div>
+                <div class="field">
+                    <label for="manual-strength-focus">Focus</label>
+                    <select id="manual-strength-focus" name="manual_strength_focus">
+                        <option value="">Seleccionar</option>
+                        {% for option in strength_focus_options %}
+                        <option value="{{ option.value }}" {% if session_view.manual_completion.strength_focus == option.value %}selected{% endif %}>{{ option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label for="manual-completion-notes">Notas</label>
+                    <textarea id="manual-completion-notes" name="manual_completion_notes" rows="3">{{ session_view.manual_completion.notes or '' }}</textarea>
+                </div>
+                <div class="actions-inline">
+                    <button class="button" type="submit">Guardar como realizada</button>
+                </div>
+            </form>
+        </details>
+        {% endif %}
+    </article>
+    {% endif %}
+
     <div class="planned-session-layout">
         <div class="detail-item detail-item-full planned-session-inline-card">
             <div class="planned-session-inline-list">
                 <span class="planned-session-inline-pill"><strong>Deporte:</strong> {{ session_view.header.sport_label }}</span>
+                <span class="planned-session-inline-pill"><strong>Modalidad:</strong> {{ session_view.header.modality_label }}</span>
                 <span class="planned-session-inline-pill"><strong>Duracion objetivo:</strong> {{ session_view.header.duration_label }}</span>
                 <span class="planned-session-inline-pill"><strong>Distancia objetivo:</strong> {{ session_view.header.distance_label }}</span>
+                {% if planned_session.strength_focus %}
+                <span class="planned-session-inline-pill"><strong>Focus fuerza:</strong> {{ strength_focus_label(planned_session.strength_focus) }}</span>
+                {% endif %}
+                {% if planned_session.strength_rpe is not none %}
+                <span class="planned-session-inline-pill"><strong>RPE fuerza:</strong> {{ planned_session.strength_rpe }}/10</span>
+                {% endif %}
             </div>
         </div>
 

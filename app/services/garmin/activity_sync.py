@@ -16,10 +16,18 @@ from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
 from app.services.garmin.auth import GarminServiceError, get_garmin_auth_context
 from app.services.garmin.client import GarminClient
-from app.services.weather.weather_service import upsert_weather_from_garmin_activity
+from app.services.modality import garmin_canonical_sport_type, garmin_modality
+from app.services.weather.weather_service import find_weather_keys, upsert_weather_from_garmin_activity
 
 
 logger = logging.getLogger(__name__)
+
+GARMIN_ACTIVITY_METHODS_USED = [
+    "get_activities_by_date",
+    "get_activity",
+    "get_activity_details",
+    "get_activity_splits",
+]
 
 
 @dataclass
@@ -94,7 +102,18 @@ def sync_activities_by_date(
                 "summary": detailed_summary,
                 "details": details,
                 "splits_preview": splits[:3],
+                "sync_diagnostics": {
+                    "methods_used": GARMIN_ACTIVITY_METHODS_USED,
+                    "split_count": len(splits),
+                },
             }
+            weather_key_paths = find_weather_keys(debug_payload)
+            debug_payload["sync_diagnostics"]["weather_key_paths"] = weather_key_paths
+            debug_payload["sync_diagnostics"]["weather_status"] = (
+                "Garmin weather keys found."
+                if weather_key_paths
+                else "Garmin activity payload does not include weather data; Open-Meteo fallback required."
+            )
 
             summary_dto = _extract_summary_dto(detailed_summary, activity_summary)
             metadata_dto = _extract_metadata_dto(detailed_summary, activity_summary)
@@ -126,6 +145,18 @@ def sync_activities_by_date(
                 db.flush()
 
             upsert_weather_from_garmin_activity(db, activity, debug_payload)
+
+            if weather_key_paths:
+                logger.info(
+                    "Garmin weather keys found for activity %s at paths: %s",
+                    garmin_activity_id,
+                    ", ".join(weather_key_paths),
+                )
+            else:
+                logger.info(
+                    "Garmin activity payload does not include weather data; Open-Meteo fallback required. activity_id=%s",
+                    garmin_activity_id,
+                )
 
             for index, lap in enumerate(splits, start=1):
                 lap_summary = _extract_lap_summary(lap)
@@ -280,6 +311,7 @@ def _build_activity_values(
     metadata_dto: dict[str, Any],
     debug_payload: dict[str, Any],
 ) -> dict[str, Any]:
+    raw_sport_type = _extract_sport_type(detailed_summary, activity_summary)
     avg_speed = _to_float(_first_nested(
         summary_dto,
         detailed_summary,
@@ -291,8 +323,9 @@ def _build_activity_values(
         "athlete_id": athlete_id,
         "garmin_activity_id": garmin_activity_id,
         "activity_name": _first_nested(detailed_summary, activity_summary, keys=("activityName", "activity_name")),
-        "sport_type": _extract_sport_type(detailed_summary, activity_summary),
+        "sport_type": garmin_canonical_sport_type(raw_sport_type),
         "discipline_variant": _extract_discipline_variant(detailed_summary, activity_summary),
+        "modality": garmin_modality(raw_sport_type),
         "is_multisport": bool(
             _first_nested(
                 detailed_summary,

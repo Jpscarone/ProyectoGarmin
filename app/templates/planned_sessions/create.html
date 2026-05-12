@@ -58,6 +58,8 @@ function serializePlannedSession(form) {
         expected_duration_min: hhmmToMinutes(formData.get("expected_duration_hhmm")),
         expected_distance_km: distanceToKm(formData.get("expected_distance_value"), formData.get("expected_distance_unit")),
         expected_elevation_gain_m: emptyToNull(formData.get("expected_elevation_gain_m")),
+        strength_focus: emptyToNull(formData.get("strength_focus")),
+        strength_rpe: emptyToNull(formData.get("strength_rpe")),
         target_type: emptyToNull(formData.get("target_type")),
         target_hr_zone: emptyToNull(formData.get("target_hr_zone")),
         target_pace_zone: emptyToNull(formData.get("target_pace_zone")),

@@ -71,6 +71,7 @@
         id="health-sync-status"
         class="health-sync-status {{ readiness.sync_view.class }}"
         data-should-auto-sync="{{ 'true' if readiness.should_auto_sync else 'false' }}"
+        data-should-auto-ai-analysis="{{ 'true' if readiness.should_auto_ai_analysis is defined and readiness.should_auto_ai_analysis else 'false' }}"
         data-health-auto-sync-url="{{ readiness.health_auto_sync_url }}"
         data-health-auto-ai-analysis-url="{{ health_auto_ai_analysis_url }}"
     >
@@ -80,68 +81,123 @@
         </div>
     </div>
 
-    <section class="health-readiness-card">
-        <div class="health-readiness-header">
-            <div>
-                <p class="eyebrow">Readiness local</p>
-                <h2>Estado para entrenar el {{ readiness.selected_date_label }}</h2>
-                {% if readiness.athlete_name %}
-                <p class="text-muted">{{ readiness.athlete_name }} · referencia {{ readiness.selected_date }}</p>
-                {% endif %}
+    {% set decision_card = readiness.get("decision_card", {
+        "title": readiness.evaluation.readiness_label|upper if readiness.get("evaluation") else "SIN DATOS SUFICIENTES",
+        "status_class": readiness.status_class if readiness.get("status_class") else "health-readiness-status-insufficient",
+        "interpretation": readiness.evaluation.recommendation if readiness.get("evaluation") else "Todavia no hay suficientes datos para interpretar el estado deportivo.",
+        "factors": readiness.reason_items if readiness.get("reason_items") else [],
+        "score_label": readiness.score_label if readiness.get("score_label") else "-",
+        "reference_label": readiness.selected_date_label if readiness.get("selected_date_label") else readiness.selected_date,
+    }) %}
+    {% set recommendation_display = readiness.evaluation.recommendation_display if readiness.evaluation.recommendation_display is defined else readiness.evaluation.recommendation %}
+    {% set human_signals = readiness.get("human_signals", []) %}
+    {% set compact_training_context = readiness.get("compact_training_context", {"has_recent_data": false, "items": []}) %}
+    {% set recent_trend_view = readiness.get("recent_trend_view", {"has_enough_points": false, "points": [], "direction_label": none, "interpretation": none}) %}
+
+    <div class="health-overview-grid">
+        <section class="health-decision-card {{ decision_card.status_class }}">
+            <div class="health-decision-header">
+                <div>
+                    <p class="eyebrow">Recomendacion de hoy</p>
+                    <h2>{{ decision_card.title }}</h2>
+                    {% if readiness.athlete_name %}
+                    <p class="text-muted">{{ readiness.athlete_name }}</p>
+                    {% endif %}
+                </div>
+                <div class="health-decision-meta">
+                    <span class="health-decision-score">Estado general {{ decision_card.score_label }}</span>
+                    <span class="health-decision-reference">Referencia: {{ decision_card.reference_label }}</span>
+                </div>
             </div>
-            <div class="health-readiness-status">
-                <span class="status-badge {{ readiness.status_class }}">{{ readiness.evaluation.readiness_label }}</span>
-                <strong class="health-readiness-score">{{ readiness.score_label }}</strong>
+
+            <p class="health-decision-text">{{ decision_card.interpretation }}</p>
+            <p class="health-decision-recommendation">{{ recommendation_display }}</p>
+
+            {% if decision_card.factors %}
+            <div class="health-decision-factors">
+                <span class="health-section-kicker">Factores del dia</span>
+                <ul>
+                    {% for item in decision_card.factors %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
             </div>
-        </div>
+            {% endif %}
 
-        <p class="health-readiness-recommendation">{{ readiness.evaluation.recommendation }}</p>
+            {% if readiness.evaluation.readiness_status == "insufficient_data" %}
+            <p class="text-muted">Hacen falta al menos 5 dias con datos dentro de los ultimos 14 para interpretar la tendencia.</p>
+            {% endif %}
+        </section>
 
-        {% if readiness.main_limiter_label %}
-        <p class="health-readiness-limiter"><strong>Factor principal:</strong> {{ readiness.main_limiter_label }}</p>
-        {% endif %}
+        <section class="health-human-signals-card">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">Semaforos del dia</p>
+                    <h2>Lectura rapida</h2>
+                </div>
+            </div>
 
-        {% if readiness.reason_items %}
-        <ul class="health-readiness-reasons">
-            {% for item in readiness.reason_items %}
-            <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
-        {% endif %}
-
-        {% if readiness.evaluation.readiness_status == "insufficient_data" %}
-        <p class="text-muted">Hacen falta al menos 5 dias con datos dentro de los ultimos 14 para evaluar la tendencia.</p>
-        {% endif %}
-
-        <div class="health-readiness-metrics-grid">
-            {% for item in readiness.metric_overview %}
-            <article class="health-readiness-metric">
-                <span class="health-readiness-metric-label">{{ item.label }}</span>
-                <strong class="health-readiness-metric-value">{{ item.value }}</strong>
-            </article>
-            {% endfor %}
-        </div>
-    </section>
+            <div class="health-human-signals">
+                {% for item in human_signals %}
+                <article class="health-human-signal {{ item.status_class }}">
+                    <div class="health-human-signal-top">
+                        <span class="health-human-signal-badge">{{ item.badge }}</span>
+                        <span class="health-human-signal-tone">{{ item.tone_label }}</span>
+                    </div>
+                    <strong class="health-human-signal-label">{{ item.label }}</strong>
+                    <span class="health-human-signal-state">{{ item.state_label }}</span>
+                    <span class="health-human-signal-detail">{{ item.detail }}</span>
+                </article>
+                {% endfor %}
+            </div>
+        </section>
+    </div>
 
     <section class="health-training-context-card">
         <div class="health-training-context-header">
             <div>
-                <p class="eyebrow">Carga reciente</p>
-                <h2>Contexto de entrenamiento reciente</h2>
+                <p class="eyebrow">Contexto deportivo</p>
+                <h2>Ultimos 7 dias</h2>
             </div>
         </div>
 
-        {% if readiness.training_context_view.has_recent_data %}
-        <div class="health-training-context-grid">
-            {% for item in readiness.training_context_view.metric_items %}
-            <article class="health-training-context-item">
-                <span class="health-training-context-label">{{ item.label }}</span>
-                <strong class="health-training-context-value">{{ item.value }}</strong>
-            </article>
+        {% if compact_training_context.has_recent_data %}
+        <div class="health-context-summary">
+            {% for item in compact_training_context["items"] %}
+            <span class="health-context-pill">{{ item }}</span>
             {% endfor %}
         </div>
         {% else %}
         <p class="empty-state">Sin datos recientes de entrenamiento.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Tendencia</p>
+                <h2>Evolucion del estado</h2>
+            </div>
+        </div>
+
+        {% if recent_trend_view.has_enough_points %}
+        <div class="health-trend-summary">
+            <span class="health-trend-direction">{{ recent_trend_view.direction_label }}</span>
+            <p class="health-trend-interpretation">{{ recent_trend_view.interpretation }}</p>
+        </div>
+        <div class="health-readiness-trend" aria-label="Evolucion del estado">
+            {% for point in recent_trend_view.points %}
+            <article class="health-readiness-trend-point">
+                <div class="health-readiness-trend-scorecard {{ point.readiness_status_class }}">
+                    <span class="health-readiness-trend-date">{{ point.reference_date_label }}</span>
+                    <strong class="health-readiness-trend-score">{{ point.score_label }}</strong>
+                    <span class="health-readiness-trend-status">{{ point.status_short_label }}</span>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="empty-state">Todavia no hay suficientes analisis guardados para mostrar tendencia.</p>
         {% endif %}
     </section>
 
@@ -185,7 +241,7 @@
         <div class="health-ai-analysis-header">
             <div>
                 <p class="eyebrow">Analisis de IA</p>
-                <h2>Lectura breve del readiness</h2>
+                <h2>Lectura breve del estado</h2>
             </div>
             <div class="health-ai-analysis-header-side">
                 <span id="health-ai-risk-badge" class="status-badge health-ai-risk-unknown">Riesgo desconocido</span>
@@ -231,36 +287,6 @@
     <section class="panel panel-subtle">
         <div class="section-heading">
             <div>
-                <p class="eyebrow">Tendencia</p>
-                <h2>Tendencia reciente de readiness</h2>
-            </div>
-        </div>
-
-        {% if readiness.recent_ai_trend.has_enough_points %}
-        <div class="health-readiness-trend" aria-label="Tendencia reciente de readiness">
-            {% for point in readiness.recent_ai_trend.points %}
-            <article class="health-readiness-trend-point">
-                <div class="health-readiness-trend-plot">
-                    <div
-                        class="health-readiness-trend-bar {{ point.readiness_status_class }}"
-                        style="height: {{ point.readiness_score }}%;"
-                        title="{{ point.reference_date_label }} · score {{ point.readiness_score }} · riesgo {{ point.risk_level_label }}"
-                    ></div>
-                </div>
-                <strong class="health-readiness-trend-score">{{ point.readiness_score }}</strong>
-                <span class="health-readiness-trend-date">{{ point.reference_date_label }}</span>
-                <span class="health-readiness-trend-risk">{{ point.risk_level_label|capitalize }}</span>
-            </article>
-            {% endfor %}
-        </div>
-        {% else %}
-        <p class="empty-state">Todavia no hay suficientes analisis guardados para mostrar tendencia.</p>
-        {% endif %}
-    </section>
-
-    <section class="panel panel-subtle">
-        <div class="section-heading">
-            <div>
                 <p class="eyebrow">Historial IA</p>
                 <h2>Historial reciente de analisis IA</h2>
             </div>
@@ -273,8 +299,8 @@
                     <tr>
                         <th>Fecha evaluada</th>
                         <th>Generado</th>
-                        <th>Readiness local</th>
-                        <th>Score local</th>
+                        <th>Estado para entrenar</th>
+                        <th>Estado general</th>
                         <th>Riesgo IA</th>
                         <th>Resumen</th>
                         <th>Accion</th>
@@ -385,6 +411,11 @@ async function runHealthAutoSync(buttonEl, force = false) {
       await runHealthAutoAiAnalysisAfterSync(statusEl);
       return;
     }
+    if (payload.reason === "fresh") {
+      updateHealthSyncStatus("Salud ya sincronizada recientemente", "Verificando si falta generar el analisis IA.", "health-sync-success");
+      await runHealthAutoAiAnalysisAfterSync(statusEl);
+      return;
+    }
     updateHealthSyncStatus("Salud ya sincronizada recientemente", "No hizo falta volver a consultar Garmin.", "health-sync-success");
   } catch (error) {
     updateHealthSyncStatus("Ultima sincronizacion fallida", "No se pudo conectar con el endpoint de sincronizacion.", "health-sync-failed");
@@ -430,6 +461,11 @@ window.addEventListener("DOMContentLoaded", () => {
   const statusEl = document.getElementById("health-sync-status");
   if (statusEl?.dataset?.shouldAutoSync === "true") {
     runHealthAutoSync(null, false);
+    return;
+  }
+  if (statusEl?.dataset?.shouldAutoAiAnalysis === "true") {
+    updateHealthSyncStatus("Salud sincronizada", "Generando analisis IA pendiente...", "health-sync-success");
+    runHealthAutoAiAnalysisAfterSync(statusEl);
   }
 });
 
@@ -472,9 +508,22 @@ function renderHealthAiList(listEl, items) {
   const values = Array.isArray(items) && items.length ? items : ["Sin observaciones relevantes."];
   values.forEach((item) => {
     const li = document.createElement("li");
-    li.textContent = item;
+    li.textContent = healthUiText(item);
     listEl.appendChild(li);
   });
+}
+
+function healthUiText(value) {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  return String(value)
+    .replaceAll("Readiness", "Estado")
+    .replaceAll("readiness", "estado")
+    .replaceAll("Recovery score", "Estado general")
+    .replaceAll("recovery score", "estado general")
+    .replaceAll("HRV status", "variabilidad cardiaca")
+    .replaceAll("hrv status", "variabilidad cardiaca");
 }
 
 function buildHealthAiAnalysisText(analysis) {
@@ -484,14 +533,14 @@ function buildHealthAiAnalysisText(analysis) {
   const watchItems = Array.isArray(safeAnalysis.what_to_watch) ? safeAnalysis.what_to_watch : [];
 
   const lines = [
-    "Estado de salud / readiness",
+    "Estado para entrenar",
     `Fecha: ${selectedDateLabel}`,
     "",
     "Resumen:",
-    safeAnalysis.summary || "-",
+    healthUiText(safeAnalysis.summary) || "-",
     "",
     "Recomendacion:",
-    safeAnalysis.training_recommendation || "-",
+    healthUiText(safeAnalysis.training_recommendation) || "-",
     "",
     "Nivel de riesgo:",
     healthAiRiskLabel(safeAnalysis.risk_level),
@@ -500,7 +549,7 @@ function buildHealthAiAnalysisText(analysis) {
   ];
 
   if (mainFactors.length) {
-    mainFactors.forEach((item) => lines.push(`- ${item}`));
+    mainFactors.forEach((item) => lines.push(`- ${healthUiText(item)}`));
   } else {
     lines.push("- Sin factores destacados.");
   }
@@ -508,7 +557,7 @@ function buildHealthAiAnalysisText(analysis) {
   lines.push("", "A observar:");
 
   if (watchItems.length) {
-    watchItems.forEach((item) => lines.push(`- ${item}`));
+    watchItems.forEach((item) => lines.push(`- ${healthUiText(item)}`));
   } else {
     lines.push("- Sin observaciones adicionales.");
   }
@@ -572,8 +621,8 @@ function renderSavedHealthAiAnalysis(savedAnalysis) {
   metaEl.textContent = savedAnalysis.created_at_label
     ? `Generado ${savedAnalysis.created_at_label}${savedAnalysis.model_name ? ` · modelo ${savedAnalysis.model_name}` : ""}`
     : "Analisis guardado";
-  summaryEl.textContent = savedAnalysis.summary || "-";
-  recommendationEl.textContent = savedAnalysis.training_recommendation || "-";
+  summaryEl.textContent = healthUiText(savedAnalysis.summary) || "-";
+  recommendationEl.textContent = healthUiText(savedAnalysis.training_recommendation) || "-";
 }
 
 function renderHealthAiAnalysis(payload) {
@@ -609,8 +658,8 @@ function renderHealthAiAnalysis(payload) {
   badgeEl.className = `status-badge ${healthAiRiskClass(riskLevel)}`;
   badgeEl.textContent = healthAiRiskLabel(riskLevel);
 
-  summaryEl.textContent = analysis?.summary || "No se recibio un resumen interpretable.";
-  recommendationEl.textContent = analysis?.training_recommendation || "No se recibio una recomendacion interpretable.";
+  summaryEl.textContent = healthUiText(analysis?.summary) || "No se recibio un resumen interpretable.";
+  recommendationEl.textContent = healthUiText(analysis?.training_recommendation) || "No se recibio una recomendacion interpretable.";
   renderHealthAiList(mainFactorsEl, analysis?.main_factors);
   renderHealthAiList(watchListEl, analysis?.what_to_watch);
 
@@ -667,7 +716,7 @@ async function runHealthAiAnalysis(buttonEl) {
 
     if (!response.ok) {
       renderHealthAiAnalysis({
-        message: payload?.message || "No se pudo analizar el readiness con IA.",
+        message: payload?.message || "No se pudo analizar el estado con IA.",
         analysis: {
           summary: payload?.message || "No se pudo completar el analisis.",
           training_recommendation: "Revisa la configuracion de OpenAI o intenta nuevamente mas tarde.",
@@ -686,7 +735,7 @@ async function runHealthAiAnalysis(buttonEl) {
     buttonEl.textContent = "Analizado";
   } catch (error) {
     renderHealthAiAnalysis({
-      message: "No se pudo analizar el readiness con IA.",
+      message: "No se pudo analizar el estado con IA.",
       analysis: {
         summary: "La solicitud no pudo completarse.",
         training_recommendation: "Volve a intentar en unos minutos.",

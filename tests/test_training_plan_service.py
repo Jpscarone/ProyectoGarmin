@@ -11,6 +11,7 @@ from app.db.models import athlete  # noqa: F401
 from app.db.models import goal  # noqa: F401
 from app.db.models import training_plan  # noqa: F401
 from app.db.models.athlete import Athlete
+from app.db.models.goal import Goal
 from app.schemas.training_plan import PlanGoalInput, TrainingPlanCreate, TrainingPlanUpdate
 from app.services.training_plan_service import (
     auto_complete_expired_training_plans,
@@ -154,6 +155,64 @@ class TrainingPlanServiceTests(unittest.TestCase):
 
         self.assertEqual(selected.id, active_plan.id)
         self.assertNotEqual(selected.id, old_plan.id)
+
+    def test_get_training_plan_detail_repairs_short_goal_years(self) -> None:
+        created = create_training_plan(
+            self.db,
+            TrainingPlanCreate(
+                athlete_id=self.athlete.id,
+                name="Plan con objetivo corto",
+                start_date=date(2026, 4, 27),
+                end_date=date(2026, 6, 28),
+                status="active",
+            ),
+        )
+        broken_goal = Goal(
+            athlete_id=self.athlete.id,
+            training_plan_id=created.id,
+            goal_role="primary",
+            name="Objetivo roto",
+            sport_type="running",
+            event_date=date(26, 6, 28),
+        )
+        self.db.add(broken_goal)
+        self.db.commit()
+        created.goal_id = broken_goal.id
+        self.db.add(created)
+        self.db.commit()
+
+        plan = get_training_plan_detail(self.db, created.id)
+
+        self.assertIsNotNone(plan.goal)
+        self.assertEqual(plan.goal.event_date, date(2026, 6, 28))
+        self.db.refresh(broken_goal)
+        self.assertEqual(broken_goal.event_date, date(2026, 6, 28))
+
+    def test_training_plan_update_normalizes_short_goal_year_input(self) -> None:
+        created = create_training_plan(
+            self.db,
+            TrainingPlanCreate(
+                athlete_id=self.athlete.id,
+                name="Plan normalizado",
+                status="active",
+            ),
+        )
+
+        update_training_plan(
+            self.db,
+            created,
+            TrainingPlanUpdate(
+                primary_goal=PlanGoalInput(
+                    name="Objetivo principal",
+                    sport_type="running",
+                    event_date=date(26, 6, 28),
+                )
+            ),
+        )
+
+        plan = get_training_plan_detail(self.db, created.id)
+        self.assertIsNotNone(plan.goal)
+        self.assertEqual(plan.goal.event_date, date(2026, 6, 28))
 
 
 if __name__ == "__main__":

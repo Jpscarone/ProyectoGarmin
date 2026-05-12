@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from urllib.parse import quote
+import json
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import RedirectResponse
@@ -19,6 +20,7 @@ from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
 from app.config import get_settings
 from app.services.garmin_activity_service import get_activities, get_activity
+from app.services.weather.weather_service import find_weather_keys
 from app.services.session_match_service import (
     auto_match_activity,
     auto_match_unlinked_activities,
@@ -147,6 +149,44 @@ def read_activity(activity_id: int, request: Request, db: Session = Depends(get_
             },
         )
     return activity
+
+
+@router.get("/{activity_id}/debug/raw-garmin-json")
+def read_activity_raw_garmin_json(activity_id: int, request: Request, db: Session = Depends(get_db)):
+    activity = get_activity(db, activity_id)
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id)
+    if current_athlete is not None and activity.athlete_id != current_athlete.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La actividad no pertenece al atleta seleccionado.")
+
+    if not activity.raw_summary_json:
+        return {
+            "activity_id": activity.id,
+            "garmin_activity_id": activity.garmin_activity_id,
+            "exists": False,
+            "message": "No existe Garmin raw JSON guardado para esta actividad.",
+            "weather_key_paths": [],
+        }
+
+    try:
+        raw_payload = json.loads(activity.raw_summary_json)
+    except json.JSONDecodeError:
+        raw_payload = activity.raw_summary_json
+
+    weather_key_paths = find_weather_keys(raw_payload)
+    return {
+        "activity_id": activity.id,
+        "garmin_activity_id": activity.garmin_activity_id,
+        "exists": True,
+        "weather_key_paths": weather_key_paths,
+        "message": (
+            "Garmin weather keys found."
+            if weather_key_paths
+            else "Garmin activity payload does not include weather data; Open-Meteo fallback required."
+        ),
+        "raw_payload": raw_payload,
+    }
 
 
 @router.post("/{activity_id}/auto-match")
@@ -357,7 +397,7 @@ def _activity_match_message(decision, weather_note: str | None = None) -> str:
     if decision.status == "matched":
         message = (
             f"Actividad vinculada con la sesion #{decision.matched_session_id}. "
-            f"Score {decision.score:.1f}."
+            f"Score {decision.score:.1f}. {decision.auto_link_decision_reason or ''}"
         )
         if weather_note:
             message = f"{message} {weather_note}"
@@ -365,14 +405,14 @@ def _activity_match_message(decision, weather_note: str | None = None) -> str:
     if decision.status == "ambiguous":
         return (
             f"Matching ambiguo. Mejor score {decision.score:.1f}. "
-            "Revisar candidatas sugeridas antes de vincular."
+            f"{decision.auto_link_decision_reason or 'Revisar candidatas sugeridas antes de vincular.'}"
         )
     if decision.status == "candidate":
         return (
-            f"Hay una sesion candidata, pero no se vinculo automaticamente. "
-            f"Score {decision.score:.1f}."
+            "Actividad candidata encontrada, pero no se vinculo automaticamente porque la confianza no fue suficiente. "
+            f"Score {decision.score:.1f}. {decision.auto_link_decision_reason or ''}"
         )
-    return "No se encontro una sesion confiable para vincular automaticamente."
+    return decision.auto_link_decision_reason or "No se encontro una sesion confiable para vincular automaticamente."
 
 
 def _parse_optional_int_query(raw_value: str | None, field_name: str) -> int | None:
@@ -518,6 +558,7 @@ def _build_activity_analysis_v2_summary(db: Session, activity) -> dict[str, obje
         "exists": True,
         "title": "Analisis de la sesion vinculada",
         "session_name": planned_session.name,
+        "session_modality": planned_session.modality,
         "session_url": f"/planned_sessions/{planned_session.id}",
         "analysis_url": f"/planned_sessions/{planned_session.id}/analysis",
         "status_label": _analysis_v2_status_label(analysis.status),

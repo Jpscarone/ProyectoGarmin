@@ -1,0 +1,13 @@
+INFO:     Started server process [20792]
+INFO:     Waiting for application startup.
+StreamableHTTP session manager started
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:9000 (Press CTRL+C to quit)
+Terminating session: None
+Terminating session: None
+Terminating session: None
+Processing request of type ListToolsRequest
+Terminating session: None
+Processing request of type CallToolRequest
+HTTP Request: GET http://127.0.0.1:8000/api/mcp/session-feedback?date=2026-05-02&athlete_id=1 "HTTP/1.1 200 OK"
+Terminating session: None

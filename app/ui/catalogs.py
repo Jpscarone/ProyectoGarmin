@@ -14,6 +14,7 @@ SPORT_OPTIONS = [
     Option("mtb", "MTB"),
     Option("running", "Running"),
     Option("trail_running", "Trail running"),
+    Option("strength", "Gimnasio"),
     Option("swimming", "Natacion"),
     Option("multisport", "Multideporte"),
 ]
@@ -28,10 +29,30 @@ SPORT_LABELS = {
     "run": "Running",
     "trail_running": "Trail running",
     "trail_run": "Trail running",
+    "strength": "Gimnasio",
+    "strength_training": "Gimnasio",
+    "gym": "Gimnasio",
+    "functional_strength_training": "Gimnasio",
     "swimming": "Natacion",
     "lap_swimming": "Natacion",
     "pool_swim": "Natacion",
     "multisport": "Multideporte",
+}
+
+STRENGTH_FOCUS_OPTIONS = [
+    Option("lower_body", "Pierna"),
+    Option("upper_body", "Tren superior"),
+    Option("core", "Core"),
+    Option("full_body", "Cuerpo completo"),
+    Option("mobility", "Movilidad"),
+]
+
+STRENGTH_FOCUS_LABELS = {
+    "lower_body": "Pierna",
+    "upper_body": "Tren superior",
+    "core": "Core",
+    "full_body": "Cuerpo completo",
+    "mobility": "Movilidad",
 }
 
 VARIANT_OPTIONS = [
@@ -51,6 +72,19 @@ VARIANT_LABELS = {
     "trail": "Trail",
     "pool": "Pileta",
     "open_water": "Aguas abiertas",
+}
+
+MODALITY_OPTIONS = [
+    Option("outdoor", "Outdoor"),
+    Option("indoor", "Indoor"),
+    Option("virtual", "Virtual"),
+]
+
+MODALITY_LABELS = {
+    "outdoor": "Outdoor",
+    "indoor": "Indoor",
+    "virtual": "Virtual",
+    "unknown": "Unknown",
 }
 
 SESSION_TYPE_OPTIONS = [
@@ -181,6 +215,9 @@ MATCH_METHOD_LABELS = {
     "same_day_sport": "Mismo dia y deporte",
     "same_day_family": "Mismo dia y familia deportiva",
     "same_day_candidate": "Candidata del mismo dia",
+    "same_day_high_confidence": "Alta confianza del mismo dia",
+    "same_day_relative_confidence": "Confianza relativa superior",
+    "same_day_unique_candidate": "Unica candidata razonable",
     "group_match": "Coincidencia por grupo",
     "manual": "Manual",
 }

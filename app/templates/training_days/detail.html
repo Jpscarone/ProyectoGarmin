@@ -56,8 +56,8 @@
                 </p>
                 {% set latest_analysis = latest_analysis_by_session.get(planned_session.id) %}
                 <div class="calendar-meta-row">
-                    {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
-                    <span class="calendar-state-badge calendar-state-badge-success">Actividad vinculada</span>
+                    {% if is_session_completed(planned_session) %}
+                    <span class="calendar-state-badge calendar-state-badge-success">{% if is_manually_completed_strength_session(planned_session) %}Realizada manualmente{% else %}Actividad vinculada{% endif %}</span>
                     {% else %}
                     <span class="calendar-state-badge calendar-state-badge-empty">Sin actividad</span>
                     {% endif %}
@@ -80,6 +80,9 @@
             </div>
             <div class="actions-inline">
                 <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                {% if planned_session.sport_type == 'strength' and not is_session_completed(planned_session) %}
+                <a class="button button-utility" href="/planned_sessions/{{ planned_session.id }}">Marcar como realizada</a>
+                {% endif %}
                 {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
                 <span title="No se puede editar una sesion que ya tiene actividad vinculada.">
                     <button class="button button-secondary" type="button" disabled>Editar</button>
@@ -145,8 +148,8 @@
                     </p>
                     {% set latest_analysis = latest_analysis_by_session.get(planned_session.id) %}
                     <div class="calendar-meta-row">
-                        {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
-                        <span class="calendar-state-badge calendar-state-badge-success">Actividad vinculada</span>
+                        {% if is_session_completed(planned_session) %}
+                        <span class="calendar-state-badge calendar-state-badge-success">{% if is_manually_completed_strength_session(planned_session) %}Realizada manualmente{% else %}Actividad vinculada{% endif %}</span>
                         {% else %}
                         <span class="calendar-state-badge calendar-state-badge-empty">Sin actividad</span>
                         {% endif %}
@@ -169,6 +172,9 @@
                 </div>
                 <div class="actions-inline">
                     <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}">Ver sesion</a>
+                    {% if planned_session.sport_type == 'strength' and not is_session_completed(planned_session) %}
+                    <a class="button button-utility" href="/planned_sessions/{{ planned_session.id }}">Marcar como realizada</a>
+                    {% endif %}
                     {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
                     <span title="No se puede editar una sesion que ya tiene actividad vinculada.">
                         <button class="button button-secondary" type="button" disabled>Editar</button>

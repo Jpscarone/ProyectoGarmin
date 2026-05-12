@@ -24,6 +24,7 @@ from app.services.planning.presentation import (
     derive_session_metrics,
     describe_session_structure_short,
 )
+from app.services.session_completion_service import is_manually_completed_strength_session, is_session_completed
 from app.services.training_day_service import create_training_day
 from app.services.training_plan_service import (
     auto_complete_expired_training_plans,
@@ -445,7 +446,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                 day_status, day_status_label = _resolve_calendar_day_status(training_day)
                 for planned_session in training_day.planned_sessions:
                     derived_metrics = derive_session_metrics(planned_session)
-                    has_match = planned_session.activity_match is not None and planned_session.activity_match.garmin_activity is not None
+                    has_match = is_session_completed(planned_session)
                     has_analysis = bool(planned_session.analysis_reports)
                     matched_count += 1 if has_match else 0
                     analyzed_count += 1 if has_analysis else 0
@@ -475,6 +476,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
                             "has_group": planned_session.session_group is not None,
                             "group_name": planned_session.session_group.name if planned_session.session_group else None,
                             "has_match": has_match,
+                            "manual_completion": is_manually_completed_strength_session(planned_session),
                             "has_analysis": has_analysis,
                             "short_description": short_description,
                             "description": long_description or (planned_session.description_text or planned_session.target_notes or "").strip(),
@@ -567,7 +569,23 @@ def _resolve_calendar_day_status(training_day) -> tuple[str, str]:
     for planned_session in training_day.planned_sessions:
         session_reports.extend([report for report in planned_session.analysis_reports if report.report_type == "session"])
     if not session_reports:
-        return ("empty", "Sin actividad")
+        if not training_day.planned_sessions:
+            return ("empty", "Sin actividad")
+
+        matched_sessions = sum(
+            1
+            for planned_session in training_day.planned_sessions
+            if is_session_completed(planned_session)
+        )
+        if matched_sessions == 0:
+            return ("empty", "Sin actividad")
+        if matched_sessions == len(training_day.planned_sessions):
+            has_manual_completion = any(
+                is_manually_completed_strength_session(planned_session)
+                for planned_session in training_day.planned_sessions
+            )
+            return ("correct", "Completado" if has_manual_completion else "Actividad vinculada")
+        return ("partial", "Actividad parcial")
 
     statuses = {report.overall_status for report in session_reports}
     if "correct" in statuses and statuses <= {"correct"}:
@@ -590,6 +608,7 @@ def _calendar_sport_icon(sport_type: str | None) -> str:
         "trail_running": "TRAIL",
         "cycling": "BIKE",
         "mtb": "MTB",
+        "strength": "🏋️",
         "swimming": "SWIM",
         "multisport": "MULTI",
     }

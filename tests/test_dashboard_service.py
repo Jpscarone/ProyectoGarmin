@@ -331,6 +331,28 @@ class DashboardServiceTests(unittest.TestCase):
 
         self.assertLessEqual(len(context["weekly_summary"]["summary"]), 130)
 
+    def test_dashboard_weekly_duration_tolerates_missing_activity_duration(self) -> None:
+        plan = self._plan()
+        self._activity(start_time=datetime(2026, 5, 2, 8, 0, tzinfo=timezone.utc), activity_name="Actividad sin duracion")
+        session = self._session(plan=plan, day_date=date(2026, 5, 2), name="Fuerza", session_type="strength")
+        session.sport_type = "strength"
+        session.completion_source = "manual"
+        session.manual_duration_sec = 50 * 60
+        session.completed_at = datetime(2026, 5, 2, 12, 0, tzinfo=timezone.utc)
+        activity = self.db.query(GarminActivity).filter_by(activity_name="Actividad sin duracion").one()
+        activity.duration_sec = None
+        self.db.commit()
+
+        context = build_dashboard_context(
+            self.db,
+            self.athlete,
+            plan,
+            selected_date=date(2026, 5, 2),
+        )
+
+        self.assertEqual(context["weekly_summary"]["total_duration_minutes"], 50)
+        self.assertEqual(context["weekly_summary"]["total_duration_label"], "50 min")
+
     def _plan(self) -> TrainingPlan:
         plan = TrainingPlan(
             athlete_id=self.athlete.id,

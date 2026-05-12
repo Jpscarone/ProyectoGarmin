@@ -114,16 +114,19 @@ class DashboardAutoRefreshServiceTests(unittest.TestCase):
             patch("app.services.dashboard_auto_refresh_service.sync_activities_by_date") as sync_mock,
             patch("app.services.dashboard_auto_refresh_service.preview_activity_match") as preview_mock,
             patch("app.services.dashboard_auto_refresh_service.auto_match_activity") as auto_match_mock,
+            patch("app.services.dashboard_auto_refresh_service.run_downstream_analyses_for_match_decision") as downstream_mock,
             patch("app.services.dashboard_auto_refresh_service.run_health_auto_sync") as health_sync_mock,
         ):
             sync_mock.return_value = SimpleNamespace(inserted=0, existing=1, errors=[])
             preview_mock.return_value = SimpleNamespace(status="matched", matched_session_id=session.id, score=90.0)
+            auto_match_mock.return_value = SimpleNamespace(status="matched", matched_session_id=session.id, activity_id=activity.id)
             result = run_dashboard_auto_refresh(self.db, self.athlete, plan, self.today)
             health_sync_mock.assert_not_called()
 
         step = self._step(result, "activity_linking")
         self.assertEqual(step["status"], "done")
         auto_match_mock.assert_called_once_with(self.db, activity.id, training_plan_id=plan.id)
+        downstream_mock.assert_called_once_with(self.db, auto_match_mock.return_value)
 
     def test_ambiguous_candidates_do_not_auto_link(self) -> None:
         plan = self._plan()

@@ -40,6 +40,7 @@ class GarminActivityRead(BaseModel):
     activity_name: str | None = None
     sport_type: str | None = None
     discipline_variant: str | None = None
+    modality: str | None = None
     is_multisport: bool
     start_time: datetime | None = None
     end_time: datetime | None = None

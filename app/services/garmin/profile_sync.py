@@ -179,7 +179,9 @@ def load_athlete_garmin_snapshot(athlete: Athlete) -> dict[str, Any]:
         data = json.loads(raw)
     except json.JSONDecodeError:
         return {}
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    return _normalize_snapshot_payload(data)
 
 
 def load_zone_payload(raw_value: str | None) -> dict[str, list[dict[str, Any]]]:
@@ -435,8 +437,30 @@ def _pace_from_garmin_speed(value: Any) -> int | None:
     parsed = _as_float(value)
     if parsed is None or parsed <= 0:
         return None
-    # Garmin devuelve este valor en km/min para lactate threshold.
-    return int(round(60 / parsed))
+    # En los payloads observados de Garmin Connect, lactateThresholdSpeed llega
+    # escalado en decimas de m/s (por ejemplo 0.35 representa ~3.5 m/s).
+    # Convertimos ese valor a segundos por km.
+    return int(round(100 / parsed))
+
+
+def _normalize_snapshot_payload(snapshot: dict[str, Any]) -> dict[str, Any]:
+    general = snapshot.get("general")
+    raw_payloads = snapshot.get("raw_payloads")
+    if not isinstance(general, dict) or not isinstance(raw_payloads, dict):
+        return snapshot
+
+    user_profile = raw_payloads.get("user_profile", {})
+    user_data = user_profile.get("userData", {}) if isinstance(user_profile, dict) else {}
+    lactate_threshold = raw_payloads.get("lactate_threshold", {})
+    lactate_speed_and_hr = lactate_threshold.get("speed_and_heart_rate", {}) if isinstance(lactate_threshold, dict) else {}
+    running_threshold_speed = _first_value(
+        user_data.get("lactateThresholdSpeed"),
+        lactate_speed_and_hr.get("speed"),
+    )
+    normalized_pace = _pace_from_garmin_speed(running_threshold_speed)
+    if normalized_pace is not None:
+        general["running_threshold_pace_sec_km"] = normalized_pace
+    return snapshot
 
 
 def _values_differ(left: Any, right: Any) -> bool:

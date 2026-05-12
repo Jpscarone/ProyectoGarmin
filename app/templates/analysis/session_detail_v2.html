@@ -11,6 +11,7 @@
             <div class="analysis-v2-meta">
                 <span>{{ view_model.header.date_label }}</span>
                 <span>{{ view_model.header.sport_label }}</span>
+                <span>{{ view_model.header.modality_label }}</span>
                 <span>{{ view_model.header.duration_label }}</span>
                 <span>{{ view_model.header.distance_label }}</span>
             </div>
@@ -44,6 +45,22 @@
     </div>
     {% endif %}
 </section>
+
+{% if view_model.analysis_notes %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Criterios</p>
+            <h2>Lectura por modalidad</h2>
+        </div>
+    </div>
+    <ul class="analysis-v2-list">
+        {% for item in view_model.analysis_notes %}
+        <li>{{ item }}</li>
+        {% endfor %}
+    </ul>
+</section>
+{% endif %}
 
 <section class="panel analysis-v2-hero">
     <div class="analysis-v2-conclusion-card">

@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.db.session import SessionLocal, get_db
 from app.routers.activities import router as activities_router
 from app.routers.activity_matching import router as activity_matching_router
+from app.routers.api_mcp import router as api_mcp_router
 from app.routers.analysis import router as analysis_router
 from app.routers.athletes import router as athletes_router
 from app.routers.garmin_health_sync import router as garmin_health_sync_router
@@ -111,6 +112,7 @@ def _dump_context_session(session: dict) -> str:
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(activities_router)
 app.include_router(activity_matching_router)
+app.include_router(api_mcp_router)
 app.include_router(analysis_router)
 app.include_router(athletes_router)
 app.include_router(health_router)

@@ -91,13 +91,23 @@
                             </select>
                         </label>
 
+                        <label class="field strength-special-field" data-strength-special-scope="simple">
+                            <span>Modalidad</span>
+                            <select name="simple_modality">
+                                <option value="">Sin definir</option>
+                                {% for option in modality_options %}
+                                <option value="{{ option.value }}">{{ option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+
                         <label class="field">
                             <span>Nombre corto</span>
                             <input name="simple_name" type="text" placeholder="Ej: Rodaje suave 50 min, Bici base 1h30 o Fondo 1h30">
                         </label>
                     </div>
 
-                    <div class="field field-full quick-simple-metrics-grid">
+                    <div class="field field-full quick-simple-metrics-grid endurance-distance-fields" data-endurance-scope="simple">
                         <label class="field">
                             <span>Duracion esperada</span>
                             <input name="simple_expected_duration_min" type="text" placeholder="Ej: 50, 1:30, 90min">
@@ -115,7 +125,24 @@
 
                     </div>
 
-                    <div class="field field-full quick-intensity-inline-grid">
+                    <div class="field field-full quick-simple-metrics-grid strength-fields" data-strength-scope="simple" hidden>
+                        <label class="field">
+                            <span>Focus de fuerza</span>
+                            <select name="simple_strength_focus">
+                                <option value="">Sin foco</option>
+                                {% for option in strength_focus_options %}
+                                <option value="{{ option.value }}">{{ option.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+
+                        <label class="field">
+                            <span>RPE estimado</span>
+                            <input name="simple_strength_rpe" type="number" min="1" max="10" step="1" placeholder="1-10">
+                        </label>
+                    </div>
+
+                    <div class="field field-full quick-intensity-inline-grid endurance-target-fields" data-endurance-target-scope="simple">
                         <label class="field">
                             <span>Criterio de intensidad</span>
                             <select name="simple_target_type" id="simple-target-type">
@@ -172,7 +199,7 @@
                         <input name="simple_target_notes" type="text" placeholder="Ej: suave, base, controlado, tempo">
                     </label>
 
-                    <label class="field">
+                    <label class="field strength-special-field" data-strength-special-scope="simple">
                         <span>Grupo</span>
                         <select name="simple_group_mode" id="simple-group-mode" onchange="toggleSimpleInlineGroupFields(this.value)">
                             <option value="existing" selected>Sin grupo o grupo existente</option>
@@ -180,7 +207,7 @@
                         </select>
                     </label>
 
-                    <label class="field">
+                    <label class="field strength-special-field" data-strength-special-scope="simple">
                         <span>Grupo existente</span>
                         <select name="simple_session_group_id" id="simple-session-group-id">
                             <option value="">Sin grupo</option>
@@ -190,7 +217,7 @@
                         </select>
                     </label>
 
-                    <div class="form-section field-full inline-group-fields" id="simple-inline-group-fields" hidden>
+                    <div class="form-section field-full inline-group-fields strength-special-field" id="simple-inline-group-fields" data-strength-special-scope="simple" hidden>
                         <div class="form-section-header">
                             <h2>Nuevo grupo</h2>
                             <p class="text-muted">Ideal para brick, doble turno o bloques complementarios dentro del mismo dia.</p>
@@ -230,10 +257,24 @@
                 </div>
 
                 <div class="form-grid">
+                    <label class="field strength-special-field" data-strength-special-scope="text">
+                        <span>Modalidad</span>
+                        <select name="advanced_modality">
+                            <option value="">Sin definir</option>
+                            {% for option in modality_options %}
+                            <option value="{{ option.value }}">{{ option.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </label>
+
                     <label class="field field-full">
                         <span>Texto de la sesion</span>
                         <textarea name="raw_text" id="text-raw-text" rows="6" placeholder="Ej: 60 min suaves, 1h bici base, 4 x 6 min en Z3 con 3 min suaves, 8 x 100 fuertes con 20 s de pausa"></textarea>
                     </label>
+
+                    <div class="alert alert-info strength-mode-message" data-strength-message-scope="text" hidden>
+                        Para gimnasio, usa sesion simple con duracion, foco y RPE por ahora.
+                    </div>
 
                     <div class="field field-full quick-text-top-grid">
                         <label class="field">
@@ -246,7 +287,7 @@
                             </select>
                         </label>
 
-                        <label class="field">
+                        <label class="field strength-special-field" data-strength-special-scope="text">
                             <span>Grupo</span>
                             <select name="text_group_mode" id="text-group-mode" onchange="toggleTextInlineGroupFields(this.value)">
                                 <option value="existing" selected>Sin grupo o grupo existente</option>
@@ -254,7 +295,7 @@
                             </select>
                         </label>
 
-                        <label class="field">
+                        <label class="field strength-special-field" data-strength-special-scope="text">
                             <span>Grupo existente</span>
                             <select name="text_session_group_id" id="text-session-group-id">
                                 <option value="">Sin grupo</option>
@@ -265,7 +306,7 @@
                         </label>
                     </div>
 
-                    <div class="form-section field-full inline-group-fields" id="text-inline-group-fields" hidden>
+                    <div class="form-section field-full inline-group-fields strength-special-field" id="text-inline-group-fields" data-strength-special-scope="text" hidden>
                         <div class="form-section-header">
                             <h2>Nuevo grupo</h2>
                             <p class="text-muted">Ideal para brick, doble turno o bloques complementarios dentro del mismo dia.</p>
@@ -322,14 +363,18 @@
                         </label>
                     </div>
 
-                    <div class="field field-full">
+                    <div class="field field-full builder-workspace">
                         <span>Bloques</span>
                         <div id="builder-blocks" class="builder-stack"></div>
                     </div>
 
-                    <div class="form-actions field-full">
+                    <div class="form-actions field-full builder-actions">
                         <button class="button button-secondary" type="button" onclick="addSimpleBlock()">Agregar bloque simple</button>
                         <button class="button button-secondary" type="button" onclick="addRepeatBlock()">Agregar bloque repetido</button>
+                    </div>
+
+                    <div class="alert alert-info strength-mode-message field-full" data-strength-message-scope="builder" hidden>
+                        Para gimnasio, usa sesion simple con duracion, foco y RPE por ahora.
                     </div>
                 </div>
             </section>
@@ -357,6 +402,10 @@
                         <span>Texto estructurado</span>
                         <textarea id="import-raw-text" rows="12" placeholder="SESSION&#10;DATE: 2026-04-05&#10;SPORT: running&#10;NAME: Fondo progresivo&#10;NOTES: base aerobica&#10;&#10;BLOCK&#10;VALUE: 15&#10;UNIT: min&#10;INTENSITY: hr&#10;ZONE: z1&#10;&#10;END"></textarea>
                     </label>
+
+                    <div class="alert alert-info field-full">
+                        Las sesiones de gimnasio conviene cargarlas desde <strong>Sesion simple</strong> por ahora.
+                    </div>
 
                     <div class="form-actions field-full">
                         <button class="button button-secondary" type="button" onclick="previewImportSessions()">Vista previa</button>
@@ -464,7 +513,7 @@ END</pre>
 
                         <input type="hidden" name="advanced_expected_distance_unit" value="km">
 
-                        <div class="field field-full quick-builder-advanced-grid">
+                        <div class="field field-full quick-builder-advanced-grid endurance-distance-fields" data-endurance-scope="advanced">
                             <label class="field">
                                 <span>Duracion esperada</span>
                                 <input name="advanced_expected_duration_hhmm" type="text" placeholder="Ej: 1:15">
@@ -482,7 +531,24 @@ END</pre>
 
                         </div>
 
-                        <div class="field field-full quick-intensity-inline-grid quick-intensity-inline-grid-advanced" id="advanced-intensity-grid"{% if initial_mode == 'builder' %} hidden{% endif %}>
+                        <div class="field field-full quick-builder-advanced-grid strength-fields" data-strength-scope="advanced" hidden>
+                            <label class="field">
+                                <span>Focus de fuerza</span>
+                                <select name="advanced_strength_focus">
+                                    <option value="">Sin foco</option>
+                                    {% for option in strength_focus_options %}
+                                    <option value="{{ option.value }}">{{ option.label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </label>
+
+                            <label class="field">
+                                <span>RPE estimado</span>
+                                <input name="advanced_strength_rpe" type="number" min="1" max="10" step="1" placeholder="1-10">
+                            </label>
+                        </div>
+
+                        <div class="field field-full quick-intensity-inline-grid quick-intensity-inline-grid-advanced endurance-target-fields" id="advanced-intensity-grid" data-endurance-target-scope="advanced"{% if initial_mode == 'builder' %} hidden{% endif %}>
                             <label class="field">
                                 <span>Criterio de intensidad</span>
                                 <select name="advanced_target_type" id="advanced-target-type">
@@ -647,6 +713,7 @@ const builderBlocksJson = document.getElementById("builder-blocks-json");
 const quickModeInput = document.getElementById("quick-mode-input");
 const quickInlineWarnings = document.getElementById("quick-inline-warnings");
 const initialQuickData = {{ initial_quick_data | tojson if initial_quick_data else "null" }};
+const sportUiDefaults = {{ sport_ui_defaults | tojson }};
 const builderZoneOptions = {
     hr: {{ hr_target_options | tojson }},
     pace: {{ pace_target_options | tojson }},
@@ -682,6 +749,7 @@ function switchQuickMode(mode) {
         syncBuilderAdvancedMode(mode);
     }
     syncFormFieldsForMode(mode);
+    syncStrengthUi();
     window.history.replaceState({}, "", `#${mode}`);
     updateCreationWarnings();
 }
@@ -708,6 +776,7 @@ function syncFormFieldsForMode(mode) {
 
     syncTargetTypeUi("simple");
     syncTargetTypeUi("advanced");
+    syncStrengthUi();
 
     const advancedIntensityGrid = document.getElementById("advanced-intensity-grid");
     if (advancedIntensityGrid && advancedIntensityGrid.hidden) {
@@ -722,6 +791,7 @@ function syncAdvancedSport(value) {
     if (advancedField && !advancedField.value && value) {
         advancedField.value = value;
     }
+    syncStrengthUi();
 }
 
 function syncAdvancedVariant(value) {
@@ -770,6 +840,123 @@ function syncTargetTypeUi(scope) {
             field.disabled = !isActive;
         });
     });
+}
+
+function currentQuickSport() {
+    const mode = quickModeInput.value;
+    if (mode === "simple") return document.getElementById("simple-sport-type")?.value || "";
+    if (mode === "text") return document.getElementById("text-sport-type")?.value || "";
+    if (mode === "builder") return document.getElementById("builder-sport")?.value || "";
+    return "";
+}
+
+function syncStrengthUi() {
+    const sport = currentQuickSport();
+    const isStrength = sport === "strength";
+    if (isStrength) {
+        clearStrengthIncompatibleFields();
+    }
+
+    document.querySelectorAll(".strength-fields").forEach((group) => {
+        const isSimpleScope = group.dataset.strengthScope === "simple";
+        const scopeActive = isSimpleScope ? quickModeInput.value === "simple" : ["text", "builder"].includes(quickModeInput.value);
+        const enabled = isStrength && scopeActive;
+        group.hidden = !enabled;
+        group.querySelectorAll("input, select, textarea").forEach((field) => {
+            field.disabled = !enabled;
+        });
+    });
+
+    const simpleIntensityGrid = document.querySelector('.quick-mode-panel[data-mode-panel="simple"] .quick-intensity-inline-grid');
+    if (simpleIntensityGrid) {
+        const enabled = quickModeInput.value === "simple" && !isStrength;
+        simpleIntensityGrid.hidden = !enabled;
+        simpleIntensityGrid.querySelectorAll("input, select, textarea").forEach((field) => {
+            field.disabled = !enabled;
+        });
+    }
+
+    const advancedIntensityGrid = document.getElementById("advanced-intensity-grid");
+    if (advancedIntensityGrid) {
+        const enabled = quickModeInput.value === "text" && !isStrength;
+        advancedIntensityGrid.hidden = !enabled;
+        advancedIntensityGrid.classList.toggle("is-hidden", !enabled);
+        advancedIntensityGrid.querySelectorAll("input, select, textarea, button").forEach((field) => {
+            field.disabled = !enabled;
+        });
+    }
+
+    document.querySelectorAll(".endurance-distance-fields").forEach((group) => {
+        const scope = group.dataset.enduranceScope;
+        const enabled = !isStrength && ((scope === "simple" && quickModeInput.value === "simple") || (scope === "advanced" && ["text", "builder"].includes(quickModeInput.value)));
+        group.hidden = !enabled;
+        group.querySelectorAll("input, select, textarea").forEach((field) => {
+            field.disabled = !enabled;
+        });
+    });
+
+    document.querySelectorAll(".strength-mode-message").forEach((message) => {
+        const scope = message.dataset.strengthMessageScope;
+        const show = isStrength && quickModeInput.value === scope;
+        message.hidden = !show;
+    });
+
+    document.querySelectorAll(".strength-special-field").forEach((group) => {
+        const scope = group.dataset.strengthSpecialScope;
+        const show = !(isStrength && quickModeInput.value === scope);
+        group.hidden = !show;
+        group.querySelectorAll("input, select, textarea, button").forEach((field) => {
+            field.disabled = !show;
+        });
+    });
+
+    const builderWorkspace = document.querySelector(".builder-workspace");
+    const builderActions = document.querySelector(".builder-actions");
+    if (builderWorkspace) {
+        builderWorkspace.hidden = isStrength && quickModeInput.value === "builder";
+    }
+    if (builderActions) {
+        builderActions.hidden = isStrength && quickModeInput.value === "builder";
+    }
+}
+
+function clearStrengthIncompatibleFields() {
+    [
+        'simple_modality',
+        'advanced_modality',
+        'simple_group_mode',
+        'simple_session_group_id',
+        'simple_new_group_name',
+        'simple_new_group_type',
+        'simple_new_group_notes',
+        'text_group_mode',
+        'text_session_group_id',
+        'text_new_group_name',
+        'text_new_group_type',
+        'text_new_group_notes',
+        'simple_expected_distance_km',
+        'advanced_expected_distance_value',
+        'simple_target_type',
+        'simple_target_hr_zone',
+        'simple_target_pace_zone',
+        'simple_target_power_zone',
+        'simple_target_rpe_zone',
+        'advanced_target_type',
+        'advanced_target_hr_zone',
+        'advanced_target_pace_zone',
+        'advanced_target_power_zone',
+        'advanced_target_rpe_zone',
+    ].forEach((name) => {
+        const field = document.querySelector(`[name="${name}"]`);
+        if (!field) return;
+        if (field.type === "checkbox") {
+            field.checked = false;
+        } else {
+            field.value = field.tagName === "SELECT" && name.endsWith("_group_mode") ? "existing" : "";
+        }
+    });
+    toggleSimpleInlineGroupFields("existing");
+    toggleTextInlineGroupFields("existing");
 }
 
 function addSimpleBlock(initialData = null) {
@@ -1417,6 +1604,11 @@ document.getElementById("unified-session-form").addEventListener("submit", (even
         return;
     }
     if (mode === "builder") {
+        if (currentQuickSport() === "strength") {
+            event.preventDefault();
+            window.alert("Para gimnasio, usa sesion simple con duracion, foco y RPE por ahora.");
+            return;
+        }
         refreshBuilderPreview();
         if (builderBlocksJson) {
             builderBlocksJson.value = JSON.stringify(serializeBuilderBlocksData());
@@ -1625,9 +1817,13 @@ window.addEventListener("load", () => {
     toggleTextInlineGroupFields(document.getElementById("text-group-mode")?.value || "existing");
     document.getElementById("simple-target-type")?.addEventListener("change", () => syncTargetTypeUi("simple"));
     document.getElementById("advanced-target-type")?.addEventListener("change", () => syncTargetTypeUi("advanced"));
+    document.getElementById("simple-sport-type")?.addEventListener("change", syncStrengthUi);
+    document.getElementById("text-sport-type")?.addEventListener("change", syncStrengthUi);
+    document.getElementById("builder-sport")?.addEventListener("change", syncStrengthUi);
     syncTargetTypeUi("simple");
     syncTargetTypeUi("advanced");
     syncFormFieldsForMode(initialMode);
+    syncStrengthUi();
     updateCreationWarnings();
     syncBuilderAdvancedMode(initialMode);
 
@@ -1657,6 +1853,8 @@ function applyQuickInitialData(data) {
     setFieldValue('simple_name', data.simple?.name);
     setFieldValue('simple_expected_duration_min', data.simple?.expectedDuration);
     setFieldValue('simple_expected_distance_km', data.simple?.expectedDistance);
+    setFieldValue('simple_strength_focus', data.simple?.strengthFocus);
+    setFieldValue('simple_strength_rpe', data.simple?.strengthRpe);
     setFieldValue('simple_target_type', data.simple?.targetType);
     setFieldValue('simple_target_hr_zone', data.simple?.targetHrZone);
     setFieldValue('simple_target_pace_zone', data.simple?.targetPaceZone);
@@ -1672,6 +1870,8 @@ function applyQuickInitialData(data) {
     setFieldValue('advanced_name', data.advanced?.name);
     setFieldValue('advanced_expected_duration_hhmm', data.advanced?.expectedDuration);
     setFieldValue('advanced_expected_distance_value', data.advanced?.expectedDistance);
+    setFieldValue('advanced_strength_focus', data.advanced?.strengthFocus);
+    setFieldValue('advanced_strength_rpe', data.advanced?.strengthRpe);
     setFieldValue('advanced_target_type', data.advanced?.targetType);
     setFieldValue('advanced_target_hr_zone', data.advanced?.targetHrZone);
     setFieldValue('advanced_target_pace_zone', data.advanced?.targetPaceZone);

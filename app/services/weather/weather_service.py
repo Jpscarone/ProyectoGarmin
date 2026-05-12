@@ -17,6 +17,20 @@ from app.services.weather.client import OpenMeteoClient, WeatherClientError
 
 logger = logging.getLogger(__name__)
 
+WEATHER_KEYWORDS = (
+    "weather",
+    "temp",
+    "temperature",
+    "apparentTemperature",
+    "humidity",
+    "wind",
+    "windSpeed",
+    "windDirection",
+    "condition",
+    "climate",
+    "weatherType",
+)
+
 
 class ActivityWeatherSyncError(Exception):
     """Raised when weather sync cannot complete for an activity."""
@@ -214,6 +228,32 @@ def extract_weather_from_garmin_activity(raw_activity_json: str | dict[str, Any]
     return candidate_values
 
 
+def find_weather_keys(raw_json: str | dict[str, Any] | list[Any] | None) -> list[str]:
+    payload = _parse_debug_payload(raw_json)
+    if payload is None:
+        return []
+
+    matches: list[str] = []
+    seen: set[str] = set()
+
+    def visit(node: Any, path: str) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                current_path = f"{path}.{key}" if path else str(key)
+                if _looks_like_weather_key(str(key)) and current_path not in seen:
+                    seen.add(current_path)
+                    matches.append(current_path)
+                visit(value, current_path)
+            return
+        if isinstance(node, list):
+            for index, item in enumerate(node):
+                current_path = f"{path}[{index}]" if path else f"[{index}]"
+                visit(item, current_path)
+
+    visit(payload, "")
+    return matches
+
+
 def _build_hourly_points(hourly: dict[str, Any]) -> list[dict[str, Any]]:
     times = hourly.get("time")
     if not isinstance(times, list):
@@ -377,6 +417,22 @@ def _parse_raw_activity_payload(raw_activity_json: str | dict[str, Any] | None) 
     return parsed if isinstance(parsed, dict) else None
 
 
+def _parse_debug_payload(raw_json: str | dict[str, Any] | list[Any] | None) -> dict[str, Any] | list[Any] | None:
+    if raw_json is None:
+        return None
+    if isinstance(raw_json, (dict, list)):
+        return raw_json
+    if not isinstance(raw_json, str) or not raw_json.strip():
+        return None
+    try:
+        parsed = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, (dict, list)):
+        return parsed
+    return None
+
+
 def _extract_first_numeric(
     payload: dict[str, Any],
     keys: tuple[str, ...],
@@ -429,3 +485,16 @@ def _safe_float(value: Any) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _looks_like_weather_key(key: str) -> bool:
+    normalized_key = _normalize_weather_key(key)
+    for candidate in WEATHER_KEYWORDS:
+        normalized_candidate = _normalize_weather_key(candidate)
+        if normalized_candidate and normalized_candidate in normalized_key:
+            return True
+    return False
+
+
+def _normalize_weather_key(value: str) -> str:
+    return "".join(character for character in value.lower() if character.isalnum())

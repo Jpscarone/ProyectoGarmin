@@ -29,6 +29,7 @@ class GarminActivity(Base):
     activity_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     sport_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     discipline_variant: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    modality: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_multisport: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

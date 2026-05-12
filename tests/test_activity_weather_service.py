@@ -18,7 +18,7 @@ from app.db.models.athlete import Athlete
 from app.db.models.activity_weather import ActivityWeather
 from app.db.models.garmin_activity import GarminActivity
 from app.services.garmin.activity_sync import sync_activities_by_date
-from app.services.weather.weather_service import extract_weather_from_garmin_activity, sync_weather_for_activity
+from app.services.weather.weather_service import extract_weather_from_garmin_activity, find_weather_keys, sync_weather_for_activity
 
 
 class ActivityWeatherServiceTests(unittest.TestCase):
@@ -56,6 +56,38 @@ class ActivityWeatherServiceTests(unittest.TestCase):
 
         self.assertIsNone(extracted)
 
+    def test_find_weather_keys_returns_nested_matching_paths(self) -> None:
+        payload = {
+            "summaryDTO": {
+                "temperature": 22.4,
+            },
+            "metadataDTO": {
+                "weather": {
+                    "apparentTemperature": 21.0,
+                    "windSpeed": 14.0,
+                }
+            },
+            "activity": {
+                "weather": {
+                    "windDirection": 180,
+                }
+            },
+        }
+
+        matches = find_weather_keys(payload)
+
+        self.assertEqual(
+            matches,
+            [
+                "summaryDTO.temperature",
+                "metadataDTO.weather",
+                "metadataDTO.weather.apparentTemperature",
+                "metadataDTO.weather.windSpeed",
+                "activity.weather",
+                "activity.weather.windDirection",
+            ],
+        )
+
     @patch("app.services.garmin.activity_sync.GarminClient")
     @patch("app.services.garmin.activity_sync.get_garmin_auth_context")
     def test_garmin_activity_with_weather_saves_source_garmin_activity(self, auth_mock, client_cls_mock) -> None:
@@ -77,6 +109,10 @@ class ActivityWeatherServiceTests(unittest.TestCase):
         self.assertEqual(weather.provider_name, "Garmin Activity")
         self.assertEqual(weather.temperature_start_c, 24.5)
         self.assertEqual(weather.humidity_start_pct, 68.0)
+        activity = self.db.scalar(select(GarminActivity))
+        assert activity is not None
+        self.assertIn('"weather_key_paths"', activity.raw_summary_json or "")
+        self.assertIn("summary.summaryDTO.temperature", activity.raw_summary_json or "")
 
     @patch("app.services.garmin.activity_sync.GarminClient")
     @patch("app.services.garmin.activity_sync.get_garmin_auth_context")
@@ -94,6 +130,12 @@ class ActivityWeatherServiceTests(unittest.TestCase):
 
         weather = self.db.scalar(select(ActivityWeather))
         self.assertIsNone(weather)
+        activity = self.db.scalar(select(GarminActivity))
+        assert activity is not None
+        self.assertIn(
+            "Garmin activity payload does not include weather data; Open-Meteo fallback required.",
+            activity.raw_summary_json or "",
+        )
 
     @patch("app.services.weather.weather_service.OpenMeteoClient")
     def test_open_meteo_manual_sync_saves_source_open_meteo(self, client_cls_mock) -> None:

@@ -1,38 +1,24 @@
 {% extends "base.html" %}
 
-{% block title %}Sincronizar Garmin | training_app{% endblock %}
+{% block title %}Garmin | training_app{% endblock %}
 
 {% block content %}
 <section class="panel">
     <div class="section-heading">
         <div>
             <p class="eyebrow">Garmin</p>
-            <h1>Sincronizacion Manual</h1>
-            <p class="text-muted">La sincronizacion usa credenciales configuradas en `.env` y guarda tokens en `GARMIN_TOKEN_DIR`.</p>
+            <h1>Diagnostico y mantenimiento Garmin</h1>
+            <p class="text-muted">Esta pantalla sirve para verificar la conexion con Garmin y forzar sincronizaciones manuales si la sincronizacion automatica de Actividades o Salud falla.</p>
+            <p class="text-muted">Usar estas acciones solo si necesitas actualizar manualmente o diagnosticar un problema. En condiciones normales, Actividades y Salud se actualizan desde sus propias pantallas.</p>
+            {% if selected_athlete %}
+            <p class="text-muted"><strong>Atleta seleccionado:</strong> {{ selected_athlete.name }}</p>
+            {% endif %}
         </div>
     </div>
 
     {% if status_message %}
     <div class="alert alert-info">{{ status_message }}</div>
     {% endif %}
-
-    <div class="actions-inline">
-        <form method="post" action="/sync/garmin/activities">
-            <div class="form-actions">
-                <button class="button" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar actividades recientes</button>
-            </div>
-        </form>
-        <form method="post" action="/sync/garmin/health/from-activities">
-            <div class="form-actions">
-                <button class="button button-utility" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar salud</button>
-            </div>
-        </form>
-        <form method="post" action="/sync/garmin/all">
-            <div class="form-actions">
-                <button class="button button-secondary" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Sincronizar todo</button>
-            </div>
-        </form>
-    </div>
 
     {% if needs_mfa %}
     <section class="panel panel-subtle">
@@ -69,15 +55,13 @@
     <section class="panel panel-subtle">
         <div class="section-heading">
             <div>
-                <p class="eyebrow">Diagnostico Garmin</p>
-                <h2>Estado de autenticacion</h2>
+                <p class="eyebrow">Estado de conexion</p>
+                <h2>Conexion Garmin</h2>
             </div>
         </div>
         <div class="detail-grid sync-summary">
-            <div class="detail-item"><strong>Directorio de tokens:</strong> {{ garmin_auth_diagnostics.token_dir }}</div>
-            <div class="detail-item"><strong>Archivo de tokens:</strong> {{ 'Disponible' if garmin_auth_diagnostics.token_file_exists else 'No encontrado' }}</div>
-            <div class="detail-item"><strong>Ruta tokens:</strong> {{ garmin_auth_diagnostics.token_file }}</div>
             <div class="detail-item"><strong>Sesion reutilizable:</strong> {{ 'Si' if garmin_auth_diagnostics.tokens_usable else 'No' }}</div>
+            <div class="detail-item"><strong>Archivo de tokens disponible:</strong> {{ 'Si' if garmin_auth_diagnostics.token_file_exists else 'No' }}</div>
             <div class="detail-item"><strong>MFA pendiente:</strong> {{ 'Si' if garmin_auth_diagnostics.needs_mfa else 'No' }}</div>
             <div class="detail-item">
                 <strong>Rate limit activo:</strong>
@@ -87,38 +71,108 @@
                 No
                 {% endif %}
             </div>
+            <div class="detail-item"><strong>Ultima conexion exitosa:</strong> {{ sync_overview.last_connection_success_at }}</div>
             {% if garmin_auth_diagnostics.last_auth_error %}
             <div class="detail-item detail-item-full"><strong>Ultimo error Garmin:</strong> {{ garmin_auth_diagnostics.last_auth_error }}</div>
             {% endif %}
         </div>
+        <details class="detail-item detail-item-full">
+            <summary><strong>Mostrar detalles tecnicos</strong></summary>
+            <div class="detail-grid sync-summary">
+                <div class="detail-item"><strong>Directorio de tokens:</strong> {{ garmin_auth_diagnostics.token_dir }}</div>
+                <div class="detail-item"><strong>Ruta tokens:</strong> {{ garmin_auth_diagnostics.token_file }}</div>
+                <div class="detail-item"><strong>Archivo de tokens:</strong> {{ 'Disponible' if garmin_auth_diagnostics.token_file_exists else 'No encontrado' }}</div>
+            </div>
+        </details>
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Sincronizaciones</p>
+                <h2>Estado reciente</h2>
+            </div>
+        </div>
+        <div class="detail-grid sync-summary">
+            <div class="detail-item"><strong>Ultima sincronizacion de actividades:</strong> {{ sync_overview.activity_last_sync_at }}</div>
+            <div class="detail-item"><strong>Estado actividades:</strong> {{ sync_overview.activity_status }}</div>
+            <div class="detail-item detail-item-full"><strong>Mensaje actividades:</strong> {{ sync_overview.activity_message }}</div>
+
+            <div class="detail-item"><strong>Ultima sincronizacion de salud:</strong> {{ sync_overview.health_last_sync_at }}</div>
+            <div class="detail-item"><strong>Estado salud:</strong> {{ sync_overview.health_status }}</div>
+            <div class="detail-item detail-item-full"><strong>Mensaje salud:</strong> {{ sync_overview.health_message }}</div>
+
+            <div class="detail-item"><strong>Ultima sincronizacion completa:</strong> {{ sync_overview.full_last_sync_at }}</div>
+            <div class="detail-item"><strong>Estado de la ultima sincronizacion completa:</strong> {{ sync_overview.full_status }}</div>
+            <div class="detail-item detail-item-full"><strong>Mensaje de la ultima sincronizacion completa:</strong> {{ sync_overview.full_message }}</div>
+
+            <div class="detail-item"><strong>Ultima sincronizacion registrada:</strong> {{ sync_overview.latest_sync_at }}</div>
+            <div class="detail-item"><strong>Bloque mas reciente:</strong> {{ sync_overview.latest_sync_label }}</div>
+            <div class="detail-item detail-item-full"><strong>Ultimo estado y mensaje:</strong> {{ sync_overview.latest_sync_status }}{% if sync_overview.latest_sync_message and sync_overview.latest_sync_message != '-' %} · {{ sync_overview.latest_sync_message }}{% endif %}</div>
+        </div>
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Acciones manuales</p>
+                <h2>Forzar sincronizacion</h2>
+                <p class="text-muted">Estas acciones son de emergencia o mantenimiento. El flujo principal vive en Actividades y Salud.</p>
+            </div>
+        </div>
+        <div class="actions-inline">
+            <form method="post" action="/sync/garmin/activities">
+                <div class="form-actions">
+                    <button class="button" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Forzar actividades</button>
+                </div>
+            </form>
+            <form method="post" action="/sync/garmin/health/from-activities">
+                <div class="form-actions">
+                    <button class="button button-utility" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Forzar salud</button>
+                </div>
+            </form>
+            <form method="post" action="/sync/garmin/all">
+                <div class="form-actions">
+                    <button class="button button-secondary" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Forzar todo</button>
+                </div>
+            </form>
+        </div>
     </section>
 
     {% if result %}
-    <div class="detail-grid sync-summary">
-        <div class="detail-item"><strong>Atleta:</strong> {{ result.athlete_name }}</div>
-        <div class="detail-item"><strong>Encontradas:</strong> {{ result.found }}</div>
-        <div class="detail-item"><strong>Insertadas:</strong> {{ result.inserted }}</div>
-        <div class="detail-item"><strong>Actualizadas:</strong> {{ result.existing }}</div>
-    </div>
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Resultado manual</p>
+                <h2>Ultima ejecucion de actividades</h2>
+            </div>
+        </div>
+        <div class="detail-grid sync-summary">
+            <div class="detail-item"><strong>Atleta:</strong> {{ result.athlete_name }}</div>
+            <div class="detail-item"><strong>Encontradas:</strong> {{ result.found }}</div>
+            <div class="detail-item"><strong>Insertadas:</strong> {{ result.inserted }}</div>
+            <div class="detail-item"><strong>Actualizadas:</strong> {{ result.existing }}</div>
+        </div>
 
-    {% if result.errors %}
-    <div class="alert alert-error">
-        <strong>Errores:</strong>
-        <ul class="flat-list">
-            {% for item in result.errors %}
-            <li>{{ item }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-    {% endif %}
+        {% if result.errors %}
+        <div class="alert alert-error">
+            <strong>Errores:</strong>
+            <ul class="flat-list">
+                {% for item in result.errors %}
+                <li>{{ item }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+    </section>
     {% endif %}
 
     {% if sync_all_result %}
     <section class="panel panel-subtle">
         <div class="section-heading">
             <div>
-                <p class="eyebrow">Sincronizacion completa</p>
-                <h2>Resumen</h2>
+                <p class="eyebrow">Resultado manual</p>
+                <h2>Resumen de forzar todo</h2>
             </div>
         </div>
         <div class="detail-grid">

@@ -193,6 +193,26 @@ class ActivityAutoSyncServiceTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].garmin_activity_id, 9001)
 
+    @patch("app.services.garmin.activity_sync.GarminClient")
+    @patch("app.services.garmin.activity_sync.get_garmin_auth_context")
+    def test_sync_maps_garmin_indoor_subtype_to_modality(self, auth_mock, client_cls_mock) -> None:
+        auth_mock.return_value = SimpleNamespace(client=object())
+        client_cls_mock.return_value = _FakeIndoorGarminClient()
+
+        result = sync_activities_by_date(
+            self.db,
+            self.settings,
+            start_date=date(2026, 4, 30),
+            end_date=date(2026, 5, 1),
+            athlete_id=self.athlete.id,
+        )
+
+        self.assertEqual(result.inserted, 1)
+        row = self.db.scalar(select(GarminActivity).where(GarminActivity.garmin_activity_id == 9002))
+        self.assertIsNotNone(row)
+        self.assertEqual(row.sport_type, "cycling")
+        self.assertEqual(row.modality, "indoor")
+
     def _activity(self, *, garmin_activity_id: int, start_time: datetime) -> GarminActivity:
         row = GarminActivity(
             athlete_id=self.athlete.id,
@@ -232,6 +252,37 @@ class _FakeGarminClient:
                 "averageSpeed": 2.7777777778,
             },
             "activityTypeDTO": {"typeKey": "running"},
+        }
+
+    def get_activity_details(self, activity_id: int | str) -> dict:
+        return {}
+
+    def get_activity_splits(self, activity_id: int | str) -> list[dict]:
+        return []
+
+
+class _FakeIndoorGarminClient:
+    def get_activities_by_date(self, start_date: date, end_date: date, activitytype: str | None = None, sortorder: str | None = None) -> list[dict]:
+        return [
+            {
+                "activityId": 9002,
+                "activityName": "Bici indoor Garmin",
+                "startTimeLocal": "2026-04-30T09:00:00+00:00",
+                "activityType": {"typeKey": "indoor_cycling"},
+            }
+        ]
+
+    def get_activity_summary(self, activity_id: int | str) -> dict:
+        return {
+            "activityId": int(activity_id),
+            "activityName": "Bici indoor Garmin",
+            "summaryDTO": {
+                "startTimeLocal": "2026-04-30T09:00:00+00:00",
+                "duration": 3000,
+                "distance": 0.0,
+                "averageSpeed": 0.0,
+            },
+            "activityTypeDTO": {"typeKey": "indoor_cycling"},
         }
 
     def get_activity_details(self, activity_id: int | str) -> dict:

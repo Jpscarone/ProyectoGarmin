@@ -29,6 +29,7 @@ def _make_step(
     target_pace_max: int | None = None,
     duration_sec: int | None = None,
     distance_m: int | None = None,
+    incline_pct: float | None = None,
 ) -> PlannedStepContext:
     return PlannedStepContext(
         id=order,
@@ -50,6 +51,7 @@ def _make_step(
         target_rpe_zone=None,
         target_cadence_min=None,
         target_cadence_max=None,
+        incline_pct=incline_pct,
         target_notes=None,
     )
 
@@ -103,6 +105,7 @@ def _make_context(steps: list[PlannedStepContext], laps: list[ActivityLapContext
             title="Sesion intervalos",
             sport_type="running",
             discipline_variant=None,
+            modality=None,
             session_type=None,
             description=None,
             target_notes=None,
@@ -110,6 +113,8 @@ def _make_context(steps: list[PlannedStepContext], laps: list[ActivityLapContext
             expected_duration_min=60,
             expected_distance_km=10.0,
             expected_elevation_gain_m=None,
+            strength_focus=None,
+            strength_rpe=None,
             target_type=None,
             target_hr_zone=None,
             target_pace_zone=None,
@@ -128,6 +133,7 @@ def _make_context(steps: list[PlannedStepContext], laps: list[ActivityLapContext
             title="Actividad",
             sport_type="running",
             discipline_variant=None,
+            modality=None,
             start_time=None,
             end_time=None,
             local_date=date(2026, 4, 7),
@@ -172,6 +178,12 @@ def _make_context(steps: list[PlannedStepContext], laps: list[ActivityLapContext
             completed_ratio_pct=100.0,
         ),
     )
+
+
+def _set_modality(context: SessionAnalysisContext, planned: str | None, activity: str | None) -> SessionAnalysisContext:
+    context.planned_session.modality = planned
+    context.activity.modality = activity
+    return context
 
 
 def test_detect_session_intent_interval_mixed():
@@ -410,3 +422,63 @@ def test_custom_explicit_targets_flow_to_analysis_v2():
     assert block_analysis[0]["planned_target_max"] == 155
     assert block_analysis[1]["planned_target_min"] == 300
     assert block_analysis[1]["planned_target_max"] == 310
+
+
+def test_indoor_cycling_distance_zero_does_not_penalize_compliance():
+    steps = [_make_step(1, target_type="hr", target_hr_zone="z2", duration_sec=3000)]
+    laps = [_make_lap(1, duration_sec=3000, distance_m=0, avg_hr=140, avg_pace_sec_km=None)]
+    context = _make_context(steps, laps)
+    context.planned_session.sport_type = "cycling"
+    context.planned_session.expected_distance_km = 25.0
+    context.activity.sport_type = "cycling"
+    context.activity.distance_m = 0.0
+    _set_modality(context, "indoor", "indoor")
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["compliance"]["distance_score"] is None
+    assert metrics["compliance"]["elevation_score"] is None
+    assert "Distancia no evaluada por modalidad indoor." in metrics["compliance"]["notes"]
+    assert metrics["scores"]["compliance_score"] is not None
+    assert metrics["scores"]["compliance_score"] >= 80
+
+
+def test_indoor_running_distance_zero_uses_low_weight():
+    steps = [_make_step(1, target_type="hr", target_hr_zone="z2", duration_sec=3600)]
+    laps = [_make_lap(1, duration_sec=3600, distance_m=0, avg_hr=145, avg_pace_sec_km=None)]
+    context = _make_context(steps, laps)
+    context.activity.distance_m = 0.0
+    _set_modality(context, "indoor", "indoor")
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["compliance"]["distance_score"] is None
+    assert "Distancia de cinta tomada como referencia, no como metrica principal." in metrics["compliance"]["notes"]
+    assert metrics["scores"]["compliance_score"] is not None
+    assert metrics["scores"]["compliance_score"] >= 70
+
+
+def test_sessions_without_modality_keep_distance_behavior():
+    steps = [_make_step(1, target_type="pace", target_pace_zone="z2", duration_sec=3600)]
+    laps = [_make_lap(1, duration_sec=3600, distance_m=5000, avg_hr=145, avg_pace_sec_km=430)]
+    context = _make_context(steps, laps)
+    context.planned_session.expected_distance_km = 10.0
+    context.activity.distance_m = 5000.0
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["compliance"]["distance_score"] == 50.0
+
+
+def test_indoor_running_with_planned_incline_adds_analysis_note():
+    steps = [_make_step(1, target_type="hr", target_hr_zone="z2", duration_sec=3600, incline_pct=8.0)]
+    laps = [_make_lap(1, duration_sec=3600, distance_m=7000, avg_hr=145, avg_pace_sec_km=430)]
+    context = _make_context(steps, laps)
+    context.activity.distance_m = 7000.0
+    context.activity.avg_pace_sec_km = 430
+    _set_modality(context, "indoor", "indoor")
+
+    metrics = compute_session_metrics(context)
+
+    assert "Sesion en cinta con inclinacion planificada: se prioriza duracion e intensidad sobre ritmo/distancia." in metrics["compliance"]["notes"]
+    assert metrics["scores"]["compliance_score"] is not None

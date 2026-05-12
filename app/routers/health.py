@@ -84,6 +84,34 @@ def _health_readiness_score_label(score: int | None) -> str:
     return "-" if score is None else f"{score}/100"
 
 
+def _ui_health_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    replacements = [
+        ("Readiness", "Estado"),
+        ("readiness", "estado"),
+        ("Recovery score", "Estado general"),
+        ("recovery score", "estado general"),
+        ("HRV status", "variabilidad cardiaca"),
+        ("hrv status", "variabilidad cardiaca"),
+    ]
+    for source, target in replacements:
+        text = text.replace(source, target)
+    return text
+
+
+def _ui_status_recommendation(status: str) -> str:
+    mapping = {
+        "green": "Entrenar normal",
+        "yellow": "Controlar carga",
+        "orange": "Solo suave / recuperacion",
+        "red": "Descanso recomendado",
+        "insufficient_data": "Sin datos suficientes",
+    }
+    return mapping.get(status, "Sin datos suficientes")
+
+
 def _build_health_metric_overview(summary: Any) -> list[dict[str, str]]:
     return [
         {"label": "Sueno promedio 7d", "value": _hours_label(summary.sleep_avg_7d)},
@@ -103,8 +131,8 @@ def _serialize_health_ai_analysis(analysis: Any | None) -> dict[str, Any] | None
         "reference_date": analysis.reference_date.isoformat(),
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
         "created_at_label": analysis.created_at.strftime("%d/%m/%Y %H:%M") if analysis.created_at else None,
-        "summary": analysis.summary,
-        "training_recommendation": analysis.training_recommendation,
+        "summary": _ui_health_text(analysis.summary),
+        "training_recommendation": _ui_health_text(analysis.training_recommendation),
         "risk_level": analysis.risk_level,
         "model_name": analysis.model_name,
         "llm_json_hash": analysis.llm_json_hash,
@@ -127,12 +155,12 @@ def _serialize_health_ai_analysis_history(analyses: list[Any], athlete_id: int |
                 "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
                 "created_at_label": analysis.created_at.strftime("%d/%m/%Y %H:%M") if analysis.created_at else None,
                 "readiness_status": readiness_local.get("readiness_status"),
-                "readiness_status_label": readiness_local.get("readiness_label") or readiness_local.get("readiness_status") or "-",
+                "readiness_status_label": _ui_status_recommendation(readiness_local.get("readiness_status") or "insufficient_data"),
                 "readiness_status_class": _health_readiness_status_class(readiness_local.get("readiness_status") or "insufficient_data"),
                 "readiness_score": readiness_local.get("readiness_score"),
                 "risk_level": analysis.risk_level or "unknown",
                 "risk_level_label": (analysis.risk_level or "unknown").replace("_", " "),
-                "summary": analysis.summary or "-",
+                "summary": _ui_health_text(analysis.summary) or "-",
                 "view_date_url": (
                     "/health?"
                     + "&".join(
@@ -168,7 +196,7 @@ def _serialize_health_ai_analysis_trend(analyses: list[Any]) -> dict[str, Any]:
                 "reference_date_label": analysis.reference_date.strftime("%d/%m"),
                 "readiness_score": max(0, min(100, score_value)),
                 "readiness_status": readiness_local.get("readiness_status") or "insufficient_data",
-                "readiness_status_label": readiness_local.get("readiness_label") or readiness_local.get("readiness_status") or "-",
+                "readiness_status_label": _ui_status_recommendation(readiness_local.get("readiness_status") or "insufficient_data"),
                 "readiness_status_class": _health_readiness_status_class(readiness_local.get("readiness_status") or "insufficient_data"),
                 "risk_level": analysis.risk_level or "unknown",
                 "risk_level_label": (analysis.risk_level or "unknown").replace("_", " "),
@@ -212,6 +240,273 @@ def _build_training_context_view(training_context: dict[str, Any]) -> dict[str, 
     }
 
 
+def _decision_title(status: str) -> str:
+    mapping = {
+        "green": "ENTRENAR NORMAL",
+        "yellow": "CONTROLAR CARGA",
+        "orange": "SOLO SUAVE / RECUPERACION",
+        "red": "DESCANSO RECOMENDADO",
+        "insufficient_data": "SIN DATOS SUFICIENTES",
+    }
+    return mapping.get(status, "SIN DATOS SUFICIENTES")
+
+
+def _decision_interpretation(evaluation: Any, summary: Any, training_context: dict[str, Any]) -> str:
+    status = evaluation.readiness_status
+    hard_sessions = int(training_context.get("hard_sessions_last_7d") or 0)
+    if status == "green":
+        if hard_sessions >= 4:
+            return "La recuperacion es razonable, aunque venis acumulando bastante carga reciente."
+        return "La recuperacion parece buena para entrenar normal."
+    if status == "yellow":
+        if summary.hrv_trend == "down":
+            return "Hay senales para controlar la carga de hoy y evitar pasarte con la intensidad."
+        return "El estado general es aceptable, pero conviene entrenar con control."
+    if status == "orange":
+        return "Venis con signos de fatiga acumulada y hoy conviene bajar la exigencia."
+    if status == "red":
+        return "Hoy no parece un buen dia para intensidad alta."
+    return "Todavia no hay suficientes datos para interpretar el estado deportivo de forma confiable."
+
+
+def _decision_factors(evaluation: Any, summary: Any, training_context: dict[str, Any]) -> list[str]:
+    factors: list[str] = []
+    for reason in list(evaluation.reasons or []):
+        cleaned = str(reason).strip()
+        if cleaned and cleaned not in factors:
+            factors.append(cleaned)
+
+    hard_sessions = int(training_context.get("hard_sessions_last_7d") or 0)
+    if hard_sessions >= 4:
+        factors.append(f"{hard_sessions} sesiones duras en los ultimos 7 dias.")
+    elif hard_sessions >= 2:
+        factors.append(f"{hard_sessions} sesiones duras recientes.")
+
+    if summary.hrv_trend == "down":
+        factors.append("La HRV viene en descenso.")
+
+    last_activity_date = training_context.get("last_activity_date")
+    if last_activity_date == summary.reference_date.isoformat():
+        factors.append("Hubo actividad registrada hoy.")
+
+    if summary.sleep_avg_7d is not None and summary.sleep_avg_7d < 6.75:
+        factors.append("El sueno reciente fue insuficiente.")
+
+    deduped: list[str] = []
+    for item in factors:
+        normalized = item.strip()
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped[:3]
+
+
+def _metric_status_tokens(status: str) -> tuple[str, str]:
+    mapping = {
+        "green": ("health-readiness-status-green", "Verde"),
+        "yellow": ("health-readiness-status-yellow", "Amarillo"),
+        "orange": ("health-readiness-status-orange", "Naranja"),
+        "red": ("health-readiness-status-red", "Rojo"),
+        "insufficient_data": ("health-readiness-status-insufficient", "Sin datos"),
+    }
+    return mapping.get(status, mapping["insufficient_data"])
+
+
+def _build_human_signal_items(summary: Any, training_context: dict[str, Any]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+
+    sleep_value = summary.sleep_avg_7d
+    if sleep_value is None:
+        sleep_status, sleep_label, sleep_detail = "insufficient_data", "Sin datos", "Faltan datos recientes de sueno."
+    elif sleep_value >= 7.5:
+        sleep_status, sleep_label, sleep_detail = "green", "Bueno", f"Promedio 7d: {sleep_value:.1f} h"
+    elif sleep_value >= 6.75:
+        sleep_status, sleep_label, sleep_detail = "yellow", "Aceptable", f"Promedio 7d: {sleep_value:.1f} h"
+    elif sleep_value >= 6.0:
+        sleep_status, sleep_label, sleep_detail = "orange", "Corto", f"Promedio 7d: {sleep_value:.1f} h"
+    else:
+        sleep_status, sleep_label, sleep_detail = "red", "Muy corto", f"Promedio 7d: {sleep_value:.1f} h"
+    items.append(_build_signal_item("sleep", "Sueno", "Dormir", sleep_status, sleep_label, sleep_detail))
+
+    body_battery = summary.body_battery_morning_avg_3d
+    hrv_trend = summary.hrv_trend
+    if body_battery is None and not hrv_trend:
+        recovery_status, recovery_label, recovery_detail = "insufficient_data", "Sin datos", "No hay una lectura clara de recuperacion."
+    elif body_battery is not None and body_battery < 35:
+        recovery_status, recovery_label, recovery_detail = "red", "Recuperacion baja", f"Body Battery 3d: {body_battery:.0f}"
+    elif hrv_trend == "down" or (body_battery is not None and body_battery < 50):
+        recovery_status, recovery_label, recovery_detail = "orange", "Baja", _recovery_detail_text(hrv_trend, body_battery)
+    elif hrv_trend == "stable" or (body_battery is not None and body_battery < 65):
+        recovery_status, recovery_label, recovery_detail = "yellow", "Aceptable", _recovery_detail_text(hrv_trend, body_battery)
+    else:
+        recovery_status, recovery_label, recovery_detail = "green", "Buena", _recovery_detail_text(hrv_trend, body_battery)
+    items.append(_build_signal_item("recovery", "Recuperacion", "Rec", recovery_status, recovery_label, recovery_detail))
+
+    hard_sessions = int(training_context.get("hard_sessions_last_7d") or 0)
+    if hard_sessions >= 5:
+        load_status, load_label, load_detail = "red", "Muy exigente", f"{hard_sessions} sesiones duras en 7 dias"
+    elif hard_sessions >= 4:
+        load_status, load_label, load_detail = "orange", "Exigente", f"{hard_sessions} sesiones duras en 7 dias"
+    elif hard_sessions >= 2:
+        load_status, load_label, load_detail = "yellow", "Moderada", f"{hard_sessions} sesiones duras en 7 dias"
+    else:
+        load_status, load_label, load_detail = "green", "Ligera", f"{hard_sessions} sesiones duras en 7 dias"
+    items.append(_build_signal_item("load", "Carga reciente", "Carga", load_status, load_label, load_detail))
+
+    stress_value = summary.stress_avg_3d
+    if stress_value is None:
+        stress_status, stress_label, stress_detail = "insufficient_data", "Sin datos", "No hay promedio reciente de estres."
+    elif stress_value >= 60:
+        stress_status, stress_label, stress_detail = "red", "Alto", f"Promedio 3d: {stress_value:.0f}"
+    elif stress_value >= 45:
+        stress_status, stress_label, stress_detail = "orange", "Elevado", f"Promedio 3d: {stress_value:.0f}"
+    elif stress_value >= 30:
+        stress_status, stress_label, stress_detail = "yellow", "Moderado", f"Promedio 3d: {stress_value:.0f}"
+    else:
+        stress_status, stress_label, stress_detail = "green", "Bajo", f"Promedio 3d: {stress_value:.0f}"
+    items.append(_build_signal_item("stress", "Estres", "Estres", stress_status, stress_label, stress_detail))
+    return items
+
+
+def _build_signal_item(key: str, label: str, badge: str, status: str, state_label: str, detail: str) -> dict[str, str]:
+    status_class, tone_label = _metric_status_tokens(status)
+    return {
+        "key": key,
+        "label": label,
+        "badge": badge,
+        "status": status,
+        "status_class": status_class,
+        "tone_label": tone_label,
+        "state_label": state_label,
+        "detail": detail,
+    }
+
+
+def _recovery_detail_text(hrv_trend: str | None, body_battery: float | None) -> str:
+    parts: list[str] = []
+    if hrv_trend == "up":
+        parts.append("HRV en mejora")
+    elif hrv_trend == "down":
+        parts.append("HRV en descenso")
+    elif hrv_trend == "stable":
+        parts.append("HRV estable")
+    if body_battery is not None:
+        parts.append(f"Body Battery 3d: {body_battery:.0f}")
+    return " · ".join(parts) if parts else "Recuperacion sin datos claros."
+
+
+def _build_compact_context(training_context: dict[str, Any], reference_date: date) -> dict[str, Any]:
+    items: list[str] = []
+    completed = int(training_context.get("completed_activities_last_7d") or 0)
+    planned = int(training_context.get("planned_sessions_last_7d") or 0)
+    hard = int(training_context.get("hard_sessions_last_7d") or 0)
+    minutes = training_context.get("total_duration_minutes_last_7d")
+    km = training_context.get("total_distance_km_last_7d")
+    last_activity_date = training_context.get("last_activity_date")
+    next_goal = training_context.get("next_goal_name")
+    days_to_goal = training_context.get("days_to_next_goal")
+
+    items.append(f"{completed} actividades realizadas")
+    items.append(f"{planned} sesiones planificadas")
+    items.append(f"{hard} sesiones duras")
+    if minutes is not None:
+        items.append(f"{_number_label(minutes)} min totales")
+    if km is not None:
+        items.append(f"{_number_label(km)} km")
+    if last_activity_date:
+        items.append(f"Ultima actividad: {_relative_date_label(last_activity_date, reference_date)}")
+    if next_goal:
+        goal_text = f"Proximo objetivo: {next_goal}"
+        if days_to_goal is not None:
+            goal_text += f" ({days_to_goal} dias)"
+        items.append(goal_text)
+
+    has_recent_data = any(
+        [
+            completed > 0,
+            planned > 0,
+            hard > 0,
+            minutes is not None,
+            km is not None,
+            bool(next_goal),
+        ]
+    )
+    return {"has_recent_data": has_recent_data, "items": items}
+
+
+def _relative_date_label(value: str, reference_date: date) -> str:
+    try:
+        target_date = date.fromisoformat(value)
+    except ValueError:
+        return value
+    delta = (reference_date - target_date).days
+    if delta <= 0:
+        return "hoy"
+    if delta == 1:
+        return "ayer"
+    return f"hace {delta} dias"
+
+
+def _build_recent_trend_view(recent_ai_trend: dict[str, Any]) -> dict[str, Any]:
+    points = list(recent_ai_trend.get("points") or [])
+    if len(points) < 2:
+        return {
+            "has_enough_points": False,
+            "points": points,
+            "direction_label": None,
+            "interpretation": None,
+        }
+
+    first_score = int(points[0]["readiness_score"])
+    last_score = int(points[-1]["readiness_score"])
+    delta = last_score - first_score
+    if delta >= 8:
+        direction_label = "Subida reciente"
+        interpretation = "Mejora reciente en la recuperacion."
+    elif delta <= -8:
+        direction_label = "Caida reciente"
+        interpretation = "La recuperacion viene bajando hace varios dias."
+    else:
+        direction_label = "Estable"
+        interpretation = "Estado estable durante la ultima semana."
+
+    normalized_points: list[dict[str, Any]] = []
+    for point in points:
+        normalized_points.append(
+            {
+                **point,
+                "score_label": f"{point['readiness_score']}",
+                "status_short_label": point.get("readiness_status_label") or "-",
+            }
+        )
+
+    return {
+        "has_enough_points": True,
+        "points": normalized_points,
+        "direction_label": direction_label,
+        "interpretation": interpretation,
+    }
+
+
+def _should_auto_generate_health_ai_analysis(
+    athlete: Athlete,
+    *,
+    summary: Any,
+    evaluation: Any,
+    selected_date: date,
+    training_context: dict[str, Any],
+    latest_ai_analysis: Any | None,
+) -> bool:
+    llm_json = build_health_llm_json(
+        athlete,
+        summary,
+        evaluation,
+        selected_date,
+        training_context=training_context,
+    )
+    llm_json_hash = build_health_llm_json_hash(llm_json)
+    return should_auto_run_health_ai_analysis(latest_ai_analysis, llm_json_hash)
+
+
 def _build_health_readiness_view_model(
     db: Session,
     *,
@@ -227,11 +522,13 @@ def _build_health_readiness_view_model(
             "athlete_id": None,
             "athlete_name": None,
             "selected_date": selected_date.isoformat(),
+            "selected_date_label": selected_date.strftime("%d/%m/%Y"),
             "summary": None,
             "evaluation": {
                 "readiness_score": None,
                 "readiness_status": "insufficient_data",
                 "readiness_label": "datos insuficientes",
+                "recommendation_display": _ui_status_recommendation("insufficient_data"),
                 "main_limiter": None,
                 "reasons": [],
                 "recommendation": "Todavia no hay datos suficientes para evaluar la tendencia. Hacen falta al menos 5 dias dentro de los ultimos 14.",
@@ -246,7 +543,27 @@ def _build_health_readiness_view_model(
             "sync_state": None,
             "sync_view": build_health_sync_view(None, should_auto_sync=False),
             "should_auto_sync": False,
+            "should_auto_ai_analysis": False,
             "health_auto_sync_url": "",
+            "decision_card": {
+                "title": _decision_title("insufficient_data"),
+                "status_class": _health_readiness_status_class("insufficient_data"),
+                "interpretation": "Todavia no hay suficientes datos para interpretar el estado deportivo de forma confiable.",
+                "factors": [],
+                "score_label": "-",
+                "reference_label": selected_date.strftime("%d/%m/%Y"),
+            },
+            "human_signals": _build_human_signal_items(
+                type("Summary", (), {
+                    "sleep_avg_7d": None,
+                    "body_battery_morning_avg_3d": None,
+                    "hrv_trend": None,
+                    "stress_avg_3d": None,
+                })(),
+                {},
+            ),
+            "compact_training_context": {"has_recent_data": False, "items": []},
+            "recent_trend_view": {"has_enough_points": False, "points": [], "direction_label": None, "interpretation": None},
         }
 
     summary = build_health_readiness_summary(db, athlete.id, selected_date)
@@ -254,8 +571,17 @@ def _build_health_readiness_view_model(
     training_context = build_health_training_context(db, athlete.id, selected_date)
     latest_ai_analysis = get_latest_health_ai_analysis_for_date(db, athlete.id, selected_date)
     recent_ai_analyses = list_health_ai_analyses_for_athlete(db, athlete.id, limit=10)
+    recent_ai_trend = _serialize_health_ai_analysis_trend(recent_ai_analyses)
     sync_state = get_health_sync_state(db, athlete.id)
     should_sync = should_auto_sync_health(sync_state, utc_now(), selected_date)
+    should_auto_ai_analysis = _should_auto_generate_health_ai_analysis(
+        athlete,
+        summary=summary,
+        evaluation=evaluation,
+        selected_date=selected_date,
+        training_context=training_context,
+        latest_ai_analysis=latest_ai_analysis,
+    )
     today = date.today()
 
     def build_health_url(target_date: date) -> str:
@@ -277,7 +603,12 @@ def _build_health_readiness_view_model(
             "is_today": selected_date == today,
         },
         "summary": summary.model_dump(),
-        "evaluation": evaluation.model_dump(),
+        "evaluation": {
+            **evaluation.model_dump(),
+            "readiness_label": _ui_status_recommendation(evaluation.readiness_status),
+            "recommendation_display": _ui_status_recommendation(evaluation.readiness_status),
+            "recommendation": _ui_health_text(evaluation.recommendation),
+        },
         "status_class": _health_readiness_status_class(evaluation.readiness_status),
         "score_label": _health_readiness_score_label(evaluation.readiness_score),
         "main_limiter_label": _main_limiter_label(evaluation.main_limiter),
@@ -288,10 +619,22 @@ def _build_health_readiness_view_model(
         "sync_state": serialize_health_sync_state(sync_state),
         "sync_view": build_health_sync_view(sync_state, should_auto_sync=should_sync),
         "should_auto_sync": should_sync,
+        "should_auto_ai_analysis": should_auto_ai_analysis,
         "health_auto_sync_url": f"/health/auto-sync?selected_date={selected_date.isoformat()}&athlete_id={athlete.id}",
         "latest_ai_analysis": _serialize_health_ai_analysis(latest_ai_analysis),
         "recent_ai_history": _serialize_health_ai_analysis_history(recent_ai_analyses[:5], athlete.id),
-        "recent_ai_trend": _serialize_health_ai_analysis_trend(recent_ai_analyses),
+        "recent_ai_trend": recent_ai_trend,
+        "decision_card": {
+            "title": _decision_title(evaluation.readiness_status),
+            "status_class": _health_readiness_status_class(evaluation.readiness_status),
+            "interpretation": _decision_interpretation(evaluation, summary, training_context),
+            "factors": _decision_factors(evaluation, summary, training_context),
+            "score_label": _health_readiness_score_label(evaluation.readiness_score),
+            "reference_label": selected_date.strftime("%d/%m/%Y"),
+        },
+        "human_signals": _build_human_signal_items(summary, training_context),
+        "compact_training_context": _build_compact_context(training_context, selected_date),
+        "recent_trend_view": _build_recent_trend_view(recent_ai_trend),
     }
 
 
@@ -500,7 +843,7 @@ def analyze_health_readiness(
             status_code=404,
             content={
                 "error": "athlete_not_found",
-                "message": "No se encontro un atleta para analizar readiness.",
+                "message": "No se encontro un atleta para analizar el estado.",
             },
         )
 
@@ -533,7 +876,7 @@ def analyze_health_readiness(
             status_code=502,
             content={
                 "error": "ai_analysis_failed",
-                "message": f"No se pudo analizar readiness con IA: {exc}",
+                "message": f"No se pudo analizar el estado con IA: {exc}",
             },
         )
 
@@ -585,7 +928,7 @@ def auto_analyze_health_readiness(
             content={
                 "ran": False,
                 "reason": "athlete_not_found",
-                "message": "No se encontro un atleta para analizar readiness.",
+                "message": "No se encontro un atleta para analizar el estado.",
             },
         )
 
@@ -626,7 +969,7 @@ def auto_analyze_health_readiness(
             content={
                 "ran": False,
                 "reason": "ai_analysis_failed",
-                "message": f"No se pudo analizar readiness con IA: {exc}",
+                "message": f"No se pudo analizar el estado con IA: {exc}",
             },
         )
 

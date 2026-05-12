@@ -29,12 +29,15 @@ class SessionAdvancedData:
     planned_start_time: time | None = None
     sport_type: str | None = None
     discipline_variant: str | None = None
+    modality: str | None = None
     session_type: str | None = None
     session_group_id: int | None = None
     is_key_session: bool | None = None
     expected_duration_min: int | None = None
     expected_distance_km: float | None = None
     expected_elevation_gain_m: float | None = None
+    strength_focus: str | None = None
+    strength_rpe: int | None = None
     target_type: str | None = None
     target_hr_zone: str | None = None
     target_pace_zone: str | None = None
@@ -55,6 +58,8 @@ def create_session_from_quick_mode(
     description_text: str | None = None,
     expected_duration_min: int | None = None,
     expected_distance_km: float | None = None,
+    strength_focus: str | None = None,
+    strength_rpe: int | None = None,
     target_type: str | None = None,
     target_hr_zone: str | None = None,
     target_pace_zone: str | None = None,
@@ -77,6 +82,8 @@ def create_session_from_quick_mode(
             description_text=description_text,
             expected_duration_min=expected_duration_min,
             expected_distance_km=expected_distance_km,
+            strength_focus=strength_focus,
+            strength_rpe=strength_rpe,
             target_type=target_type,
             target_hr_zone=target_hr_zone,
             target_pace_zone=target_pace_zone,
@@ -114,6 +121,8 @@ def create_quick_session(
     description_text: str | None,
     expected_duration_min: int | None,
     expected_distance_km: float | None,
+    strength_focus: str | None = None,
+    strength_rpe: int | None = None,
     target_type: str | None = None,
     target_hr_zone: str | None = None,
     target_pace_zone: str | None = None,
@@ -141,6 +150,8 @@ def create_quick_session(
         session_type=parsed.session_type if parsed else None,
         expected_duration_min=expected_duration_min if expected_duration_min is not None else (parsed.expected_duration_min if parsed else None),
         expected_distance_km=expected_distance_km if expected_distance_km is not None else (parsed.expected_distance_km if parsed else None),
+        strength_focus=strength_focus or advanced.strength_focus,
+        strength_rpe=strength_rpe if strength_rpe is not None else advanced.strength_rpe,
         target_type=target_type or advanced.target_type,
         target_hr_zone=target_hr_zone or (parsed.target_hr_zone if parsed else None),
         target_pace_zone=target_pace_zone or advanced.target_pace_zone,
@@ -180,7 +191,9 @@ def create_session_from_natural_language(
     ))
 
     created_steps = 0
-    if parsed.steps:
+    if _is_strength_sport(planned_session.sport_type):
+        created_steps = 0
+    elif parsed.steps:
         for step in parsed.steps:
             create_step(
                 db,
@@ -216,6 +229,8 @@ def _next_session_order(db: Session, training_day_id: int) -> int:
 
 
 def _create_default_step_for_session(db: Session, planned_session: PlannedSession):
+    if _is_strength_sport(planned_session.sport_type):
+        return None
     duration_sec = planned_session.expected_duration_min * 60 if planned_session.expected_duration_min is not None else None
     distance_m = int(round(planned_session.expected_distance_km * 1000)) if planned_session.expected_distance_km is not None else None
     if duration_sec is None and distance_m is None:
@@ -256,6 +271,8 @@ def _build_simple_session_create(
     session_type: str | None,
     expected_duration_min: int | None,
     expected_distance_km: float | None,
+    strength_focus: str | None,
+    strength_rpe: int | None,
     target_type: str | None,
     target_hr_zone: str | None,
     target_pace_zone: str | None,
@@ -265,19 +282,24 @@ def _build_simple_session_create(
     is_key_session: bool,
     advanced: SessionAdvancedData,
 ) -> PlannedSessionCreate:
+    resolved_sport_type = sport_type or advanced.sport_type
+    is_strength = _is_strength_sport(resolved_sport_type)
     payload = PlannedSessionCreate(
         training_day_id=training_day_id,
-        sport_type=sport_type or advanced.sport_type,
+        sport_type=resolved_sport_type,
         discipline_variant=discipline_variant or advanced.discipline_variant,
+        modality=None if is_strength else advanced.modality,
         name=advanced.name or name,
         description_text=description_text or advanced.description_text,
         session_type=session_type or advanced.session_type,
         session_order=session_order,
         planned_start_time=advanced.planned_start_time,
-        session_group_id=advanced.session_group_id,
+        session_group_id=None if is_strength else advanced.session_group_id,
         expected_duration_min=expected_duration_min if expected_duration_min is not None else advanced.expected_duration_min,
         expected_distance_km=expected_distance_km if expected_distance_km is not None else advanced.expected_distance_km,
         expected_elevation_gain_m=advanced.expected_elevation_gain_m,
+        strength_focus=strength_focus or advanced.strength_focus,
+        strength_rpe=strength_rpe if strength_rpe is not None else advanced.strength_rpe,
         target_type=target_type or advanced.target_type,
         target_hr_zone=target_hr_zone or advanced.target_hr_zone,
         target_pace_zone=target_pace_zone or advanced.target_pace_zone,
@@ -298,19 +320,24 @@ def _build_parsed_session_create(
     is_key_session: bool,
     advanced: SessionAdvancedData,
 ) -> PlannedSessionCreate:
+    resolved_sport_type = parsed.sport_type or advanced.sport_type
+    is_strength = _is_strength_sport(resolved_sport_type)
     payload = PlannedSessionCreate(
         training_day_id=training_day_id,
-        sport_type=parsed.sport_type or advanced.sport_type,
+        sport_type=resolved_sport_type,
         discipline_variant=discipline_variant_override or parsed.discipline_variant or advanced.discipline_variant,
+        modality=None if is_strength else advanced.modality,
         name=advanced.name or parsed.name,
         description_text=parsed.description_text or advanced.description_text,
         session_type=parsed.session_type or advanced.session_type,
         session_order=session_order,
         planned_start_time=advanced.planned_start_time,
-        session_group_id=advanced.session_group_id,
+        session_group_id=None if is_strength else advanced.session_group_id,
         expected_duration_min=parsed.expected_duration_min if parsed.expected_duration_min is not None else advanced.expected_duration_min,
         expected_distance_km=parsed.expected_distance_km if parsed.expected_distance_km is not None else advanced.expected_distance_km,
         expected_elevation_gain_m=advanced.expected_elevation_gain_m,
+        strength_focus=advanced.strength_focus,
+        strength_rpe=advanced.strength_rpe,
         target_type=advanced.target_type,
         target_hr_zone=parsed.target_hr_zone or advanced.target_hr_zone,
         target_pace_zone=advanced.target_pace_zone,
@@ -348,3 +375,7 @@ def _default_target_note(session_type: str | None) -> str | None:
         "technique": "tecnica",
     }
     return mapping.get(session_type)
+
+
+def _is_strength_sport(sport_type: str | None) -> bool:
+    return (sport_type or "").strip().lower() == "strength"

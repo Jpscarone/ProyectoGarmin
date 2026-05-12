@@ -111,7 +111,7 @@
                     </td>
                     <td class="activity-table-main">
                         <strong>{{ activity.activity_name or '-' }}</strong>
-                        <span>{{ sport_label(activity.sport_type) }}</span>
+                        <span>{{ sport_label(activity.sport_type) }}{% if activity.modality %} {{ modality_label(activity.modality).lower() }}{% endif %}</span>
                     </td>
                     <td class="activity-table-metrics">
                         <span>{{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</span>
@@ -132,7 +132,7 @@
                             {% if match_previews and match_previews.get(activity.id) and match_previews.get(activity.id).status in ['candidate', 'ambiguous'] %}
                             <span class="candidate-pill">
                                 {{ 'Ambigua' if match_previews.get(activity.id).status == 'ambiguous' else 'Candidata' }}
-                                {{ match_previews.get(activity.id).score | round(1) }}
+                                {{ match_previews.get(activity.id).score | round(1) }} | {{ match_previews.get(activity.id).confidence_level or '-' }}
                             </span>
                             {% endif %}
                         </div>
@@ -266,6 +266,16 @@ window.addEventListener('DOMContentLoaded', () => {
         const planLabel = candidate.training_plan_name
             ? `<div class="text-muted">Plan: ${candidate.training_plan_name}${candidate.is_current_plan ? ' (plan seleccionado)' : ''}</div>`
             : '';
+        const confidenceLabel = candidate.confidence_level || '-';
+        const reasons = candidate.reasons && candidate.reasons.length
+            ? `<div class="text-muted"><strong>Razones:</strong> ${candidate.reasons.join(', ')}</div>`
+            : '';
+        const penalties = candidate.penalties && candidate.penalties.length
+            ? `<div class="text-muted"><strong>Penalizaciones:</strong> ${candidate.penalties.join(', ')}</div>`
+            : '';
+        const decision = candidate.auto_link_decision_reason
+            ? `<div class="text-muted"><strong>Decision:</strong> ${candidate.auto_link_decision_reason}</div>`
+            : '';
         return `
             <div class="candidate-row">
                 <div>
@@ -273,7 +283,10 @@ window.addEventListener('DOMContentLoaded', () => {
                     <div class="text-muted">${candidate.session_date} | ${sportLabel}</div>
                     ${planLabel}
                     <div class="text-muted">Duracion esperada ${expectedDuration} | Distancia esperada ${expectedDistance}</div>
-                    <div class="text-muted">Score ${scoreLabel}</div>
+                    <div class="text-muted">Score ${scoreLabel} | Confianza ${confidenceLabel}</div>
+                    ${decision}
+                    ${reasons}
+                    ${penalties}
                 </div>
                 <div class="actions-inline">
                     ${sessionLink}

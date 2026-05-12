@@ -18,11 +18,13 @@ from app.db.models.athlete import Athlete
 from app.db.models.session_group import SessionGroup
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
+from app.schemas.planned_session import PlannedSessionCreate
 from app.services.planning.quick_session_service import (
     SessionAdvancedData,
     create_quick_session,
     create_session_from_quick_mode,
 )
+from app.services.planned_session_service import create_planned_session
 from app.services.session_group_service import create_inline_group
 
 
@@ -191,6 +193,103 @@ class QuickSessionServiceTests(unittest.TestCase):
 
         self.assertEqual(group.name, "Pre carrera")
         self.assertEqual(result.planned_session.session_group_id, group.id)
+
+    def test_strength_session_can_be_created_with_focus_and_rpe(self) -> None:
+        result = create_session_from_quick_mode(
+            self.db,
+            training_day_id=self.training_day.id,
+            mode="simple",
+            sport_type="strength",
+            name="Gimnasio pierna",
+            expected_duration_min=50,
+            strength_focus="lower_body",
+            strength_rpe=6,
+        )
+
+        self.assertEqual(result.planned_session.sport_type, "strength")
+        self.assertEqual(result.planned_session.strength_focus, "lower_body")
+        self.assertEqual(result.planned_session.strength_rpe, 6)
+        self.assertEqual(result.created_steps, 0)
+        self.assertEqual(len(result.planned_session.planned_session_steps), 0)
+
+    def test_strength_session_drops_distance_and_endurance_targets(self) -> None:
+        result = create_session_from_quick_mode(
+            self.db,
+            training_day_id=self.training_day.id,
+            mode="simple",
+            sport_type="strength",
+            name="Gimnasio general",
+            expected_duration_min=45,
+            expected_distance_km=8.0,
+            strength_focus="full_body",
+            strength_rpe=7,
+            target_type="pace",
+            target_pace_zone="Z3",
+            target_power_zone="Z4",
+            target_hr_zone="Z2",
+            target_rpe_zone="Z3",
+        )
+
+        planned = result.planned_session
+        self.assertIsNone(planned.expected_distance_km)
+        self.assertIsNone(planned.expected_elevation_gain_m)
+        self.assertIsNone(planned.target_type)
+        self.assertIsNone(planned.target_hr_zone)
+        self.assertIsNone(planned.target_pace_zone)
+        self.assertIsNone(planned.target_power_zone)
+        self.assertIsNone(planned.target_rpe_zone)
+        self.assertIsNone(planned.modality)
+        self.assertIsNone(planned.session_group_id)
+
+    def test_strength_session_ignores_modality_and_group_metadata(self) -> None:
+        group = create_inline_group(
+            self.db,
+            training_day_id=self.training_day.id,
+            name="Grupo fuerza",
+            group_type="strength",
+            notes="No deberia usarse para gimnasio",
+        )
+
+        result = create_session_from_quick_mode(
+            self.db,
+            training_day_id=self.training_day.id,
+            mode="simple",
+            sport_type="strength",
+            name="Gym general",
+            expected_duration_min=45,
+            advanced_data=SessionAdvancedData(
+                modality="indoor",
+                session_group_id=group.id,
+            ),
+        )
+
+        planned = result.planned_session
+        self.assertIsNone(planned.modality)
+        self.assertIsNone(planned.session_group_id)
+
+    def test_strength_session_direct_service_create_drops_endurance_fields(self) -> None:
+        planned = create_planned_session(
+            self.db,
+            PlannedSessionCreate(
+                training_day_id=self.training_day.id,
+                sport_type="strength",
+                name="Gimnasio core",
+                expected_duration_min=40,
+                expected_distance_km=5.0,
+                expected_elevation_gain_m=120,
+                strength_focus="core",
+                strength_rpe=5,
+                target_type="power",
+                target_pace_zone="Z2",
+                target_power_zone="Z3",
+            ),
+        )
+
+        self.assertIsNone(planned.expected_distance_km)
+        self.assertIsNone(planned.expected_elevation_gain_m)
+        self.assertIsNone(planned.target_type)
+        self.assertIsNone(planned.target_pace_zone)
+        self.assertIsNone(planned.target_power_zone)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,22 @@ from app.db.models.session_group import SessionGroup
 from app.db.models.training_day import TrainingDay
 from app.schemas.planned_session import PlannedSessionCreate, PlannedSessionUpdate
 from app.services.intensity_target_service import normalize_session_target_fields
+from app.services.session_completion_service import clear_strength_session_completion, mark_strength_session_completed
+
+
+def _normalize_sport_specific_fields(data: dict) -> dict:
+    sport_type = str(data.get("sport_type") or "").strip().lower()
+    if sport_type != "strength":
+        return data
+
+    data["expected_distance_km"] = None
+    data["expected_elevation_gain_m"] = None
+    data["target_type"] = None
+    data["target_hr_zone"] = None
+    data["target_pace_zone"] = None
+    data["target_power_zone"] = None
+    data["target_rpe_zone"] = None
+    return data
 
 
 def get_planned_sessions(db: Session) -> list[PlannedSession]:
@@ -47,6 +63,7 @@ def create_planned_session(db: Session, planned_session_in: PlannedSessionCreate
 
     data["athlete_id"] = training_day.athlete_id
     data = normalize_session_target_fields(data)
+    data = _normalize_sport_specific_fields(data)
 
     planned_session = PlannedSession(**data)
     db.add(planned_session)
@@ -74,6 +91,7 @@ def update_planned_session(
 
     data["athlete_id"] = training_day.athlete_id
     data = normalize_session_target_fields(data)
+    data = _normalize_sport_specific_fields(data)
 
     for field, value in data.items():
         setattr(planned_session, field, value)
@@ -87,3 +105,33 @@ def update_planned_session(
 def delete_planned_session(db: Session, planned_session: PlannedSession) -> None:
     db.delete(planned_session)
     db.commit()
+
+
+def complete_strength_session_manually(
+    db: Session,
+    planned_session: PlannedSession,
+    *,
+    duration_sec: int | None,
+    strength_rpe: int | None,
+    strength_focus: str | None,
+    notes: str | None,
+) -> PlannedSession:
+    mark_strength_session_completed(
+        planned_session,
+        duration_sec=duration_sec,
+        strength_rpe=strength_rpe,
+        strength_focus=strength_focus,
+        notes=notes,
+    )
+    db.add(planned_session)
+    db.commit()
+    db.refresh(planned_session)
+    return planned_session
+
+
+def clear_strength_session_manual_completion(db: Session, planned_session: PlannedSession) -> PlannedSession:
+    clear_strength_session_completion(planned_session)
+    db.add(planned_session)
+    db.commit()
+    db.refresh(planned_session)
+    return planned_session

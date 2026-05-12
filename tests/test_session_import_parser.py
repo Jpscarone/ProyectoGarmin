@@ -16,6 +16,7 @@ class SessionImportParserTests(unittest.TestCase):
         raw = """SESSION
 DATE: 2026-04-05
 SPORT: running
+MODALITY: indoor
 NAME: Fondo progresivo
 
 BLOCK
@@ -27,9 +28,24 @@ ZONE: z2
 END"""
         parsed = parse_session_import_text(raw)
         self.assertEqual(parsed.errors, [])
+        self.assertEqual(parsed.sessions[0].modality, "indoor")
 
         validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
         self.assertEqual(validation.errors, [])
+
+    def test_invalid_modality(self) -> None:
+        raw = """SESSION
+DATE: 2026-04-05
+SPORT: cycling
+MODALITY: moon
+
+BLOCK
+VALUE: 20
+UNIT: min
+END"""
+        parsed = parse_session_import_text(raw)
+        validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
+        self._assert_has_error(validation.errors, "MODALITY invalida")
 
     def test_repeat_valid(self) -> None:
         raw = """SESSION
@@ -322,6 +338,74 @@ END"""
         parsed = parse_session_import_text(raw)
         validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
         self._assert_has_error(validation.errors, "Campos custom no permitidos")
+
+    def test_block_accepts_integer_incline_pct(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+MODALITY: indoor
+
+BLOCK
+VALUE: 6
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+INCLINE_PCT: 8
+
+END"""
+        parsed = parse_session_import_text(raw)
+        validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
+        self.assertEqual(parsed.sessions[0].blocks[0].incline_pct, "8")
+        self.assertEqual(validation.errors, [])
+
+    def test_block_accepts_decimal_incline_pct(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+MODALITY: indoor
+
+BLOCK
+VALUE: 6
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+INCLINE_PCT: 8.5
+
+END"""
+        parsed = parse_session_import_text(raw)
+        validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
+        self.assertEqual(parsed.sessions[0].blocks[0].incline_pct, "8.5")
+        self.assertEqual(validation.errors, [])
+
+    def test_block_rejects_non_numeric_incline_pct(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+
+BLOCK
+VALUE: 6
+UNIT: min
+INCLINE_PCT: ocho
+
+END"""
+        parsed = parse_session_import_text(raw)
+        validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
+        self._assert_has_error(validation.errors, "INCLINE_PCT invalido")
+
+    def test_block_rejects_out_of_range_incline_pct(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+
+BLOCK
+VALUE: 6
+UNIT: min
+INCLINE_PCT: 30
+
+END"""
+        parsed = parse_session_import_text(raw)
+        validation = validate_import_payload(sessions=parsed.sessions, groups=parsed.groups, base_date=None)
+        self._assert_has_error(validation.errors, "INCLINE_PCT fuera de rango")
 
 
 if __name__ == "__main__":

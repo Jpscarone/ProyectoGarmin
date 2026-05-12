@@ -61,7 +61,9 @@ def get_training_plans(db: Session) -> list[TrainingPlan]:
         .options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal), selectinload(TrainingPlan.goals))
         .order_by(TrainingPlan.start_date.desc(), TrainingPlan.id.desc())
     )
-    return list(db.scalars(statement).all())
+    plans = list(db.scalars(statement).all())
+    _repair_goal_dates_if_needed(db, plans)
+    return plans
 
 
 def get_training_plans_for_athlete(db: Session, athlete_id: int) -> list[TrainingPlan]:
@@ -71,7 +73,9 @@ def get_training_plans_for_athlete(db: Session, athlete_id: int) -> list[Trainin
         .options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal), selectinload(TrainingPlan.goals))
         .order_by(TrainingPlan.start_date.desc(), TrainingPlan.id.desc())
     )
-    return list(db.scalars(statement).all())
+    plans = list(db.scalars(statement).all())
+    _repair_goal_dates_if_needed(db, plans)
+    return plans
 
 
 def select_default_training_plan(db: Session, athlete_id: int | None = None, today: date | None = None) -> TrainingPlan | None:
@@ -82,6 +86,7 @@ def select_default_training_plan(db: Session, athlete_id: int | None = None, tod
     plans = list(db.scalars(statement).all())
     if not plans:
         return None
+    _repair_goal_dates_if_needed(db, plans)
 
     active_current = [
         plan
@@ -135,7 +140,38 @@ def get_training_plan_detail(db: Session, training_plan_id: int) -> TrainingPlan
             selectinload(TrainingPlan.training_days).selectinload(TrainingDay.analysis_reports),
         )
     )
-    return db.scalar(statement)
+    training_plan = db.scalar(statement)
+    _repair_goal_dates_if_needed(db, [training_plan] if training_plan is not None else [])
+    return training_plan
+
+
+def _normalize_short_year_date(value: date | None) -> date | None:
+    if value is None:
+        return None
+    if 0 < value.year < 100:
+        return value.replace(year=2000 + value.year)
+    return value
+
+
+def _repair_goal_dates_if_needed(db: Session, training_plans: list[TrainingPlan]) -> None:
+    changed = False
+    for training_plan in training_plans:
+        if training_plan is None:
+            continue
+        if training_plan.goal is not None:
+            normalized = _normalize_short_year_date(training_plan.goal.event_date)
+            if normalized != training_plan.goal.event_date:
+                training_plan.goal.event_date = normalized
+                db.add(training_plan.goal)
+                changed = True
+        for goal in training_plan.goals or []:
+            normalized = _normalize_short_year_date(goal.event_date)
+            if normalized != goal.event_date:
+                goal.event_date = normalized
+                db.add(goal)
+                changed = True
+    if changed:
+        db.commit()
 
 
 def create_training_plan(db: Session, training_plan_in: TrainingPlanCreate) -> TrainingPlan:

@@ -122,6 +122,7 @@ def build_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any
             "title": context.planned_session.title,
             "sport_type": context.planned_session.sport_type,
             "discipline_variant": context.planned_session.discipline_variant,
+            "modality": getattr(context.planned_session, "modality", None),
             "session_type": context.planned_session.session_type,
             "description": context.planned_session.description,
             "target_notes": context.planned_session.target_notes,
@@ -147,6 +148,7 @@ def build_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any
                     "repeat_count": step.repeat_count,
                     "duration_sec": step.duration_sec,
                     "distance_m": step.distance_m,
+                    "incline_pct": getattr(step, "incline_pct", None),
                     "target_type": step.target_type,
                     "target_hr_zone": step.target_hr_zone,
                     "target_pace_zone": step.target_pace_zone,
@@ -163,6 +165,7 @@ def build_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any
             "title": context.activity.title,
             "sport_type": context.activity.sport_type,
             "discipline_variant": context.activity.discipline_variant,
+            "modality": getattr(context.activity, "modality", None),
             "duration_sec": context.activity.duration_sec,
             "moving_duration_sec": context.activity.moving_duration_sec,
             "distance_m": context.activity.distance_m,
@@ -207,6 +210,7 @@ def build_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any
             "intensity": intensity,
             "scores": scores,
             "derived_flags": flags,
+            "analysis_notes": (metrics.get("compliance") or {}).get("notes") or [],
         },
         "recent_similar_sessions": [
             {
@@ -740,6 +744,8 @@ def _build_summary_short(context: Any, planned_vs_actual: Mapping[str, Any], ove
         bits.append(f"duracion al {round(duration_ratio)}%")
     if distance_ratio is not None:
         bits.append(f"distancia al {round(distance_ratio)}%")
+    elif (planned_vs_actual.get("distance") or {}).get("note"):
+        bits.append(str((planned_vs_actual.get("distance") or {}).get("note")))
     return ", ".join(bits) + "."
 
 
@@ -764,7 +770,10 @@ def _build_analysis_natural(
     distance_ratio = _ratio_to_pct(planned_vs_actual.get("distance", {}).get("actual_to_planned_ratio"))
     if duration_ratio is not None or distance_ratio is not None:
         duration_text = f"duracion al {round(duration_ratio)}%" if duration_ratio is not None else "duracion no evaluable"
-        distance_text = f"distancia al {round(distance_ratio)}%" if distance_ratio is not None else "distancia no evaluable"
+        if distance_ratio is not None:
+            distance_text = f"distancia al {round(distance_ratio)}%"
+        else:
+            distance_text = str((planned_vs_actual.get("distance") or {}).get("note") or "distancia no evaluable")
         fragments.append(f"En cumplimiento basico, quedo con {duration_text} y {distance_text}.")
 
     score_bits: list[str] = []

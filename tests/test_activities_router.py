@@ -159,6 +159,32 @@ class ActivitiesRouterTests(unittest.TestCase):
         self.assertIn("Garmin Activity", response.text)
         self.assertNotIn("Sincronizar clima", response.text)
 
+    def test_activity_debug_raw_garmin_json_returns_saved_payload_and_weather_paths(self) -> None:
+        activity = self.db.get(GarminActivity, 1)
+        assert activity is not None
+        activity.raw_summary_json = (
+            '{"summary":{"summaryDTO":{"temperature":22.1}},'
+            '"details":{"metadataDTO":{"weather":{"windSpeed":12}}}}'
+        )
+        self.db.commit()
+
+        response = self.client.get("/activities/1/debug/raw-garmin-json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["exists"])
+        self.assertIn("summary.summaryDTO.temperature", payload["weather_key_paths"])
+        self.assertIn("details.metadataDTO.weather.windSpeed", payload["weather_key_paths"])
+
+    def test_activity_debug_raw_garmin_json_reports_missing_payload(self) -> None:
+        response = self.client.get("/activities/1/debug/raw-garmin-json")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["exists"])
+        self.assertEqual(payload["weather_key_paths"], [])
+        self.assertIn("No existe Garmin raw JSON", payload["message"])
+
     @patch("app.routers.activities.run_activity_auto_sync")
     def test_activities_page_shows_auto_sync_status_message(self, auto_sync_mock) -> None:
         auto_sync_mock.return_value = {

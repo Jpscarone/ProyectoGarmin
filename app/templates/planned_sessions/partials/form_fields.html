@@ -57,6 +57,17 @@
         </label>
 
         <label class="field">
+            <span>Modalidad</span>
+            <select name="modality">
+                <option value="">Sin definir</option>
+                {% set current_modality = planned_session.modality if planned_session and planned_session.modality else '' %}
+                {% for option in modality_options %}
+                <option value="{{ option.value }}" {% if current_modality == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
             <span>Tipo de sesion</span>
             <select name="session_type">
                 <option value="">Sin tipo</option>
@@ -65,6 +76,22 @@
                 <option value="{{ option.value }}" {% if current_type == option.value %}selected{% endif %}>{{ option.label }}</option>
                 {% endfor %}
             </select>
+        </label>
+
+        <label class="field">
+            <span>Focus de fuerza</span>
+            {% set current_strength_focus = planned_session.strength_focus if planned_session and planned_session.strength_focus else '' %}
+            <select name="strength_focus">
+                <option value="">Sin foco</option>
+                {% for option in strength_focus_options %}
+                <option value="{{ option.value }}" {% if current_strength_focus == option.value %}selected{% endif %}>{{ option.label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+
+        <label class="field">
+            <span>RPE fuerza</span>
+            <input name="strength_rpe" type="number" min="1" max="10" step="1" value="{{ planned_session.strength_rpe if planned_session and planned_session.strength_rpe is not none else '' }}" placeholder="1-10">
         </label>
 
         <label class="field">

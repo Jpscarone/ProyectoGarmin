@@ -13,6 +13,7 @@ from app.services.planning.presentation import (
     format_duration_human_from_minutes,
     format_duration_human_from_seconds,
 )
+from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 from app.services.athlete_zone_service import DEFAULT_RPE_LABELS, ZONE_NAMES
 from app.services.garmin.profile_sync import load_zone_payload
 from app.ui.catalogs import (
@@ -22,6 +23,8 @@ from app.ui.catalogs import (
     GROUP_TYPE_LABELS,
     GROUP_TYPE_OPTIONS,
     MATCH_METHOD_LABELS,
+    MODALITY_LABELS,
+    MODALITY_OPTIONS,
     INTENSITY_TARGET_LABELS,
     INTENSITY_TARGET_OPTIONS,
     RPE_ZONE_LABELS,
@@ -30,6 +33,8 @@ from app.ui.catalogs import (
     SESSION_TYPE_OPTIONS,
     SPORT_LABELS,
     SPORT_OPTIONS,
+    STRENGTH_FOCUS_LABELS,
+    STRENGTH_FOCUS_OPTIONS,
     STEP_TYPE_LABELS,
     STEP_TYPE_OPTIONS,
     VARIANT_LABELS,
@@ -212,8 +217,10 @@ def build_templates(base_path: Path) -> Jinja2Templates:
     templates = Jinja2Templates(directory=str(base_path / "templates"))
     templates.env.globals.update(
         sport_options=SPORT_OPTIONS,
+        strength_focus_options=STRENGTH_FOCUS_OPTIONS,
         variant_options=VARIANT_OPTIONS,
         session_type_options=SESSION_TYPE_OPTIONS,
+        modality_options=MODALITY_OPTIONS,
         step_type_options=STEP_TYPE_OPTIONS,
         group_type_options=GROUP_TYPE_OPTIONS,
         day_type_options=DAY_TYPE_OPTIONS,
@@ -221,8 +228,10 @@ def build_templates(base_path: Path) -> Jinja2Templates:
         intensity_target_options=INTENSITY_TARGET_OPTIONS,
         rpe_zone_options=RPE_ZONE_OPTIONS,
         sport_label=lambda value: label_for(SPORT_LABELS, value),
+        strength_focus_label=lambda value: label_for(STRENGTH_FOCUS_LABELS, value),
         variant_label=lambda value: label_for(VARIANT_LABELS, value),
         session_type_label=lambda value: label_for(SESSION_TYPE_LABELS, value),
+        modality_label=lambda value: label_for(MODALITY_LABELS, value),
         step_type_label=lambda value: label_for(STEP_TYPE_LABELS, value),
         group_type_label=lambda value: label_for(GROUP_TYPE_LABELS, value),
         day_type_label=lambda value: label_for(DAY_TYPE_LABELS, value),
@@ -249,5 +258,8 @@ def build_templates(base_path: Path) -> Jinja2Templates:
         session_structure_summary=describe_session_structure,
         session_structure_summary_short=describe_session_structure_short,
         derive_session_metrics=derive_session_metrics,
+        is_session_completed=is_session_completed,
+        is_manually_completed_strength_session=is_manually_completed_strength_session,
+        completed_duration_sec=completed_duration_sec,
     )
     return templates

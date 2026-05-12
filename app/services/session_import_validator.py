@@ -11,6 +11,7 @@ from app.services.session_import_parser import (
     ImportRepeat,
     ImportSession,
 )
+from app.services.modality import SUPPORTED_MODALITIES, normalize_modality
 
 
 SUPPORTED_SPORTS = {"running", "cycling", "swimming", "strength", "walking", "other"}
@@ -65,6 +66,11 @@ def _validate_session(session: ImportSession, errors: list[ImportError], fallbac
     elif fallback_date is None:
         errors.append(ImportError(line=session.line, message="DATE faltante en SESSION."))
 
+    if session.modality:
+        normalized_modality = normalize_modality(session.modality)
+        if normalized_modality not in SUPPORTED_MODALITIES:
+            errors.append(ImportError(line=session.line, message=f"MODALITY invalida: {session.modality}."))
+
     if not session.blocks:
         errors.append(ImportError(line=session.line, message="SESSION sin BLOCKS."))
 
@@ -103,6 +109,13 @@ def _validate_block(block: ImportBlock, errors: list[ImportError]) -> None:
 
     if block.zone and zone not in SUPPORTED_ZONES:
         errors.append(ImportError(line=block.line, message=f"ZONE invalida: {block.zone}."))
+
+    if block.incline_pct is not None:
+        incline_pct = _parse_number(block.incline_pct)
+        if incline_pct is None:
+            errors.append(ImportError(line=block.line, message=f"INCLINE_PCT invalido: {block.incline_pct}."))
+        elif incline_pct < 0 or incline_pct > 25:
+            errors.append(ImportError(line=block.line, message="INCLINE_PCT fuera de rango razonable (0-25)."))
 
     if zone == "custom":
         _validate_custom_block(block, intensity, errors)

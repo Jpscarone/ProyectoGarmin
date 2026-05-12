@@ -45,6 +45,7 @@ class PlannedSessionStepBase(BaseModel):
     target_rpe_zone: str | None = None
     target_cadence_min: int | None = None
     target_cadence_max: int | None = None
+    incline_pct: float | None = None
     target_notes: str | None = None
 
     @field_validator("step_type")
@@ -64,6 +65,15 @@ class PlannedSessionStepBase(BaseModel):
         if normalized not in SUPPORTED_TARGET_TYPES:
             raise ValueError(f"Unsupported target_type: {value}")
         return normalized
+
+    @field_validator("incline_pct")
+    @classmethod
+    def validate_incline_pct(cls, value: float | None) -> float | None:
+        if value is None:
+            return value
+        if value < 0 or value > 25:
+            raise ValueError("incline_pct must be between 0 and 25.")
+        return value
 
 
 class PlannedSessionStepCreate(PlannedSessionStepBase):
@@ -90,6 +100,7 @@ class PlannedSessionStepUpdate(BaseModel):
     target_rpe_zone: str | None = None
     target_cadence_min: int | None = None
     target_cadence_max: int | None = None
+    incline_pct: float | None = None
     target_notes: str | None = None
 
     @field_validator("step_type")
@@ -111,6 +122,15 @@ class PlannedSessionStepUpdate(BaseModel):
         if normalized not in SUPPORTED_TARGET_TYPES:
             raise ValueError(f"Unsupported target_type: {value}")
         return normalized
+
+    @field_validator("incline_pct")
+    @classmethod
+    def validate_incline_pct(cls, value: float | None) -> float | None:
+        if value is None:
+            return value
+        if value < 0 or value > 25:
+            raise ValueError("incline_pct must be between 0 and 25.")
+        return value
 
 
 class PlannedSessionStepRead(PlannedSessionStepBase):

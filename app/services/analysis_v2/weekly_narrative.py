@@ -105,6 +105,8 @@ def build_weekly_llm_payload(context: Any, metrics: Mapping[str, Any]) -> dict[s
                     "session_type": item.session_type,
                     "expected_duration_min": item.expected_duration_min,
                     "expected_distance_km": item.expected_distance_km,
+                    "strength_focus": item.strength_focus,
+                    "strength_rpe": item.strength_rpe,
                     "matched": item.matched,
                 }
                 for item in context.planned_sessions
@@ -353,6 +355,14 @@ def _build_weekly_fallback_output(context: Any, metrics: Mapping[str, Any]) -> W
         findings.append(f"El cumplimiento semanal quedo en {round(compliance['compliance_ratio_pct'])}%.")
     if totals.get("activity_count"):
         findings.append(f"Se registraron {totals['activity_count']} actividades en la semana.")
+    if (totals.get("strength_sessions_count") or 0) > 0:
+        strength_sentence = (
+            f"La semana incluyo sesiones de fuerza ({totals['strength_sessions_count']}), "
+            "lo que suma carga neuromuscular adicional."
+        )
+        if (totals.get("lower_body_strength_sessions_count") or 0) > 0:
+            strength_sentence += " Hubo trabajo de tren inferior, lo que puede influir en la fatiga de carrera."
+        findings.append(strength_sentence)
 
     if flags.get("intensity_distribution_imbalance_flag"):
         risks.insert(0, "La distribucion de intensidad quedo desequilibrada, con demasiada carga en zonas altas.")
@@ -484,6 +494,14 @@ def _weekly_analysis_natural(context: Any, metrics: Mapping[str, Any]) -> str:
             f"Contra el promedio reciente, la duracion cambio {trends['duration_vs_prev_avg_pct']:+.1f}% "
             f"y la distancia {trends.get('distance_vs_prev_avg_pct', 0):+.1f}%."
         )
+    if (totals.get("strength_sessions_count") or 0) > 0:
+        fragment = (
+            f"La semana incluyo {totals['strength_sessions_count']} sesiones de fuerza, "
+            "sumando carga neuromuscular adicional."
+        )
+        if (totals.get("lower_body_strength_sessions_count") or 0) > 0:
+            fragment += " Parte de esa carga estuvo orientada a tren inferior y puede influir en la fatiga de carrera."
+        fragments.append(fragment)
     return " ".join(fragments)
 
 

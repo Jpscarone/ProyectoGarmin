@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_name: str = "training_app"
     debug: bool = True
     database_url: str = f"sqlite:///{(BASE_DIR / 'training_app.db').as_posix()}"
+    mcp_api_token: str | None = None
     garmin_enabled: bool = False
     garmin_email: str | None = None
     garmin_password: str | None = None

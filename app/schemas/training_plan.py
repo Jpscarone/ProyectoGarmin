@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
+
+
+def _normalize_short_year_date(value: date | None) -> date | None:
+    if value is None:
+        return None
+    if 0 < value.year < 100:
+        return value.replace(year=2000 + value.year)
+    return value
 
 
 class PlanGoalInput(BaseModel):
@@ -16,6 +24,11 @@ class PlanGoalInput(BaseModel):
     priority: str | None = None
     notes: str | None = None
 
+    @field_validator("event_date", mode="after")
+    @classmethod
+    def normalize_event_date(cls, value: date | None) -> date | None:
+        return _normalize_short_year_date(value)
+
 
 class TrainingPlanBase(BaseModel):
     athlete_id: int
@@ -26,6 +39,11 @@ class TrainingPlanBase(BaseModel):
     end_date: date | None = None
     description: str | None = None
     status: str | None = None
+
+    @field_validator("start_date", "end_date", mode="after")
+    @classmethod
+    def normalize_plan_dates(cls, value: date | None) -> date | None:
+        return _normalize_short_year_date(value)
 
 
 class TrainingPlanCreate(TrainingPlanBase):

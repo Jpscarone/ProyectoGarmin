@@ -168,7 +168,7 @@ def _to_legacy_activity_result(decision: MatchDecision) -> ActivityMatchResult:
     if decision.status == "matched":
         message = (
             f"Actividad vinculada con la sesion #{decision.matched_session_id}. "
-            f"Score {decision.score:.1f}. {' '.join(decision.explanations)}"
+            f"Score {decision.score:.1f}. {decision.auto_link_decision_reason or ''} {' '.join(decision.explanations)}"
         )
         return ActivityMatchResult(
             activity_id=decision.activity_id,
@@ -182,15 +182,15 @@ def _to_legacy_activity_result(decision: MatchDecision) -> ActivityMatchResult:
     if decision.status == "ambiguous":
         message = (
             "Matching ambiguo: hay varias sesiones candidatas fuertes y no se vinculo automaticamente. "
-            f"Mejor score {decision.score:.1f}."
+            f"Mejor score {decision.score:.1f}. {decision.auto_link_decision_reason or ''}"
         )
     elif decision.status == "candidate":
         message = (
-            "Hay una sesion candidata razonable, pero no se vinculo automaticamente. "
-            f"Score {decision.score:.1f}."
+            "Actividad candidata encontrada, pero no se vinculo automaticamente porque la confianza no fue suficiente. "
+            f"Score {decision.score:.1f}. {decision.auto_link_decision_reason or ''}"
         )
     else:
-        message = "No se encontro una sesion lo bastante confiable para vincular automaticamente."
+        message = decision.auto_link_decision_reason or "No se encontro una sesion lo bastante confiable para vincular automaticamente."
 
     return ActivityMatchResult(
         activity_id=decision.activity_id,

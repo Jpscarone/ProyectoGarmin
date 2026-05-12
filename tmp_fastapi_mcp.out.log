@@ -1,0 +1,2 @@
+INFO:     127.0.0.1:59061 - "GET /api/mcp/session-feedback?date=2026-05-02&athlete_id=1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59070 - "GET /api/mcp/session-feedback?date=2026-05-02&athlete_id=1 HTTP/1.1" 200 OK

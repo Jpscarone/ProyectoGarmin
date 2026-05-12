@@ -17,6 +17,8 @@ from app.db.models.training_day import TrainingDay
 from app.services.analysis_v2.metrics import compute_session_metrics
 from app.services.analysis_v2.narrative import generate_session_narrative
 from app.services.analysis_v2.schemas import NarrativeResult
+from app.services.analysis_v2.scoring import clamp_score
+from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 
 
 ANALYSIS_VERSION = "v2"
@@ -66,6 +68,7 @@ class PlannedStepContext:
     target_rpe_zone: str | None
     target_cadence_min: int | None
     target_cadence_max: int | None
+    incline_pct: float | None
     target_notes: str | None
 
 
@@ -94,6 +97,7 @@ class PlannedSessionContext:
     title: str
     sport_type: str | None
     discipline_variant: str | None
+    modality: str | None
     session_type: str | None
     description: str | None
     target_notes: str | None
@@ -101,6 +105,8 @@ class PlannedSessionContext:
     expected_duration_min: int | None
     expected_distance_km: float | None
     expected_elevation_gain_m: float | None
+    strength_focus: str | None
+    strength_rpe: int | None
     target_type: str | None
     target_hr_zone: str | None
     target_pace_zone: str | None
@@ -171,6 +177,7 @@ class ActivityContext:
     title: str | None
     sport_type: str | None
     discipline_variant: str | None
+    modality: str | None
     start_time: str | None
     end_time: str | None
     local_date: date | None
@@ -305,6 +312,7 @@ def build_context(db: Session, planned_session_id: int, activity_id: int) -> Ses
             title=planned_session.name,
             sport_type=planned_session.sport_type,
             discipline_variant=planned_session.discipline_variant,
+            modality=planned_session.modality,
             session_type=planned_session.session_type,
             description=planned_session.description_text,
             target_notes=planned_session.target_notes,
@@ -312,6 +320,8 @@ def build_context(db: Session, planned_session_id: int, activity_id: int) -> Ses
             expected_duration_min=planned_session.expected_duration_min,
             expected_distance_km=planned_session.expected_distance_km,
             expected_elevation_gain_m=planned_session.expected_elevation_gain_m,
+            strength_focus=planned_session.strength_focus,
+            strength_rpe=planned_session.strength_rpe,
             target_type=planned_session.target_type,
             target_hr_zone=planned_session.target_hr_zone,
             target_pace_zone=planned_session.target_pace_zone,
@@ -330,6 +340,7 @@ def build_context(db: Session, planned_session_id: int, activity_id: int) -> Ses
             title=activity.activity_name,
             sport_type=activity.sport_type,
             discipline_variant=activity.discipline_variant,
+            modality=activity.modality,
             start_time=activity.start_time.isoformat() if activity.start_time else None,
             end_time=activity.end_time.isoformat() if activity.end_time else None,
             local_date=activity_local_date,
@@ -374,10 +385,14 @@ def build_context(db: Session, planned_session_id: int, activity_id: int) -> Ses
 
 
 def compute_metrics(context: SessionAnalysisContext) -> dict[str, Any]:
+    if _is_strength_session_context(context):
+        return _compute_strength_session_metrics(context)
     return compute_session_metrics(context)
 
 
 def generate_narrative(context: SessionAnalysisContext, metrics: dict[str, Any]) -> NarrativeResult:
+    if _is_strength_session_context(context):
+        return _build_strength_session_narrative(context, metrics)
     return generate_session_narrative(context, metrics)
 
 
@@ -542,6 +557,152 @@ def _build_goal_context(planned_session: PlannedSession) -> GoalContext | None:
     )
 
 
+def _is_strength_session_context(context: SessionAnalysisContext) -> bool:
+    planned_sport = _normalized(context.planned_session.sport_type)
+    actual_sport = _normalized(context.activity.sport_type)
+    strength_aliases = {"strength", "strength_training", "gym", "functional_strength_training"}
+    return planned_sport in strength_aliases or actual_sport in strength_aliases
+
+
+def _compute_strength_session_metrics(context: SessionAnalysisContext) -> dict[str, Any]:
+    planned_duration = context.planned_session.expected_duration_min
+    actual_duration = _seconds_to_minutes(context.activity.duration_sec)
+    duration_delta = None
+    duration_delta_pct = None
+    if planned_duration is not None and actual_duration is not None:
+        duration_delta = round(actual_duration - planned_duration, 1)
+        if planned_duration > 0:
+            duration_delta_pct = round(((actual_duration - planned_duration) / planned_duration) * 100.0, 1)
+
+    strength_rpe = context.planned_session.strength_rpe
+    load_score = int(round((actual_duration or planned_duration or 0) * (strength_rpe or 5)))
+    compliance_score = 85.0
+    if duration_delta_pct is not None:
+        compliance_score = clamp_score(100.0 - abs(duration_delta_pct) * 1.5) or 0.0
+    execution_score = clamp_score(70.0 + min(load_score / 20.0, 20.0))
+    control_score = 75.0 if strength_rpe is not None else 68.0
+    fatigue_score = clamp_score(min(85.0, 30.0 + (load_score / 8.0)))
+
+    return {
+        "session_intent": "strength_session",
+        "planned_vs_actual": {
+            "planned_duration_min": planned_duration,
+            "actual_duration_min": actual_duration,
+            "duration_delta_min": duration_delta,
+            "duration_delta_pct": duration_delta_pct,
+        },
+        "strength": {
+            "focus": context.planned_session.strength_focus,
+            "rpe": strength_rpe,
+            "duration_min": actual_duration or planned_duration,
+            "load_score": load_score,
+        },
+        "heart_rate": {},
+        "pace": {},
+        "power": {},
+        "cadence": {},
+        "elevation": {},
+        "laps": {},
+        "block_analysis": [],
+        "structure": {
+            "session_intent": "strength_session",
+            "primary_targets": [],
+            "block_structure": [],
+            "expected_repeats_summary": None,
+            "expanded_steps": [],
+        },
+        "compliance": {
+            "duration_match_score": compliance_score,
+        },
+        "comparisons": {
+            "sport_match": _normalized(context.activity.sport_type) == _normalized(context.planned_session.sport_type),
+            "recent_similar": [],
+        },
+        "weekly_context": {
+            "activity_count": context.weekly_summary.activity_count,
+            "planned_session_count": context.weekly_summary.planned_session_count,
+        },
+        "derived_flags": {
+            "heat_impact_flag": False,
+            "cardiac_drift_flag": False,
+            "hydration_risk_flag": False,
+            "pace_instability_flag": False,
+            "manual_review_needed": False,
+        },
+        "scores": {
+            "compliance_score": compliance_score,
+            "execution_score": execution_score,
+            "control_score": control_score,
+            "fatigue_score": fatigue_score,
+        },
+        "rule_thresholds": {
+            "strength_load_formula": "duration_min * rpe, o duration_min * 5 si rpe no existe",
+        },
+    }
+
+
+def _build_strength_session_narrative(context: SessionAnalysisContext, metrics: dict[str, Any]) -> NarrativeResult:
+    strength = metrics.get("strength", {})
+    focus_label = _strength_focus_label(strength.get("focus"))
+    duration_min = strength.get("duration_min")
+    load_text = _strength_load_label(strength.get("rpe"))
+    focus_fragment = f" ({focus_label})" if focus_label else ""
+    duration_fragment = f" de {round(duration_min)} min" if duration_min is not None else ""
+    summary = f"Sesion de fuerza{focus_fragment}{duration_fragment}, carga {load_text}."
+    structured_output = {
+        "session_type_detected": "strength_session",
+        "overall_assessment": "correcto",
+        "key_positive_points": ["Sesion de fuerza registrada con duracion util para seguimiento semanal."],
+        "key_risk_points": ["No se evaluan ritmo, HR zones ni block_analysis para sesiones strength."],
+        "practical_recommendations": ["Revisar la carga semanal total si la fuerza estuvo orientada a tren inferior."],
+        "tags": ["strength", strength.get("focus") or "general_strength"],
+        "interpretive_flags": {
+            "manual_review_needed": False,
+        },
+    }
+    return NarrativeResult(
+        narrative_status="completed",
+        provider=None,
+        model=None,
+        summary_short=summary,
+        analysis_natural=summary,
+        coach_conclusion="La sesion suma carga neuromuscular, pero se analiza fuera del pipeline de running/cycling.",
+        next_recommendation="Considerar esta carga dentro del contexto semanal, sobre todo si hubo trabajo de tren inferior.",
+        quick_takeaway=summary,
+        structured_output=structured_output,
+        llm_json={
+            "provider": None,
+            "model": None,
+            "status": "strength_fallback",
+            "structured_output": structured_output,
+        },
+    )
+
+
+def _strength_focus_label(value: str | None) -> str | None:
+    mapping = {
+        "lower_body": "pierna",
+        "upper_body": "tren superior",
+        "core": "core",
+        "full_body": "cuerpo completo",
+        "mobility": "movilidad",
+    }
+    normalized = _normalized(value)
+    return mapping.get(normalized)
+
+
+def _strength_load_label(rpe: int | None) -> str:
+    if rpe is None:
+        return "moderada"
+    if rpe <= 3:
+        return "suave"
+    if rpe <= 6:
+        return "moderada"
+    if rpe <= 8:
+        return "alta"
+    return "muy alta"
+
+
 def _prepare_pending_analysis(
     db: Session,
     *,
@@ -691,6 +852,7 @@ def _build_planned_step_context(step: Any) -> PlannedStepContext:
         target_rpe_zone=step.target_rpe_zone,
         target_cadence_min=step.target_cadence_min,
         target_cadence_max=step.target_cadence_max,
+        incline_pct=getattr(step, "incline_pct", None),
         target_notes=step.target_notes,
     )
 
@@ -885,7 +1047,12 @@ def _build_weekly_summary(db: Session, athlete_id: int, activity_date: date | No
         .order_by(TrainingDay.day_date.asc(), PlannedSession.session_order.asc())
     )
     planned_sessions = list(db.scalars(planned_statement).all())
-    matched_session_count = sum(1 for item in planned_sessions if item.activity_match is not None)
+    matched_session_count = sum(1 for item in planned_sessions if is_session_completed(item))
+    manual_strength_duration_sec = sum(
+        completed_duration_sec(item) or 0
+        for item in planned_sessions
+        if is_manually_completed_strength_session(item)
+    )
     completed_ratio_pct = None
     if planned_sessions:
         completed_ratio_pct = round((matched_session_count / len(planned_sessions)) * 100.0, 1)
@@ -894,7 +1061,7 @@ def _build_weekly_summary(db: Session, athlete_id: int, activity_date: date | No
         week_start=week_start,
         week_end=week_end,
         activity_count=len(weekly_activities),
-        total_duration_sec=total_duration_sec,
+        total_duration_sec=total_duration_sec + manual_strength_duration_sec,
         total_distance_m=round(total_distance_m, 2),
         total_elevation_gain_m=round(total_elevation_gain_m, 2),
         activities_by_sport=sport_counts,

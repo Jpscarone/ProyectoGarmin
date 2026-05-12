@@ -20,6 +20,7 @@ from app.services.activity_auto_sync_service import (
     get_latest_activity_for_athlete,
     get_or_create_garmin_account_for_athlete,
 )
+from app.services.activity_matching_service import run_downstream_analyses_for_match_decision
 from app.services.analysis_v2.session_analysis_service import run_session_analysis
 from app.services.garmin.activity_sync import sync_activities_by_date
 from app.services.health_auto_sync_service import get_health_sync_state, run_health_auto_sync
@@ -314,7 +315,8 @@ def _run_linking_step(
     for activity in activities:
         decision = preview_activity_match(db, activity.id, training_plan_id=training_plan.id if training_plan else None)
         if decision.status == "matched" and decision.matched_session_id and (decision.score or 0.0) >= AUTO_LINK_SAFE_SCORE:
-            auto_match_activity(db, activity.id, training_plan_id=training_plan.id if training_plan else None)
+            matched_decision = auto_match_activity(db, activity.id, training_plan_id=training_plan.id if training_plan else None)
+            run_downstream_analyses_for_match_decision(db, matched_decision)
             matched += 1
         elif decision.status == "ambiguous":
             ambiguous += 1

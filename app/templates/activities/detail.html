@@ -8,7 +8,7 @@
         <div>
             <p class="eyebrow">Actividad</p>
             <h1>{{ activity.activity_name or 'Actividad Garmin' }}</h1>
-            <p class="text-muted">{{ sport_label(activity.sport_type) }} | {{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</p>
+            <p class="text-muted">{{ sport_label(activity.sport_type) }}{% if activity.modality %} {{ modality_label(activity.modality).lower() }}{% endif %} | {{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</p>
         </div>
         <div class="actions-inline">
             <a class="button button-nav" href="/activities">Volver a actividades</a>
@@ -68,10 +68,20 @@
                 </span>
                 <span class="planned-session-inline-pill"><strong>Score:</strong> {{ match_preview.score if match_preview.score is not none else '-' }}</span>
                 <span class="planned-session-inline-pill"><strong>Confianza:</strong> {% if match_preview.confidence is not none %}{{ (match_preview.confidence * 100)|round|int }}%{% else %}-{% endif %}</span>
+                <span class="planned-session-inline-pill"><strong>Nivel:</strong> {{ match_preview.confidence_level or '-' }}</span>
             </div>
         </div>
+        {% if match_preview.auto_link_decision_reason %}
+        <p class="activity-match-summary"><strong>Decision:</strong> {{ match_preview.auto_link_decision_reason }}</p>
+        {% endif %}
         {% if match_preview.explanations %}
         <p class="activity-match-summary">{{ match_preview.explanations | join(' ') }}</p>
+        {% endif %}
+        {% if match_preview.reasons %}
+        <p class="activity-match-candidate-reasons"><strong>Razones:</strong> {{ match_preview.reasons | join(', ') }}</p>
+        {% endif %}
+        {% if match_preview.penalties %}
+        <p class="activity-match-candidate-reasons"><strong>Penalizaciones:</strong> {{ match_preview.penalties | join(', ') }}</p>
         {% endif %}
         {% if match_preview.candidate_sessions and match_preview.status != 'matched' %}
         <div class="activity-match-candidate-list">
@@ -79,10 +89,18 @@
             <article class="activity-match-candidate-card">
                 <div class="activity-match-candidate-head">
                     <strong><a href="/planned_sessions/{{ candidate.planned_session_id }}">{{ candidate.session_name }}</a></strong>
-                    <span class="status-badge status-badge-empty">score {{ candidate.score }}</span>
+                    <span class="status-badge status-badge-empty">score {{ candidate.score }} | {{ candidate.confidence_level }}</span>
                 </div>
                 <p class="text-muted">{{ candidate.session_date }} | {{ sport_label(candidate.sport_type) }}</p>
-                <p class="activity-match-candidate-reasons">{{ candidate.reasons | join(', ') }}</p>
+                {% if candidate.auto_link_decision_reason %}
+                <p class="activity-match-candidate-reasons"><strong>Decision:</strong> {{ candidate.auto_link_decision_reason }}</p>
+                {% endif %}
+                {% if candidate.reasons %}
+                <p class="activity-match-candidate-reasons"><strong>Razones:</strong> {{ candidate.reasons | join(', ') }}</p>
+                {% endif %}
+                {% if candidate.penalties %}
+                <p class="activity-match-candidate-reasons"><strong>Penalizaciones:</strong> {{ candidate.penalties | join(', ') }}</p>
+                {% endif %}
             </article>
             {% endfor %}
         </div>
@@ -109,6 +127,7 @@
         <div class="detail-item"><strong>Fin:</strong> {{ activity.end_time.strftime('%Y-%m-%d %H:%M:%S') if activity.end_time else '-' }}</div>
         <div class="detail-item"><strong>Duracion:</strong> {{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</div>
         <div class="detail-item"><strong>Tiempo en movimiento:</strong> {{ duration_seconds_hhmm(activity.moving_duration_sec) or '-' }}</div>
+        <div class="detail-item"><strong>Modalidad:</strong> {{ modality_label(activity.modality) }}</div>
         <div class="detail-item"><strong>Distancia:</strong> {{ distance_label_meters(activity.distance_m) }}</div>
         <div class="detail-item"><strong>Desnivel +:</strong> {{ activity.elevation_gain_m or '-' }}</div>
         <div class="detail-item"><strong>Desnivel -:</strong> {{ activity.elevation_loss_m or '-' }}</div>

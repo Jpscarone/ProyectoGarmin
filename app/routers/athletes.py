@@ -95,8 +95,8 @@ def select_athlete_endpoint(
     default_plan = select_default_training_plan(db, athlete_id=athlete.id)
     set_current_training_plan(request, default_plan.id if default_plan else None)
     if default_plan is not None:
-        return RedirectResponse(url=f"/training_plans/{default_plan.id}/calendar?athlete_id={athlete.id}", status_code=303)
-    return RedirectResponse(url=f"/training_plans?athlete_id={athlete.id}", status_code=303)
+        return RedirectResponse(url=f"/dashboard?athlete_id={athlete.id}&training_plan_id={default_plan.id}", status_code=303)
+    return RedirectResponse(url=f"/dashboard?athlete_id={athlete.id}", status_code=303)
 
 
 @router.get("/{athlete_id}/plans")

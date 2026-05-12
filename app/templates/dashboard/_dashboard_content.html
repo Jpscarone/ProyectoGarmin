@@ -6,7 +6,7 @@
         </div>
         <div class="dashboard-kpi-row">
             <span class="dashboard-status-badge dashboard-status-{{ dashboard.today_status.status }}">{{ dashboard.today_status.status_label }}</span>
-            <span class="planned-session-inline-pill"><strong>Readiness:</strong> {{ dashboard.today_status.score if dashboard.today_status.score is not none else '-' }}</span>
+            <span class="planned-session-inline-pill"><strong>Estado general:</strong> {{ dashboard.today_status.score if dashboard.today_status.score is not none else '-' }}</span>
         </div>
     </div>
     <div class="detail-grid">
@@ -54,7 +54,7 @@
             {% if dashboard.today_session.status_badges %}
             <div class="dashboard-pill-row">
                 {% for badge in dashboard.today_session.status_badges %}
-                <span class="dashboard-pill {% if badge == 'Realizada' %}dashboard-pill-success{% elif badge == 'Analizada' %}dashboard-pill-info{% elif badge == 'Actividad sin vincular' %}dashboard-pill-warning{% else %}dashboard-pill-muted{% endif %}">{{ badge }}</span>
+                <span class="dashboard-pill {% if badge == 'Realizada' or badge == 'Realizada manualmente' %}dashboard-pill-success{% elif badge == 'Analizada' %}dashboard-pill-info{% elif badge == 'Actividad sin vincular' %}dashboard-pill-warning{% else %}dashboard-pill-muted{% endif %}">{{ badge }}</span>
                 {% endfor %}
             </div>
             {% endif %}
@@ -127,7 +127,7 @@
                 <h2>{{ dashboard.health.readiness_label }}</h2>
             </div>
             <div class="dashboard-kpi-row">
-                <span class="planned-session-inline-pill"><strong>Score:</strong> {{ dashboard.health.readiness_score if dashboard.health.readiness_score is not none else '-' }}</span>
+                <span class="planned-session-inline-pill"><strong>Estado general:</strong> {{ dashboard.health.readiness_score if dashboard.health.readiness_score is not none else '-' }}</span>
             </div>
         </div>
         <div class="detail-grid">

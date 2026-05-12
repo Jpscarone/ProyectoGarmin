@@ -10,6 +10,7 @@ SPORT_PATTERNS = [
     (r"^mtb$", ("mtb", "mountain")),
     (r"^(running|run)$", ("running", "street")),
     (r"^(ciclismo|bici|bike)$", ("cycling", "road")),
+    (r"^(strength|fuerza|gimnasio|gym)$", ("strength", None)),
     (r"^(natacion|swimming)$", ("swimming", "pool")),
     (r"^(trail)$", ("trail_running", "trail")),
 ]
@@ -17,6 +18,7 @@ SPORT_PATTERNS = [
 SPORT_HINTS = [
     (r"\bmtb\b", ("mtb", "mountain")),
     (r"\b(ciclismo|bici|bike)\b", ("cycling", "road")),
+    (r"\b(strength|fuerza|gimnasio|gym)\b", ("strength", None)),
     (r"\btrail\b", ("trail_running", "trail")),
     (r"\b(running|run|trote|rodaje)\b", ("running", "street")),
     (r"\b(natacion|pileta|swimming)\b", ("swimming", "pool")),

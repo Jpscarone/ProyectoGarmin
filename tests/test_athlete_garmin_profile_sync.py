@@ -10,7 +10,7 @@ from app.db.base import Base
 from app.db.models import athlete  # noqa: F401
 from app.db.models.athlete import Athlete
 from app.services.athlete_zone_service import recalculate_athlete_zones, update_athlete_zones_manual, use_garmin_zones
-from app.services.garmin.profile_sync import apply_garmin_changes, build_athlete_garmin_comparison
+from app.services.garmin.profile_sync import _pace_from_garmin_speed, apply_garmin_changes, build_athlete_garmin_comparison
 
 
 class AthleteGarminProfileSyncTests(unittest.TestCase):
@@ -104,6 +104,8 @@ class AthleteGarminProfileSyncTests(unittest.TestCase):
             athlete_row,
             hr_rows=[{"min": 100, "max": 120}, {"min": 121, "max": 140}, {"min": None, "max": None}, {"min": None, "max": None}, {"min": None, "max": None}],
             power_rows=[{"min": 120, "max": 180}, {"min": 181, "max": 220}, {"min": None, "max": None}, {"min": None, "max": None}, {"min": None, "max": None}],
+            pace_rows=[{"min": None, "max": None}, {"min": None, "max": None}, {"min": None, "max": None}, {"min": None, "max": None}, {"min": None, "max": None}],
+            rpe_rows=[{"label": None}, {"label": None}, {"label": None}, {"label": None}, {"label": None}],
         )
 
         self.assertIn("zonas de frecuencia cardiaca", updated)
@@ -142,6 +144,30 @@ class AthleteGarminProfileSyncTests(unittest.TestCase):
         self.assertIn("zonas de frecuencia cardiaca", updated)
         self.assertEqual(athlete_row.source_hr_zones, "garmin")
         self.assertEqual(athlete_row.source_power_zones, "garmin")
+
+    def test_build_comparison_normalizes_running_threshold_pace_from_raw_snapshot(self) -> None:
+        athlete_row = Athlete(
+            name="Atleta Garmin",
+            garmin_profile_snapshot_json=json.dumps(
+                {
+                    "general": {"running_threshold_pace_sec_km": 171},
+                    "raw_payloads": {
+                        "user_profile": {"userData": {"lactateThresholdSpeed": 0.34999902000000005}},
+                        "lactate_threshold": {"speed_and_heart_rate": {"speed": 0.34999902000000005}},
+                    },
+                }
+            ),
+        )
+        self.db.add(athlete_row)
+        self.db.commit()
+
+        comparison = build_athlete_garmin_comparison(athlete_row)
+
+        threshold_row = next(row for row in comparison["general_rows"] if row["field_name"] == "running_threshold_pace_sec_km")
+        self.assertEqual(threshold_row["garmin_value"], "4:46 /km")
+
+    def test_pace_from_garmin_speed_converts_observed_threshold_payload(self) -> None:
+        self.assertEqual(_pace_from_garmin_speed(0.34999902000000005), 286)
 
 
 if __name__ == "__main__":

@@ -19,6 +19,14 @@ from app.db.models.training_day import TrainingDay
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.services.analysis_v2.scoring import average_scores, clamp_score
 from app.services.analysis_v2.weekly_narrative import generate_weekly_narrative as _generate_weekly_narrative
+from app.services.session_completion_service import (
+    completed_duration_sec,
+    completed_strength_focus,
+    completed_strength_rpe,
+    has_linked_activity,
+    is_manually_completed_strength_session,
+    is_session_completed,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -82,14 +90,22 @@ class WeeklyPlannedSessionContext:
     session_type: str | None
     expected_duration_min: int | None
     expected_distance_km: float | None
+    strength_focus: str | None
+    strength_rpe: int | None
     target_type: str | None
     target_hr_zone: str | None
     target_pace_zone: str | None
     target_power_zone: str | None
     target_rpe_zone: str | None
     is_key_session: bool
+    completed: bool
     matched: bool
+    manual_completed: bool
     linked_activity_id: int | None
+    completed_duration_sec: int | None
+    completed_strength_focus: str | None
+    completed_strength_rpe: int | None
+    completion_method: str | None
 
 
 @dataclass(slots=True)
@@ -635,14 +651,22 @@ def _build_weekly_planned_session_context(session: PlannedSession) -> WeeklyPlan
         session_type=session.session_type,
         expected_duration_min=session.expected_duration_min,
         expected_distance_km=session.expected_distance_km,
+        strength_focus=session.strength_focus,
+        strength_rpe=session.strength_rpe,
         target_type=session.target_type,
         target_hr_zone=session.target_hr_zone,
         target_pace_zone=session.target_pace_zone,
         target_power_zone=session.target_power_zone,
         target_rpe_zone=session.target_rpe_zone,
         is_key_session=session.is_key_session,
-        matched=session.activity_match is not None,
+        completed=is_session_completed(session),
+        matched=has_linked_activity(session),
+        manual_completed=is_manually_completed_strength_session(session),
         linked_activity_id=session.activity_match.garmin_activity_id_fk if session.activity_match else None,
+        completed_duration_sec=completed_duration_sec(session),
+        completed_strength_focus=completed_strength_focus(session),
+        completed_strength_rpe=completed_strength_rpe(session),
+        completion_method="manual" if is_manually_completed_strength_session(session) else "garmin" if has_linked_activity(session) else None,
     )
 
 
@@ -693,7 +717,12 @@ def _build_previous_week_summaries(
             for item in all_planned_sessions
             if item.training_day and week_start <= item.training_day.day_date <= week_end
         ]
-        completed_sessions = sum(1 for item in week_planned if item.activity_match is not None)
+        completed_sessions = sum(1 for item in week_planned if is_session_completed(item))
+        manual_strength_duration_sec = sum(
+            completed_duration_sec(item) or 0
+            for item in week_planned
+            if is_manually_completed_strength_session(item)
+        )
         compliance_ratio = None
         if week_planned:
             compliance_ratio = round(completed_sessions / len(week_planned), 3)
@@ -702,7 +731,7 @@ def _build_previous_week_summaries(
                 week_start_date=week_start,
                 week_end_date=week_end,
                 activity_count=len(week_activities),
-                total_duration_sec=sum(item.duration_sec or 0 for item in week_activities),
+                total_duration_sec=sum(item.duration_sec or 0 for item in week_activities) + manual_strength_duration_sec,
                 total_distance_m=round(sum(item.distance_m or 0.0 for item in week_activities), 2),
                 total_elevation_gain_m=round(sum(item.elevation_gain_m or 0.0 for item in week_activities), 2),
                 planned_sessions=len(week_planned),
@@ -726,14 +755,30 @@ def _build_week_totals(context: WeeklyContext) -> dict[str, Any]:
         daily_distance_m[key] = round(daily_distance_m.get(key, 0.0) + (activity.distance_m or 0.0), 2)
         daily_elevation_m[key] = round(daily_elevation_m.get(key, 0.0) + (activity.elevation_gain_m or 0.0), 2)
 
+    for session in context.planned_sessions:
+        if not session.manual_completed or session.session_date is None:
+            continue
+        key = session.session_date.isoformat()
+        daily_duration_sec[key] = daily_duration_sec.get(key, 0) + int(session.completed_duration_sec or 0)
+
+    strength_metrics = _build_strength_metrics(context)
+    total_manual_strength_duration_sec = sum(
+        int(item.completed_duration_sec or 0)
+        for item in context.planned_sessions
+        if item.manual_completed
+    )
     return {
         "activity_count": len(context.activities),
-        "total_duration_sec": sum(activity.duration_sec or 0 for activity in context.activities),
+        "total_duration_sec": sum(activity.duration_sec or 0 for activity in context.activities) + total_manual_strength_duration_sec,
         "total_distance_m": round(sum(activity.distance_m or 0.0 for activity in context.activities), 2),
         "total_elevation_gain_m": round(sum(activity.elevation_gain_m or 0.0 for activity in context.activities), 2),
         "daily_duration_sec": daily_duration_sec,
         "daily_distance_m": daily_distance_m,
         "daily_elevation_m": daily_elevation_m,
+        "strength_sessions_count": strength_metrics["strength_sessions_count"],
+        "strength_total_duration_min": strength_metrics["strength_total_duration_min"],
+        "strength_load_score": strength_metrics["strength_load_score"],
+        "lower_body_strength_sessions_count": strength_metrics["lower_body_strength_sessions_count"],
     }
 
 
@@ -770,6 +815,14 @@ def _build_week_distribution(context: WeeklyContext) -> dict[str, Any]:
                     time_in_zones_sec[str(zone_name)] = time_in_zones_sec.get(str(zone_name), 0) + int(seconds)
                 except (TypeError, ValueError):
                     continue
+
+    for planned_session in context.planned_sessions:
+        if _normalized(planned_session.sport_type) != "strength" or planned_session.matched:
+            continue
+        if not planned_session.completed:
+            continue
+        sport_counts["strength"] = sport_counts.get("strength", 0) + 1
+        sport_duration_sec["strength"] = sport_duration_sec.get("strength", 0) + int(planned_session.completed_duration_sec or 0)
 
     intensity_zone_summary = _build_week_intensity_zone_summary(time_in_zones_sec)
     return {
@@ -819,7 +872,7 @@ def _zone_seconds(time_in_zones_sec: dict[str, int], zone_names: set[str]) -> in
 
 def _build_week_compliance(context: WeeklyContext) -> dict[str, Any]:
     planned_sessions = len(context.planned_sessions)
-    completed_sessions = sum(1 for item in context.planned_sessions if item.matched)
+    completed_sessions = sum(1 for item in context.planned_sessions if item.completed)
     compliance_ratio = None if planned_sessions == 0 else round(completed_sessions / planned_sessions, 3)
     compliance_ratio_pct = None if compliance_ratio is None else round(compliance_ratio * 100.0, 1)
     return {
@@ -864,7 +917,7 @@ def _build_week_trends(context: WeeklyContext, totals: dict[str, Any]) -> dict[s
 
 
 def _build_week_consistency(context: WeeklyContext, totals: dict[str, Any]) -> dict[str, Any]:
-    trained_days = len({item.activity_date for item in context.activities if item.activity_date is not None})
+    trained_days = len({date.fromisoformat(key) for key, value in totals["daily_duration_sec"].items() if value > 0})
     rest_days = max(0, 7 - trained_days)
     active_day_ratio_pct = round((trained_days / 7.0) * 100.0, 1)
     peak_day_duration = max(totals["daily_duration_sec"].values(), default=0)
@@ -985,6 +1038,7 @@ def _build_week_scores(
     )
 
     hard_session_count = distribution["intensity_distribution"].get("hard", 0)
+    strength_fatigue_bonus = _strength_fatigue_bonus(totals)
     fatigue_score = average_scores(
         [
             session_aggregate["avg_fatigue_score"],
@@ -993,6 +1047,8 @@ def _build_week_scores(
             _health_fatigue_component(health_context),
         ]
     )
+    if fatigue_score is not None and strength_fatigue_bonus:
+        fatigue_score = clamp_score(fatigue_score + strength_fatigue_bonus)
 
     balance_score = average_scores(
         [
@@ -1012,6 +1068,38 @@ def _build_week_scores(
         "balance_score": balance_score,
         "weekly_intensity_balance_score": weekly_intensity_balance_score,
     }
+
+
+def _build_strength_metrics(context: WeeklyContext) -> dict[str, int]:
+    sessions = [
+        item
+        for item in context.planned_sessions
+        if _normalized(item.sport_type) == "strength" and item.completed
+    ]
+    total_duration_min = int(sum(int(round((item.completed_duration_sec or 0) / 60)) for item in sessions))
+    total_load = int(
+        sum(
+            int(round((item.completed_duration_sec or 0) / 60)) * (item.completed_strength_rpe or 5)
+            for item in sessions
+        )
+    )
+    lower_body_count = sum(1 for item in sessions if _normalized(item.completed_strength_focus) == "lower_body")
+    return {
+        "strength_sessions_count": len(sessions),
+        "strength_total_duration_min": total_duration_min,
+        "strength_load_score": total_load,
+        "lower_body_strength_sessions_count": lower_body_count,
+    }
+
+
+def _strength_fatigue_bonus(totals: dict[str, Any]) -> float:
+    strength_count = int(totals.get("strength_sessions_count") or 0)
+    if strength_count <= 0:
+        return 0.0
+    bonus = 4.0 + min(float(strength_count), 2.0) * 1.5
+    if int(totals.get("lower_body_strength_sessions_count") or 0) > 0:
+        bonus += 3.0
+    return bonus
 
 
 def _classify_intensity_bucket(planned_session: WeeklyPlannedSessionContext | None) -> str:

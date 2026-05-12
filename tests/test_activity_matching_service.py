@@ -19,6 +19,7 @@ from app.db.models.planned_session import PlannedSession
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.services.activity_matching_service import _activity_local_date, match_activity_to_plan
+from app.services.session_match_service import score_activity_session_match
 
 
 class ActivityMatchingServiceTests(unittest.TestCase):
@@ -147,7 +148,7 @@ class ActivityMatchingServiceTests(unittest.TestCase):
 
         second_result = match_activity_to_plan(self.db, activity.id)
         self.assertTrue(second_result.matched)
-        self.assertEqual(second_result.planned_session_id, early_session.id)
+        self.assertEqual(second_result.planned_session_id, late_session.id)
 
     def test_activity_local_date_uses_timezone_when_present(self) -> None:
         activity = GarminActivity(
@@ -156,7 +157,52 @@ class ActivityMatchingServiceTests(unittest.TestCase):
             start_time=datetime(2026, 3, 22, 2, 30, tzinfo=timezone.utc),
         )
 
-        self.assertEqual(_activity_local_date(activity), activity.start_time.astimezone().date())
+        self.assertEqual(_activity_local_date(activity), date(2026, 3, 21))
+
+    def test_indoor_cycling_distance_zero_does_not_break_auto_match(self) -> None:
+        training_day = TrainingDay(
+            training_plan_id=self.training_plan.id,
+            athlete_id=self.athlete.id,
+            day_date=date(2026, 3, 23),
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session_row = PlannedSession(
+            training_day_id=training_day.id,
+            athlete_id=self.athlete.id,
+            sport_type="cycling",
+            modality="indoor",
+            name="Bici indoor",
+            session_order=1,
+            expected_duration_min=50,
+            expected_distance_km=25.0,
+        )
+        self.db.add(planned_session_row)
+        self.db.commit()
+        self.db.refresh(planned_session_row)
+
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=1004,
+            activity_name="Indoor ride",
+            sport_type="cycling",
+            modality="indoor",
+            start_time=datetime(2026, 3, 23, 8, 0, tzinfo=timezone.utc),
+            duration_sec=3000,
+            distance_m=0.0,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        candidate = score_activity_session_match(activity, planned_session_row)
+        self.assertGreaterEqual(candidate.score, 75.0)
+
+        result = match_activity_to_plan(self.db, activity.id)
+        self.assertTrue(result.matched)
+        self.assertEqual(result.planned_session_id, planned_session_row.id)
 
 
 if __name__ == "__main__":

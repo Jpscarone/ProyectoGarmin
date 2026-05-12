@@ -242,7 +242,7 @@
                                         {% if planned_session.expected_duration_min %}| {{ duration_minutes_hhmm(planned_session.expected_duration_min) }}{% endif %}
                                         {% if planned_session.session_type %}| {{ session_type_label(planned_session.session_type) }}{% endif %}
                                         {% if planned_session.planned_session_steps %}| Con pasos{% endif %}
-                                        {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}| Actividad vinculada{% endif %}
+                                        {% if is_session_completed(planned_session) %}| {% if is_manually_completed_strength_session(planned_session) %}Realizada manualmente{% else %}Actividad vinculada{% endif %}{% endif %}
                                         {% if planned_session.analysis_reports %}| Con analisis{% endif %}
                                     </p>
                                     {% endfor %}
@@ -276,13 +276,16 @@
                                 </p>
                                 <div class="calendar-meta-row">
                                     <span class="calendar-state-badge">{% if planned_session.planned_session_steps %}Con pasos{% else %}Simple{% endif %}</span>
-                                    <span class="calendar-state-badge">{% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}Actividad vinculada{% else %}Sin actividad{% endif %}</span>
+                                    <span class="calendar-state-badge">{% if is_session_completed(planned_session) %}{% if is_manually_completed_strength_session(planned_session) %}Realizada manualmente{% else %}Actividad vinculada{% endif %}{% else %}Sin actividad{% endif %}</span>
                                     <span class="calendar-state-badge">{% if planned_session.analysis_reports %}Con analisis{% else %}Sin analisis{% endif %}</span>
                                 </div>
                                 <p>{{ (planned_session.long_description_html or planned_session.description_text or planned_session.target_notes or "Sin descripcion.") | safe }}</p>
                             </div>
                             <div class="actions-inline">
                                 <a class="button button-nav" href="/planned_sessions/{{ planned_session.id }}?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}">Ver sesion</a>
+                                {% if planned_session.sport_type == 'strength' and not is_session_completed(planned_session) %}
+                                <a class="button button-utility" href="/planned_sessions/{{ planned_session.id }}?return_to=calendar&month={{ visible_month }}&selected_date={{ cell.date.isoformat() }}">Marcar como realizada</a>
+                                {% endif %}
                                 {% if planned_session.activity_match and planned_session.activity_match.garmin_activity %}
                                 <span title="No se puede editar una sesion que ya tiene actividad vinculada.">
                                     <button class="button button-secondary" type="button" disabled>Editar</button>

@@ -465,6 +465,96 @@ class PlanningPresentationTests(unittest.TestCase):
         self.assertEqual(short_summary, "10min FC personalizada 151-155 + 6min Ritmo personalizado 5:00-5:10")
         self.assertEqual(full_summary, "Running 10min FC personalizada [151-155] + 6min Ritmo personalizado [5:00-5:10]")
 
+    def test_incline_shows_in_short_and_full_summaries(self) -> None:
+        session = SimpleNamespace(
+            sport_type="running",
+            modality="indoor",
+            athlete=None,
+            expected_duration_min=None,
+            expected_distance_km=None,
+            target_notes=None,
+            session_type="intervals",
+            planned_session_steps=[
+                SimpleNamespace(
+                    id=1,
+                    step_order=1,
+                    step_type="steady",
+                    repeat_count=None,
+                    duration_sec=600,
+                    distance_m=None,
+                    target_type="hr",
+                    target_hr_zone="z1",
+                    target_hr_min=None,
+                    target_hr_max=None,
+                    target_power_zone=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_zone=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_rpe_zone=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    incline_pct=1.0,
+                    target_notes=None,
+                ),
+                SimpleNamespace(
+                    id=2,
+                    step_order=2,
+                    step_type="work",
+                    repeat_count=4,
+                    duration_sec=360,
+                    distance_m=None,
+                    target_type="hr",
+                    target_hr_zone=None,
+                    target_hr_min=145,
+                    target_hr_max=155,
+                    target_power_zone=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_zone=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_rpe_zone=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    incline_pct=8.0,
+                    target_notes=None,
+                ),
+                SimpleNamespace(
+                    id=3,
+                    step_order=3,
+                    step_type="recovery",
+                    repeat_count=4,
+                    duration_sec=180,
+                    distance_m=None,
+                    target_type="hr",
+                    target_hr_zone="z1",
+                    target_hr_min=None,
+                    target_hr_max=None,
+                    target_power_zone=None,
+                    target_power_min=None,
+                    target_power_max=None,
+                    target_pace_zone=None,
+                    target_pace_min_sec_km=None,
+                    target_pace_max_sec_km=None,
+                    target_rpe_zone=None,
+                    target_cadence_min=None,
+                    target_cadence_max=None,
+                    incline_pct=1.0,
+                    target_notes=None,
+                ),
+            ],
+        )
+
+        short_summary = describe_session_structure_short(session)
+        full_summary = build_session_summary_with_ranges(session)
+
+        self.assertIn("@1%", short_summary)
+        self.assertIn("@8%", short_summary)
+        self.assertIn("Running indoor", full_summary)
+        self.assertIn("inclinacion 8%", full_summary)
+
 
 if __name__ == "__main__":
     unittest.main()

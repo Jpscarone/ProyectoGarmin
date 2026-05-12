@@ -13,10 +13,12 @@ from app.db.base import Base
 from app.db.models import athlete  # noqa: F401
 from app.db.models import daily_health_metric  # noqa: F401
 from app.db.models import garmin_activity  # noqa: F401
+from app.db.models import goal  # noqa: F401
 from app.db.models import health_ai_analysis  # noqa: F401
 from app.db.models import health_sync_state  # noqa: F401
 from app.db.models.athlete import Athlete
 from app.db.models.garmin_activity import GarminActivity
+from app.db.models.goal import Goal
 from app.db.session import get_db
 from app.main import app
 from app.schemas.daily_health_metric import HealthDailyMetricCreate
@@ -100,10 +102,11 @@ class HealthRouterTests(unittest.TestCase):
         response = self.client.get("/health", headers={"accept": "text/html"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Estado para entrenar el", response.text)
-        self.assertIn("sin datos suficientes", response.text.lower())
-        self.assertIn("Contexto de entrenamiento reciente", response.text)
-        self.assertIn("Sin datos recientes de entrenamiento.", response.text)
+        self.assertIn("Recomendacion de hoy", response.text)
+        self.assertIn("SIN DATOS SUFICIENTES", response.text)
+        self.assertIn("Semaforos del dia", response.text)
+        self.assertIn("Ultimos 7 dias", response.text)
+        self.assertIn("0 actividades realizadas", response.text)
 
     def test_health_html_uses_selected_date(self) -> None:
         response = self.client.get(
@@ -112,7 +115,7 @@ class HealthRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Estado para entrenar el 18/04/2026", response.text)
+        self.assertIn("Referencia: 18/04/2026", response.text)
 
     def test_health_html_renders_quick_navigation_links(self) -> None:
         response = self.client.get(
@@ -168,16 +171,16 @@ class HealthRouterTests(unittest.TestCase):
         self.assertIn("if (payload.synced) {", response.text)
         self.assertIn("runHealthAutoAiAnalysisAfterSync(statusEl)", response.text)
 
-    def test_health_html_auto_sync_fresh_does_not_trigger_auto_ai_analysis(self) -> None:
+    def test_health_html_auto_sync_fresh_can_trigger_auto_ai_analysis(self) -> None:
         response = self.client.get(
             f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
             headers={"accept": "text/html"},
         )
 
         self.assertEqual(response.status_code, 200)
-        fresh_message_index = response.text.index("Salud ya sincronizada recientemente")
-        auto_ai_call_index = response.text.index("runHealthAutoAiAnalysisAfterSync(statusEl)")
-        self.assertLess(auto_ai_call_index, fresh_message_index)
+        self.assertIn('if (payload.reason === "fresh") {', response.text)
+        self.assertIn("Verificando si falta generar el analisis IA.", response.text)
+        self.assertIn('data-should-auto-ai-analysis="true"', response.text)
 
     def test_health_html_copy_json_button_updates_when_selected_date_changes(self) -> None:
         response = self.client.get(
@@ -308,6 +311,13 @@ class HealthRouterTests(unittest.TestCase):
                 training_effect_aerobic=2.4,
             )
         )
+        self.db.add(
+            Goal(
+                athlete_id=self.athlete.id,
+                name="Maraton Rosario",
+                event_date=date(2026, 4, 23),
+            )
+        )
         self.db.commit()
 
         response = self.client.get(
@@ -316,11 +326,12 @@ class HealthRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Contexto de entrenamiento reciente", response.text)
-        self.assertIn("Actividades 7d", response.text)
-        self.assertIn("Ultima actividad", response.text)
-        self.assertIn("17/04/2026", response.text)
-        self.assertIn("Km totales 7d", response.text)
+        self.assertIn("Contexto deportivo", response.text)
+        self.assertIn("Ultimos 7 dias", response.text)
+        self.assertIn("1 actividades realizadas", response.text)
+        self.assertIn("Ultima actividad: ayer", response.text)
+        self.assertIn("10 km", response.text)
+        self.assertIn("Proximo objetivo: Maraton Rosario", response.text)
 
     def test_health_html_training_context_does_not_break_with_null_fields(self) -> None:
         self.db.add(
@@ -342,10 +353,10 @@ class HealthRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Contexto de entrenamiento reciente", response.text)
-        self.assertIn("Actividades 7d", response.text)
-        self.assertIn("Minutos totales 7d", response.text)
-        self.assertIn("Km totales 7d", response.text)
+        self.assertIn("Contexto deportivo", response.text)
+        self.assertIn("1 actividades realizadas", response.text)
+        self.assertIn("0 min totales", response.text)
+        self.assertIn("0 km", response.text)
 
     @patch("app.routers.health.analyze_health_readiness_with_ai")
     def test_health_ai_analysis_endpoint_returns_expected_structure(self, mock_analyze) -> None:
@@ -470,7 +481,7 @@ class HealthRouterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Ultimo analisis IA guardado", response.text)
-        self.assertIn("Readiness estable.", response.text)
+        self.assertIn("Estado estable.", response.text)
         self.assertIn("Mantener control.", response.text)
         self.assertIn("Analizar con IA", response.text)
 
@@ -533,9 +544,9 @@ class HealthRouterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("Historial reciente de analisis IA", response.text)
-        self.assertIn("Tendencia reciente de readiness", response.text)
-        self.assertIn("health-readiness-trend", response.text)
-        self.assertIn("Readiness estable.", response.text)
+        self.assertIn("Evolucion del estado", response.text)
+        self.assertIn("health-readiness-trend-scorecard", response.text)
+        self.assertIn("Estado estable.", response.text)
         self.assertIn("Algo de carga acumulada.", response.text)
         self.assertIn("/health?selected_date=2026-04-18&amp;athlete_id=1", response.text)
         self.assertIn("/health?selected_date=2026-04-16&amp;athlete_id=1", response.text)
@@ -626,8 +637,83 @@ class HealthRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Tendencia reciente de readiness", response.text)
+        self.assertIn("Evolucion del estado", response.text)
         self.assertIn("Todavia no hay suficientes analisis guardados para mostrar tendencia.", response.text)
+
+    def test_health_html_renders_decision_block_and_human_signals(self) -> None:
+        self._seed_metric_window(reference_date=date(2026, 4, 18))
+
+        response = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Recomendacion de hoy", response.text)
+        self.assertIn("ENTRENAR NORMAL", response.text)
+        self.assertIn("Semaforos del dia", response.text)
+        self.assertIn("Sueno", response.text)
+        self.assertIn("Recuperacion", response.text)
+        self.assertIn("Carga reciente", response.text)
+        self.assertIn("Estres", response.text)
+
+    def test_health_html_renders_trend_interpretation(self) -> None:
+        create_health_ai_analysis(
+            self.db,
+            athlete_id=self.athlete.id,
+            reference_date=date(2026, 4, 16),
+            llm_json={
+                "schema_version": "health_readiness_v1",
+                "readiness_local": {
+                    "readiness_status": "orange",
+                    "readiness_label": "solo suave",
+                    "readiness_score": 62,
+                },
+            },
+            ai_response_json={"summary": "Fatiga reciente.", "risk_level": "moderate"},
+            summary="Fatiga reciente.",
+            training_recommendation="Bajar carga.",
+            risk_level="moderate",
+            model_name="gpt-test",
+        )
+        create_health_ai_analysis(
+            self.db,
+            athlete_id=self.athlete.id,
+            reference_date=date(2026, 4, 18),
+            llm_json={
+                "schema_version": "health_readiness_v1",
+                "readiness_local": {
+                    "readiness_status": "green",
+                    "readiness_label": "entrenar normal",
+                    "readiness_score": 84,
+                },
+            },
+            ai_response_json={"summary": "Mejora reciente.", "risk_level": "low"},
+            summary="Mejora reciente.",
+            training_recommendation="Entrenar normal.",
+            risk_level="low",
+            model_name="gpt-test",
+        )
+
+        response = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Subida reciente", response.text)
+        self.assertIn("Mejora reciente en la recuperacion.", response.text)
+        self.assertIn("health-readiness-trend-scorecard", response.text)
+
+    def test_health_html_keeps_mobile_friendly_layout_hooks(self) -> None:
+        response = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("health-overview-grid", response.text)
+        self.assertIn("health-human-signals", response.text)
 
     def test_health_html_renders_sync_state(self) -> None:
         self.db.add(
@@ -672,6 +758,76 @@ class HealthRouterTests(unittest.TestCase):
         payload = response.json()
         self.assertFalse(payload["synced"])
         self.assertEqual(payload["reason"], "fresh")
+
+    def test_health_html_marks_auto_ai_as_pending_when_analysis_is_missing(self) -> None:
+        self.db.add(
+            HealthSyncState(
+                athlete_id=self.athlete.id,
+                source="garmin",
+                status="success",
+                last_success_at=datetime.now(timezone.utc) - timedelta(hours=1),
+                last_synced_for_date=date.today(),
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date={date.today().isoformat()}",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-should-auto-sync="false"', response.text)
+        self.assertIn('data-should-auto-ai-analysis="true"', response.text)
+
+    def test_health_html_marks_auto_ai_as_updated_when_hash_matches(self) -> None:
+        readiness = self.client.get(
+            f"/health/readiness/llm-json?athlete_id={self.athlete.id}&selected_date=2026-04-18"
+        ).json()
+        from app.services.health_ai_analysis_service import build_health_llm_json_hash
+
+        create_health_ai_analysis(
+            self.db,
+            athlete_id=self.athlete.id,
+            reference_date=date(2026, 4, 18),
+            llm_json=readiness,
+            llm_json_hash=build_health_llm_json_hash(readiness),
+            ai_response_json={"summary": "Ya guardado.", "risk_level": "low"},
+            summary="Ya guardado.",
+            training_recommendation="Mantener.",
+            risk_level="low",
+            model_name="gpt-test",
+        )
+
+        response = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('data-should-auto-ai-analysis="false"', response.text)
+
+    def _seed_metric_window(self, reference_date: date) -> None:
+        for offset in range(14):
+            metric_date = reference_date - timedelta(days=offset)
+            create_or_update_daily_health_metric(
+                self.db,
+                HealthDailyMetricCreate(
+                    athlete_id=self.athlete.id,
+                    date=metric_date,
+                    sleep_duration_minutes=470,
+                    sleep_score=82,
+                    resting_hr=49,
+                    hrv_value=61.0,
+                    hrv_status="stable",
+                    stress_avg=24,
+                    body_battery_morning=73,
+                    body_battery_min=32,
+                    body_battery_max=81,
+                    training_load=290.0,
+                    source="garmin",
+                ),
+            )
 
     @patch("app.services.health_auto_sync_service.sync_recent_health")
     def test_health_auto_sync_handles_garmin_error(self, mock_sync) -> None:

@@ -20,6 +20,7 @@ from app.services.training_day_service import create_training_day, get_training_
 from app.services.training_plan_service import get_training_plan
 from app.services.session_import_parser import ImportBlock, ImportGroup, ImportRepeat, ImportSession, parse_session_import_text
 from app.services.session_import_validator import validate_import_payload
+from app.services.modality import normalize_modality
 
 
 SUPPORTED_SPORTS = {"running", "cycling", "swimming", "strength", "walking", "other"}
@@ -220,6 +221,7 @@ def _build_session_preview(
     return {
         "date": resolved_date.isoformat() if resolved_date else "-",
         "sport": (session.sport or "").strip().lower(),
+        "modality": normalize_modality(session.modality),
         "name": session.name or "Sesion sin nombre",
         "notes": session.notes or "",
         "duration": _format_duration(duration_sec),
@@ -304,12 +306,17 @@ def _block_preview(
 ) -> dict[str, Any]:
     intensity = _normalize_intensity(block.intensity)
     zone = _normalize_zone(block.zone)
+    incline_label = _incline_label(_parse_float(block.incline_pct))
+    target_label = _describe_block_target(block)
+    if incline_label:
+        target_label = " · ".join(part for part in (target_label, incline_label) if part)
     return {
         "value": block.value or "",
         "unit": _normalize_unit(block.unit),
         "intensity": intensity,
         "zone": zone,
-        "target_label": _describe_block_target(block),
+        "target_label": target_label,
+        "incline_label": incline_label,
         "notes": block.notes or "",
         "duration": _format_duration(seconds),
         "distance": _format_distance(meters),
@@ -381,6 +388,7 @@ def _create_import_session(
         PlannedSessionCreate(
             training_day_id=training_day.id,
             sport_type=sport_type or None,
+            modality=normalize_modality(session.modality),
             name=session.name or "Sesion importada",
             description_text=session.notes or None,
             session_type=None,
@@ -457,6 +465,7 @@ def _create_step_from_block(
             "duration_sec": duration_sec,
             "distance_m": distance_m,
             "target_type": intensity,
+            "incline_pct": _parse_float(block.incline_pct),
             **step_target_fields,
             "target_notes": notes,
         },
@@ -835,6 +844,14 @@ def _custom_range_label(label: str, minimum: Any, maximum: Any, *, suffix: str) 
     min_label = str(minimum) if minimum is not None else "-"
     max_label = str(maximum) if maximum is not None else "-"
     return f"{label} [{min_label}-{max_label} {suffix}]"
+
+
+def _incline_label(value: float | None) -> str | None:
+    if value is None:
+        return None
+    if float(value).is_integer():
+        return f"inclinacion {int(value)}%"
+    return f"inclinacion {str(round(value, 2)).rstrip('0').rstrip('.')}%"
 
 
 def _target_type_label(value: str | None) -> str | None:

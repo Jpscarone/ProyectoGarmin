@@ -32,6 +32,8 @@ from app.services.planning.quick_session_service import (
 )
 from app.services.planning.parser import parse_session_text
 from app.services.planned_session_service import (
+    clear_strength_session_manual_completion,
+    complete_strength_session_manually,
     create_planned_session,
     delete_planned_session,
     get_planned_session,
@@ -39,12 +41,21 @@ from app.services.planned_session_service import (
     update_planned_session,
 )
 from app.services.planned_session_step_service import replace_steps_for_session
+from app.services.analysis_v2.weekly_analysis_service import re_run_weekly_analysis
 from app.services.session_group_service import create_inline_group
+from app.services.session_completion_service import (
+    completed_duration_sec,
+    completed_strength_focus,
+    completed_strength_rpe,
+    has_linked_activity,
+    is_manually_completed_strength_session,
+    is_strength_sport,
+)
 from app.services.training_day_service import create_training_day, get_training_day, get_training_day_by_plan_and_date
 from app.services.training_plan_service import get_training_plan
 from app.services.session_import_service import preview_session_import, create_session_import
 from app.schemas.training_day import TrainingDayCreate
-from app.ui.catalogs import INTENSITY_TARGET_LABELS, MATCH_METHOD_LABELS, SPORT_LABELS, STEP_TYPE_LABELS, label_for
+from app.ui.catalogs import INTENSITY_TARGET_LABELS, MATCH_METHOD_LABELS, MODALITY_LABELS, SPORT_LABELS, STEP_TYPE_LABELS, label_for
 from app.web.templates import build_templates
 
 
@@ -136,6 +147,7 @@ def create_quick_session_page(
             "return_selected_date": selected_date or (selected_day_date.isoformat() if selected_day_date else ""),
             "editing_session": editing_session,
             "initial_quick_data": _build_initial_quick_data(editing_session, initial_mode) if editing_session else None,
+            "sport_ui_defaults": _sport_ui_capabilities(None),
         },
     )
 
@@ -234,6 +246,102 @@ def rerun_planned_session_analysis_v2(
     )
 
 
+@router.post("/{planned_session_id}/mark-complete")
+def mark_strength_session_complete_endpoint(
+    planned_session_id: int,
+    request: Request,
+    manual_duration_min: str | None = Form(default=None),
+    manual_strength_rpe: str | None = Form(default=None),
+    manual_strength_focus: str | None = Form(default=None),
+    manual_completion_notes: str | None = Form(default=None),
+    return_to: str | None = Form(default=None),
+    month: str | None = Form(default=None),
+    selected_date: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+
+    duration_min = _parse_optional_int(manual_duration_min)
+    strength_rpe = _parse_optional_int(manual_strength_rpe)
+    if strength_rpe is not None and not 1 <= strength_rpe <= 10:
+        return RedirectResponse(
+            url=_planned_session_completion_redirect_url(
+                planned_session,
+                return_to=return_to,
+                month=month,
+                selected_date=selected_date,
+                status_message="El RPE de fuerza debe estar entre 1 y 10.",
+            ),
+            status_code=303,
+        )
+
+    resolved_duration_sec = duration_min * 60 if duration_min is not None else (
+        completed_duration_sec(planned_session)
+        or (planned_session.expected_duration_min * 60 if planned_session.expected_duration_min is not None else None)
+    )
+    try:
+        complete_strength_session_manually(
+            db,
+            planned_session,
+            duration_sec=resolved_duration_sec,
+            strength_rpe=strength_rpe if strength_rpe is not None else planned_session.strength_rpe,
+            strength_focus=(manual_strength_focus or "").strip() or planned_session.strength_focus,
+            notes=(manual_completion_notes or "").strip() or None,
+        )
+        _refresh_weekly_summary_for_session(db, planned_session)
+    except ValueError as exc:
+        return RedirectResponse(
+            url=_planned_session_completion_redirect_url(
+                planned_session,
+                return_to=return_to,
+                month=month,
+                selected_date=selected_date,
+                status_message=str(exc),
+            ),
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url=_planned_session_completion_redirect_url(
+            planned_session,
+            return_to=return_to,
+            month=month,
+            selected_date=selected_date,
+            status_message="Sesion de gimnasio marcada como realizada.",
+        ),
+        status_code=303,
+    )
+
+
+@router.post("/{planned_session_id}/clear-completion")
+def clear_strength_session_completion_endpoint(
+    planned_session_id: int,
+    request: Request,
+    return_to: str | None = Form(default=None),
+    month: str | None = Form(default=None),
+    selected_date: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+
+    clear_strength_session_manual_completion(db, planned_session)
+    _refresh_weekly_summary_for_session(db, planned_session)
+    return RedirectResponse(
+        url=_planned_session_completion_redirect_url(
+            planned_session,
+            return_to=return_to,
+            month=month,
+            selected_date=selected_date,
+            status_message="Se quitó el completado manual de la sesion.",
+        ),
+        status_code=303,
+    )
+
+
 def _get_preferred_session_analysis(
     db: Session,
     planned_session_id: int,
@@ -302,6 +410,46 @@ def _build_planned_session_back_link(request: Request, planned_session) -> dict[
     return {"label": "Volver", "url": f"/training_days/{training_day.id}"}
 
 
+def _planned_session_completion_redirect_url(
+    planned_session,
+    *,
+    return_to: str | None,
+    month: str | None,
+    selected_date: str | None,
+    status_message: str,
+) -> str:
+    normalized_return_to = (return_to or "").strip().lower()
+    encoded_status = quote(status_message)
+    training_day = planned_session.training_day
+    if training_day is None:
+        return f"/planned_sessions/{planned_session.id}?ui_status={encoded_status}"
+
+    effective_selected_date = selected_date or (training_day.day_date.isoformat() if training_day.day_date else "")
+    effective_month = month or (training_day.day_date.strftime("%Y-%m") if training_day.day_date else "")
+    if normalized_return_to == "calendar" and training_day.training_plan is not None:
+        query_parts = [f"status={encoded_status}"]
+        if effective_month:
+            query_parts.append(f"month={quote(effective_month)}")
+        if effective_selected_date:
+            query_parts.append(f"selected_date={quote(effective_selected_date)}")
+        return f"/training_plans/{training_day.training_plan.id}/calendar?{'&'.join(query_parts)}"
+    if normalized_return_to == "day":
+        return f"/training_days/{training_day.id}?ui_status={encoded_status}"
+    return f"/planned_sessions/{planned_session.id}?ui_status={encoded_status}"
+
+
+def _refresh_weekly_summary_for_session(db: Session, planned_session) -> None:
+    training_day = planned_session.training_day
+    if training_day is None:
+        return
+    re_run_weekly_analysis(
+        db,
+        athlete_id=planned_session.athlete_id,
+        reference_date=training_day.day_date,
+        trigger_source="manual_strength_completion",
+    )
+
+
 def _build_session_analysis_v2_view_model(planned_session, linked_activity, analysis: SessionAnalysis | None) -> dict[str, Any]:
     status_value = analysis.status if analysis else "missing"
     session_metrics = derive_session_metrics(planned_session)
@@ -319,6 +467,7 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
         "title": short_description,
         "date_label": planned_session.training_day.day_date.strftime("%d/%m/%Y") if planned_session.training_day and planned_session.training_day.day_date else "-",
         "sport_label": _sport_label(planned_session.sport_type),
+        "modality_label": _modality_label(planned_session.modality),
         "duration_label": _duration_minutes_label(planned_session.expected_duration_min),
         "distance_label": _distance_km_label(planned_session.expected_distance_km),
         "status_label": _analysis_v2_status_label(status_value),
@@ -367,6 +516,7 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
         "scores": scores,
         "positives": structured_output.get("key_positive_points") or [],
         "risks": structured_output.get("key_risk_points") or [],
+        "analysis_notes": ((metrics.get("compliance") or {}).get("notes") or []) if isinstance(metrics, dict) else [],
         "recommendation": analysis.next_recommendation if analysis and analysis.next_recommendation else _empty_recommendation_copy(status_value, linked_activity is not None),
         "recommendation_is_ai_generated": is_ai_generated,
         "session_type_detected": structured_output.get("session_type_detected") or "-",
@@ -601,39 +751,58 @@ def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalys
     block_rows = _extract_v2_step_rows(metrics)
 
     activity_match = planned_session.activity_match
+    manual_completion = is_manually_completed_strength_session(planned_session)
+    completion_duration_sec = completed_duration_sec(planned_session)
     confidence_pct = (
         round(float(activity_match.match_confidence) * 100)
         if activity_match and activity_match.match_confidence is not None
         else None
     )
     activity_stats = [
-        {"label": "Duracion", "value": _duration_seconds_compact(linked_activity.duration_sec) if linked_activity else "-"},
+        {"label": "Duracion", "value": _duration_seconds_compact(completion_duration_sec) if completion_duration_sec is not None else "-"},
         {"label": "Distancia", "value": _distance_meters_compact(linked_activity.distance_m) if linked_activity else "-"},
         {"label": "FC promedio", "value": str(linked_activity.avg_hr) if linked_activity and linked_activity.avg_hr is not None else "-"},
         {"label": "Inicio", "value": linked_activity.start_time.strftime("%H:%M") if linked_activity and linked_activity.start_time else "-"},
     ]
     activity_meta = [
-        {"label": "Vinculo", "value": label_for(MATCH_METHOD_LABELS, activity_match.match_method) if activity_match else "Sin vinculacion"},
+        {"label": "Vinculo", "value": label_for(MATCH_METHOD_LABELS, activity_match.match_method) if activity_match else "Registro manual" if manual_completion else "Sin vinculacion"},
         {"label": "Confianza", "value": f"{confidence_pct}%" if confidence_pct is not None else "-"},
+        {"label": "Modalidad", "value": _modality_label(linked_activity.modality if linked_activity else planned_session.modality)},
     ]
+    if manual_completion:
+        activity_meta.append({"label": "RPE real", "value": str(completed_strength_rpe(planned_session) or "-")})
+        activity_meta.append({"label": "Focus real", "value": completed_strength_focus(planned_session) or "-"})
 
     return {
         "header": {
             "title": short_description,
             "sport_label": _sport_label(planned_session.sport_type),
+            "modality_label": _modality_label(planned_session.modality),
             "duration_label": _duration_seconds_compact(objective_duration_sec),
             "distance_label": _distance_meters_compact(objective_distance_m),
             "session_type_label": label_for(STEP_TYPE_LABELS, None, "") if False else None,
         },
         "activity": {
-            "linked": linked_activity is not None,
-            "title": linked_activity.activity_name if linked_activity and linked_activity.activity_name else "Sin actividad vinculada",
+            "linked": linked_activity is not None or manual_completion,
+            "title": (
+                linked_activity.activity_name
+                if linked_activity and linked_activity.activity_name
+                else "Sesion completada manualmente"
+                if manual_completion
+                else "Sin actividad vinculada"
+            ),
             "url": f"/activities/{linked_activity.id}" if linked_activity else None,
-            "subtitle": _sport_label(linked_activity.sport_type) if linked_activity and linked_activity.sport_type else "Esperando una actividad real para comparar.",
+            "subtitle": (
+                _sport_modality_label(linked_activity.sport_type, linked_activity.modality)
+                if linked_activity and linked_activity.sport_type
+                else "La sesion strength fue registrada manualmente desde la app."
+                if manual_completion
+                else "Esperando una actividad real para comparar."
+            ),
             "stats": activity_stats,
             "meta": activity_meta,
-            "match_status_label": "Match confirmado" if activity_match else "Sin match confirmado",
-            "match_badge_class": "status-badge-manual" if activity_match and activity_match.match_method == "manual" else "status-badge-garmin" if activity_match else "status-badge-empty",
+            "match_status_label": "Registro manual" if manual_completion and not activity_match else "Match confirmado" if activity_match else "Sin match confirmado",
+            "match_badge_class": "status-badge-manual" if manual_completion or (activity_match and activity_match.match_method == "manual") else "status-badge-garmin" if activity_match else "status-badge-empty",
         },
         "quick_compare": _build_session_quick_compare_view(
             planned_session=planned_session,
@@ -655,6 +824,14 @@ def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalys
             "cards": _build_step_cards_view(planned_session, block_rows),
         },
         "latest_analysis": _build_latest_analysis_summary_view(planned_session, analysis_v2, linked_activity is not None),
+        "manual_completion": {
+            "available": is_strength_sport(planned_session.sport_type) and not has_linked_activity(planned_session),
+            "completed": manual_completion,
+            "duration_min": int(round(completion_duration_sec / 60)) if completion_duration_sec is not None else planned_session.expected_duration_min,
+            "strength_rpe": completed_strength_rpe(planned_session),
+            "strength_focus": completed_strength_focus(planned_session),
+            "notes": planned_session.manual_completion_notes,
+        },
     }
 
 
@@ -678,11 +855,15 @@ def _build_session_quick_compare_view(
         if linked_activity and linked_activity.duration_sec is not None
         else _v2_metric_actual_label(planned_vs_actual.get("duration"), "min")
     )
+    distance_metric = planned_vs_actual.get("distance") if isinstance(planned_vs_actual, dict) else {}
+    distance_note = distance_metric.get("note") if isinstance(distance_metric, dict) else None
     distance_real = (
         _distance_meters_compact(linked_activity.distance_m)
-        if linked_activity and linked_activity.distance_m is not None
+        if linked_activity and linked_activity.distance_m not in (None, 0)
         else _v2_metric_actual_label(planned_vs_actual.get("distance"), "km")
     )
+    if distance_note and isinstance(distance_metric, dict) and distance_metric.get("evaluated") is False:
+        distance_real = distance_note
     total_blocks = (
         int(lap_metrics.get("matched_count", 0)) + int(lap_metrics.get("missing_planned_steps", 0))
         if isinstance(lap_metrics, dict)
@@ -825,6 +1006,9 @@ def _build_step_item_view(
         )
     elif getattr(step, "target_power_min", None) is not None or getattr(step, "target_power_max", None) is not None:
         intensity_parts.append(f"Potencia {getattr(step, 'target_power_min', None) or '-'}-{getattr(step, 'target_power_max', None) or '-'} w")
+    incline_pct = getattr(step, "incline_pct", None)
+    if incline_pct is not None:
+        intensity_parts.append(f"{_format_incline_pct(incline_pct)} inclinacion")
 
     row_status = row.get("status") if row else None
     comment = row.get("comment") if row else None
@@ -883,11 +1067,14 @@ def _score_badge_class(value: float | None) -> str:
 
 def _build_latest_analysis_summary_view(planned_session, analysis_v2: SessionAnalysis | None, has_activity: bool) -> dict[str, Any]:
     if analysis_v2 is None:
+        manual_strength = is_manually_completed_strength_session(planned_session)
         return {
             "exists": False,
             "title": "Ultimo reporte",
             "empty_message": (
-                "Todavia no hay un analisis generado para esta sesion."
+                "La sesion strength ya fue marcada como realizada manualmente. El analisis semanal la va a contar como completada."
+                if manual_strength
+                else "Todavia no hay un analisis generado para esta sesion."
                 if has_activity
                 else "Todavia no hay analisis porque la sesion no tiene una actividad vinculada."
             ),
@@ -1114,6 +1301,18 @@ def _sport_label(value: str | None) -> str:
     return SPORT_LABELS.get(value, value.replace("_", " ").title())
 
 
+def _modality_label(value: str | None) -> str:
+    return label_for(MODALITY_LABELS, value, "-")
+
+
+def _sport_modality_label(sport_type: str | None, modality: str | None) -> str:
+    sport_label = _sport_label(sport_type)
+    modality_value = _modality_label(modality)
+    if modality_value == "-":
+        return sport_label
+    return f"{sport_label} {modality_value.lower()}"
+
+
 def _duration_seconds_compact(value: Any) -> str:
     if value is None:
         return "-"
@@ -1166,9 +1365,12 @@ def create_quick_session_endpoint(
     training_plan_id: str | None = Form(default=None),
     planned_day_date: str | None = Form(default=None),
     simple_sport_type: str | None = Form(default=None),
+    simple_modality: str | None = Form(default=None),
     simple_name: str | None = Form(default=None),
     simple_expected_duration_min: str | None = Form(default=None),
     simple_expected_distance_km: str | None = Form(default=None),
+    simple_strength_focus: str | None = Form(default=None),
+    simple_strength_rpe: str | None = Form(default=None),
     simple_target_type: str | None = Form(default=None),
     simple_target_hr_zone: str | None = Form(default=None),
     simple_target_pace_zone: str | None = Form(default=None),
@@ -1191,10 +1393,13 @@ def create_quick_session_endpoint(
     text_new_group_notes: str | None = Form(default=None),
     builder_sport_type_override: str | None = Form(default=None),
     advanced_name: str | None = Form(default=None),
+    advanced_modality: str | None = Form(default=None),
     advanced_is_key_session: bool = Form(default=False),
     advanced_expected_duration_hhmm: str | None = Form(default=None),
     advanced_expected_distance_value: str | None = Form(default=None),
     advanced_expected_distance_unit: str | None = Form(default="km"),
+    advanced_strength_focus: str | None = Form(default=None),
+    advanced_strength_rpe: str | None = Form(default=None),
     advanced_target_type: str | None = Form(default=None),
     advanced_target_hr_zone: str | None = Form(default=None),
     advanced_target_pace_zone: str | None = Form(default=None),
@@ -1208,6 +1413,11 @@ def create_quick_session_endpoint(
 ) -> RedirectResponse:
     normalized_mode = (mode or "simple").strip().lower()
     try:
+        mode_sport = {
+            "simple": simple_sport_type or None,
+            "text": text_sport_type_override or None,
+            "builder": builder_sport_type_override or None,
+        }.get(normalized_mode)
         editing_session = None
         resolved_planned_session_id = _parse_int_field(planned_session_id, "La sesion seleccionada no es valida.")
         if resolved_planned_session_id is not None:
@@ -1221,7 +1431,9 @@ def create_quick_session_endpoint(
             training_plan_id=training_plan_id,
             planned_day_date=planned_day_date,
         )
-        if normalized_mode == "simple":
+        if mode_sport and is_strength_sport(mode_sport):
+            session_group_id = None
+        elif normalized_mode == "simple":
             session_group_id = _resolve_session_group_id(
                 db,
                 training_day_id=effective_training_day_id,
@@ -1245,10 +1457,13 @@ def create_quick_session_endpoint(
             session_group_id = None
         advanced_data = SessionAdvancedData(
             name=(advanced_name or "").strip() or None,
+            modality=(advanced_modality or simple_modality or "").strip() or None,
             session_group_id=session_group_id,
             is_key_session=advanced_is_key_session,
             expected_duration_min=_parse_duration_hhmm(advanced_expected_duration_hhmm),
             expected_distance_km=_distance_to_km(advanced_expected_distance_value, advanced_expected_distance_unit),
+            strength_focus=(advanced_strength_focus or "").strip() or None,
+            strength_rpe=_parse_optional_int(advanced_strength_rpe),
             target_type=advanced_target_type or None,
             target_hr_zone=advanced_target_hr_zone or None,
             target_pace_zone=advanced_target_pace_zone or None,
@@ -1257,11 +1472,6 @@ def create_quick_session_endpoint(
             target_notes=advanced_target_notes or None,
         )
 
-        mode_sport = {
-            "simple": simple_sport_type or None,
-            "text": text_sport_type_override or None,
-            "builder": builder_sport_type_override or None,
-        }.get(normalized_mode)
         mode_variant = {
             "simple": None,
             "text": None,
@@ -1280,6 +1490,8 @@ def create_quick_session_endpoint(
                 name=(simple_name or "").strip() or None,
                 expected_duration_min=_parse_duration_hhmm(simple_expected_duration_min),
                 expected_distance_km=_parse_float_field(simple_expected_distance_km, "La distancia simple debe ser un numero."),
+                strength_focus=(simple_strength_focus or "").strip() or None,
+                strength_rpe=_parse_optional_int(simple_strength_rpe),
                 target_type=simple_target_type or None,
                 target_hr_zone=simple_target_hr_zone or None,
                 target_pace_zone=simple_target_pace_zone or None,
@@ -1302,6 +1514,8 @@ def create_quick_session_endpoint(
                 description_text=None,
                 expected_duration_min=_parse_duration_hhmm(simple_expected_duration_min),
                 expected_distance_km=_parse_float_field(simple_expected_distance_km, "La distancia simple debe ser un numero."),
+                strength_focus=(simple_strength_focus or "").strip() or None,
+                strength_rpe=_parse_optional_int(simple_strength_rpe),
                 target_type=simple_target_type or None,
                 target_hr_zone=simple_target_hr_zone or None,
                 target_pace_zone=simple_target_pace_zone or None,
@@ -1727,6 +1941,8 @@ def _build_initial_quick_data(planned_session, initial_mode: str) -> dict:
             "name": planned_session.name or "",
             "expectedDuration": _minutes_to_hhmm(planned_session.expected_duration_min),
             "expectedDistance": _float_to_string(planned_session.expected_distance_km),
+            "strengthFocus": planned_session.strength_focus or "",
+            "strengthRpe": _float_to_string(planned_session.strength_rpe),
             "targetType": planned_session.target_type or "",
             "targetHrZone": planned_session.target_hr_zone or "",
             "targetPaceZone": planned_session.target_pace_zone or "",
@@ -1744,6 +1960,8 @@ def _build_initial_quick_data(planned_session, initial_mode: str) -> dict:
             "name": planned_session.name or "",
             "expectedDuration": _minutes_to_hhmm(planned_session.expected_duration_min),
             "expectedDistance": _float_to_string(planned_session.expected_distance_km),
+            "strengthFocus": planned_session.strength_focus or "",
+            "strengthRpe": _float_to_string(planned_session.strength_rpe),
             "targetType": planned_session.target_type or "",
             "targetHrZone": planned_session.target_hr_zone or "",
             "targetPaceZone": planned_session.target_pace_zone or "",
@@ -1782,6 +2000,7 @@ def _simple_block_to_builder_data(block, fallback_target_type: str | None = None
         "targetZone": target_zone or "",
         "customMin": custom_min or "",
         "customMax": custom_max or "",
+        "inclinePct": _float_to_string(getattr(block, "incline_pct", None)),
         "stepType": block.step_type or "",
     }
 
@@ -1861,6 +2080,19 @@ def _float_to_string(value: int | float | None) -> str:
     return str(value)
 
 
+def _sport_ui_capabilities(sport_type: str | None) -> dict[str, Any]:
+    normalized = (sport_type or "").strip().lower()
+    is_strength = normalized == "strength"
+    return {
+        "sport_type": normalized or None,
+        "is_strength": is_strength,
+        "hide_endurance_distance": is_strength,
+        "hide_endurance_targets": is_strength,
+        "builder_supported": not is_strength,
+        "builder_message": "Para gimnasio, usa sesion simple con duracion, foco y RPE por ahora." if is_strength else "",
+    }
+
+
 def _update_session_from_quick_mode(
     db: Session,
     *,
@@ -1872,6 +2104,8 @@ def _update_session_from_quick_mode(
     name: str | None = None,
     expected_duration_min: int | None = None,
     expected_distance_km: float | None = None,
+    strength_focus: str | None = None,
+    strength_rpe: int | None = None,
     target_type: str | None = None,
     target_hr_zone: str | None = None,
     target_pace_zone: str | None = None,
@@ -1892,17 +2126,20 @@ def _update_session_from_quick_mode(
         updated_session = update_planned_session(
             db,
             planned_session,
-            PlannedSessionUpdate(
-                training_day_id=training_day_id,
-                sport_type=sport_type or (parsed.sport_type if parsed else planned_session.sport_type),
-                discipline_variant=discipline_variant or (parsed.discipline_variant if parsed else planned_session.discipline_variant),
-                name=advanced.name or name or planned_session.name,
+                PlannedSessionUpdate(
+                    training_day_id=training_day_id,
+                    sport_type=sport_type or (parsed.sport_type if parsed else planned_session.sport_type),
+                    discipline_variant=discipline_variant or (parsed.discipline_variant if parsed else planned_session.discipline_variant),
+                    modality=advanced.modality,
+                    name=advanced.name or name or planned_session.name,
                 description_text=raw_text or planned_session.description_text,
                 session_type=(parsed.session_type if parsed else planned_session.session_type) or advanced.session_type,
                 session_group_id=advanced.session_group_id,
                 expected_duration_min=expected_duration_min if expected_duration_min is not None else (parsed.expected_duration_min if parsed else advanced.expected_duration_min),
                 expected_distance_km=expected_distance_km if expected_distance_km is not None else (parsed.expected_distance_km if parsed else advanced.expected_distance_km),
                 expected_elevation_gain_m=advanced.expected_elevation_gain_m,
+                strength_focus=strength_focus or advanced.strength_focus or planned_session.strength_focus,
+                strength_rpe=strength_rpe if strength_rpe is not None else advanced.strength_rpe if advanced.strength_rpe is not None else planned_session.strength_rpe,
                 target_type=target_type or advanced.target_type,
                 target_hr_zone=target_hr_zone or advanced.target_hr_zone,
                 target_pace_zone=target_pace_zone or advanced.target_pace_zone,
@@ -1922,17 +2159,20 @@ def _update_session_from_quick_mode(
         updated_session = update_planned_session(
             db,
             planned_session,
-            PlannedSessionUpdate(
-                training_day_id=training_day_id,
-                sport_type=sport_type or parsed.sport_type or planned_session.sport_type,
-                discipline_variant=discipline_variant or parsed.discipline_variant or planned_session.discipline_variant,
-                name=advanced.name or parsed.name or planned_session.name,
+                PlannedSessionUpdate(
+                    training_day_id=training_day_id,
+                    sport_type=sport_type or parsed.sport_type or planned_session.sport_type,
+                    discipline_variant=discipline_variant or parsed.discipline_variant or planned_session.discipline_variant,
+                    modality=advanced.modality,
+                    name=advanced.name or parsed.name or planned_session.name,
                 description_text=raw_text,
                 session_type=parsed.session_type or advanced.session_type or planned_session.session_type,
                 session_group_id=advanced.session_group_id,
                 expected_duration_min=parsed.expected_duration_min if parsed.expected_duration_min is not None else advanced.expected_duration_min,
                 expected_distance_km=parsed.expected_distance_km if parsed.expected_distance_km is not None else advanced.expected_distance_km,
                 expected_elevation_gain_m=advanced.expected_elevation_gain_m,
+                strength_focus=advanced.strength_focus or planned_session.strength_focus,
+                strength_rpe=advanced.strength_rpe if advanced.strength_rpe is not None else planned_session.strength_rpe,
                 target_type=advanced.target_type,
                 target_hr_zone=parsed.target_hr_zone or advanced.target_hr_zone,
                 target_pace_zone=advanced.target_pace_zone,
@@ -1952,17 +2192,20 @@ def _update_session_from_quick_mode(
         updated_session = update_planned_session(
             db,
             planned_session,
-            PlannedSessionUpdate(
-                training_day_id=training_day_id,
-                sport_type=sport_type or parsed.sport_type or planned_session.sport_type,
-                discipline_variant=discipline_variant or parsed.discipline_variant or planned_session.discipline_variant,
-                name=advanced.name or parsed.name or planned_session.name,
+                PlannedSessionUpdate(
+                    training_day_id=training_day_id,
+                    sport_type=sport_type or parsed.sport_type or planned_session.sport_type,
+                    discipline_variant=discipline_variant or parsed.discipline_variant or planned_session.discipline_variant,
+                    modality=advanced.modality,
+                    name=advanced.name or parsed.name or planned_session.name,
                 description_text=raw_text,
                 session_type=parsed.session_type or advanced.session_type or planned_session.session_type,
                 session_group_id=advanced.session_group_id,
                 expected_duration_min=advanced.expected_duration_min if advanced.expected_duration_min is not None else parsed.expected_duration_min,
                 expected_distance_km=advanced.expected_distance_km if advanced.expected_distance_km is not None else parsed.expected_distance_km,
                 expected_elevation_gain_m=advanced.expected_elevation_gain_m,
+                strength_focus=advanced.strength_focus or planned_session.strength_focus,
+                strength_rpe=advanced.strength_rpe if advanced.strength_rpe is not None else planned_session.strength_rpe,
                 target_type=advanced.target_type or planned_session.target_type,
                 target_hr_zone=advanced.target_hr_zone or planned_session.target_hr_zone,
                 target_pace_zone=advanced.target_pace_zone or planned_session.target_pace_zone,
@@ -1979,6 +2222,8 @@ def _update_session_from_quick_mode(
 
 
 def _build_default_steps_for_updated_session(planned_session) -> list[PlannedSessionStepCreate]:
+    if (planned_session.sport_type or "").strip().lower() == "strength":
+        return []
     duration_sec = planned_session.expected_duration_min * 60 if planned_session.expected_duration_min is not None else None
     distance_m = int(round(planned_session.expected_distance_km * 1000)) if planned_session.expected_distance_km is not None else None
     if duration_sec is None and distance_m is None:
@@ -2007,6 +2252,8 @@ def _build_default_steps_for_updated_session(planned_session) -> list[PlannedSes
 
 
 def _build_parsed_steps_for_updated_session(planned_session, parsed) -> list[PlannedSessionStepCreate]:
+    if (planned_session.sport_type or "").strip().lower() == "strength":
+        return []
     if parsed.steps:
         return [
             PlannedSessionStepCreate(
@@ -2016,6 +2263,7 @@ def _build_parsed_steps_for_updated_session(planned_session, parsed) -> list[Pla
                 repeat_count=step.repeat_count,
                 duration_sec=step.duration_sec,
                 distance_m=step.distance_m,
+                incline_pct=getattr(step, "incline_pct", None),
                 target_notes=step.target_notes,
             )
             for step in parsed.steps
@@ -2024,6 +2272,8 @@ def _build_parsed_steps_for_updated_session(planned_session, parsed) -> list[Pla
 
 
 def _build_builder_steps_for_updated_session(planned_session, builder_blocks_json: str | None) -> list[PlannedSessionStepCreate]:
+    if (planned_session.sport_type or "").strip().lower() == "strength":
+        return []
     try:
         blocks = json.loads(builder_blocks_json or "[]")
     except json.JSONDecodeError as exc:
@@ -2071,6 +2321,7 @@ def _builder_step_create_from_payload(*, planned_session, payload: dict, step_or
     target_zone = (payload.get("targetZone") or "").strip() or None
     custom_min = (payload.get("customMin") or "").strip() or None
     custom_max = (payload.get("customMax") or "").strip() or None
+    incline_pct = _parse_optional_float((payload.get("inclinePct") or "").strip() or None)
     duration_sec, distance_m = _builder_value_to_metrics(value, unit)
     step_type = (payload.get("stepType") or "").strip().lower() or fallback_step_type
 
@@ -2092,6 +2343,7 @@ def _builder_step_create_from_payload(*, planned_session, payload: dict, step_or
         "target_power_max": None,
         "target_pace_min_sec_km": None,
         "target_pace_max_sec_km": None,
+        "incline_pct": incline_pct,
     }
 
     if target_type == "hr":
@@ -2168,6 +2420,27 @@ def _parse_pace_to_seconds(value: str | None) -> int | None:
     if seconds > 59:
         return None
     return minutes * 60 + seconds
+
+
+def _parse_optional_float(value: str | None) -> float | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    try:
+        return float(normalized.replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _format_incline_pct(value: int | float | None) -> str:
+    if value is None:
+        return "-"
+    numeric = float(value)
+    if numeric.is_integer():
+        return f"{int(numeric)}%"
+    return f"{str(round(numeric, 2)).rstrip('0').rstrip('.')}%"
 
 
 def _coerce_positive_int(value) -> int | None:

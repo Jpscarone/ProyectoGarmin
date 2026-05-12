@@ -18,6 +18,7 @@ from app.db.models.training_plan import TrainingPlan
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.services.health_readiness_service import build_health_readiness_summary, evaluate_health_readiness
 from app.services.planning.presentation import derive_session_metrics, describe_session_structure_short
+from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 
 
 APP_LOCAL_TIMEZONE = timezone(timedelta(hours=-3), name="America/Buenos_Aires")
@@ -134,6 +135,27 @@ def build_today_coach_summary(context: dict[str, Any]) -> dict[str, Any]:
         summary = _activity_coach_summary(today_activity)
         recommendation = "Analizá la actividad para ajustar mejor la próxima sesión."
         decision = "Analizar la actividad antes de ajustar la próxima sesión."
+        return {
+            "headline": headline,
+            "summary": summary,
+            "recommendation": recommendation,
+            "decision": decision,
+            "status_label": today_status["label"],
+            "status": status,
+        }
+
+    if today_session["exists"] and today_session.get("is_completed_manually"):
+        headline = "Sesion de gimnasio realizada"
+        sport_label = _sport_text(today_session.get("sport"))
+        duration = today_session.get("duration_label")
+        summary_parts = [today_session["title"]]
+        if sport_label:
+            summary_parts.append(sport_label)
+        if duration:
+            summary_parts.append(duration)
+        summary = " | ".join(summary_parts) + ". La sesion strength quedo marcada manualmente como realizada."
+        recommendation = "Toma ese trabajo como carga valida dentro de la semana y prioriza buena recuperacion si hubo fuerza de piernas."
+        decision = "Mantener la sesion como completada y usar el calendario para seguir la carga semanal."
         return {
             "headline": headline,
             "summary": summary,
@@ -309,7 +331,7 @@ def _build_today_status(
         health_ai=health_ai,
     )
 
-    if today_activity_payload["activity"] is not None:
+    if today_activity_payload["activity"] is not None or (today_session is not None and is_manually_completed_strength_session(today_session)):
         summary_text = "Ya hay actividad registrada hoy."
 
     return {
@@ -350,11 +372,15 @@ def _build_today_session_card(
     status_badges: list[str] = []
     status_line = None
     linked_activity = activity_payload.get("activity") if activity_payload.get("is_linked") else None
+    manual_completion = is_manually_completed_strength_session(session)
     if linked_activity is not None:
         status_badges.append("Realizada")
         status_line = f"{session.name} - realizado"
         if activity_payload.get("has_analysis"):
             status_badges.append("Analizada")
+    elif manual_completion:
+        status_badges.append("Realizada manualmente")
+        status_line = f"{session.name} - realizada manualmente"
     elif activity_payload.get("activity") is not None:
         status_badges.append("Actividad sin vincular")
         status_line = f"{session.name} - pendiente"
@@ -367,7 +393,7 @@ def _build_today_session_card(
         "title": session.name,
         "sport": session.sport_type,
         "objective": objective,
-        "duration_label": format_duration_minutes(session.expected_duration_min),
+        "duration_label": format_duration_minutes(int(round(completed_duration_sec(session) / 60))) if manual_completion and completed_duration_sec(session) is not None else format_duration_minutes(session.expected_duration_min),
         "url": f"/planned_sessions/{session.id}",
         "count": session_count,
         "has_more": session_count > 1,
@@ -375,6 +401,7 @@ def _build_today_session_card(
         "derived_title": metrics.title,
         "status_badges": status_badges,
         "status_line": status_line,
+        "is_completed_manually": manual_completion,
     }
 
 
@@ -495,11 +522,20 @@ def _build_weekly_summary(db: Session, athlete_id: int, reference_date: date) ->
     planned_sessions = _get_sessions_in_range(db, athlete_id, week_start, week_end)
     week_activities = _get_activities_in_range(db, athlete_id, week_start, week_end)
     planned_count = analysis.planned_sessions if analysis and analysis.planned_sessions is not None else len(planned_sessions)
-    completed_count = analysis.completed_sessions if analysis and analysis.completed_sessions is not None else len(week_activities)
+    completed_count = (
+        analysis.completed_sessions
+        if analysis and analysis.completed_sessions is not None
+        else sum(1 for session in planned_sessions if is_session_completed(session))
+    )
     total_duration_minutes = (
         int(round((analysis.total_duration_sec or 0) / 60))
         if analysis and analysis.total_duration_sec is not None
-        else _sum_duration_minutes(week_activities)
+        else (_sum_duration_minutes(week_activities) or 0)
+        + sum(
+            int(round((completed_duration_sec(session) or 0) / 60))
+            for session in planned_sessions
+            if is_manually_completed_strength_session(session)
+        )
     )
     total_distance_km = (
         round((analysis.total_distance_m or 0) / 1000, 1)
@@ -532,7 +568,10 @@ def _get_sessions_for_date(db: Session, athlete_id: int, training_plan: Training
     statement = (
         select(PlannedSession)
         .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
-        .options(selectinload(PlannedSession.training_day), selectinload(PlannedSession.activity_match))
+        .options(
+            selectinload(PlannedSession.training_day),
+            selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity),
+        )
         .where(
             PlannedSession.athlete_id == athlete_id,
             TrainingDay.day_date == reference_date,
@@ -660,7 +699,10 @@ def _get_sessions_in_range(db: Session, athlete_id: int, date_from: date, date_t
     statement = (
         select(PlannedSession)
         .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
-        .options(selectinload(PlannedSession.training_day))
+        .options(
+            selectinload(PlannedSession.training_day),
+            selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity),
+        )
         .where(
             PlannedSession.athlete_id == athlete_id,
             TrainingDay.day_date >= date_from,

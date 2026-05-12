@@ -5,6 +5,7 @@ from typing import Any
 
 from app.services.analysis_v2 import rules
 from app.services.analysis_v2.scoring import average_scores, closeness_score_from_delta_pct, range_target_score, stability_score_from_cv
+from app.services.modality import normalize_modality, preferred_modality
 from app.services.analysis_v2.structured import (
     apply_block_short_notes,
     build_block_analysis,
@@ -20,8 +21,9 @@ from app.services.analysis_v2.structured import (
 
 
 def compute_session_metrics(context: Any) -> dict[str, Any]:
+    modality_info = _build_modality_info(context)
     structured_plan = _build_structured_plan(context)
-    planned_vs_actual = _build_planned_vs_actual(context)
+    planned_vs_actual = _build_planned_vs_actual(context, modality_info)
     elevation = _build_elevation_metrics(context, planned_vs_actual)
     heart_rate = _build_heart_rate_metrics(context)
     pace = _build_pace_metrics(context)
@@ -32,13 +34,14 @@ def compute_session_metrics(context: Any) -> dict[str, Any]:
     intensity = _build_intensity_metrics(context, structured_plan)
     recent_comparisons = _build_recent_similar_comparisons(context)
     weekly_context = _build_weekly_context(context)
-    compliance = _build_compliance_metrics(planned_vs_actual, laps)
+    compliance = _build_compliance_metrics(context, planned_vs_actual, laps, intensity, modality_info)
     derived_flags = _build_flags(context, planned_vs_actual, heart_rate, pace, intensity, laps, structured_plan, block_analysis)
     block_analysis = apply_block_short_notes(block_analysis, derived_flags.get("recovery_block_not_effective_flag", False))
     scores = _build_scores(context, compliance, heart_rate, pace, power, cadence, intensity, laps, structured_plan, block_analysis)
 
     return {
         "session_intent": structured_plan["session_intent"],
+        "modality": modality_info,
         "planned_vs_actual": planned_vs_actual,
         "intensity": intensity,
         "heart_rate": heart_rate,
@@ -114,30 +117,96 @@ def _infer_zone_from_notes(*notes: str | None) -> str | None:
     return None
 
 
-def _build_planned_vs_actual(context: Any) -> dict[str, Any]:
+def _build_planned_vs_actual(context: Any, modality_info: dict[str, Any]) -> dict[str, Any]:
     actual_duration_min = _seconds_to_minutes(context.activity.duration_sec)
     actual_distance_km = _meters_to_km(context.activity.distance_m)
+    distance_metric = _comparison_metric(context.planned_session.expected_distance_km, actual_distance_km)
+    elevation_metric = _comparison_metric(context.planned_session.expected_elevation_gain_m, context.activity.elevation_gain_m)
+
+    if modality_info["sport_family"] == "bike" and modality_info["effective_modality"] in {"indoor", "virtual"}:
+        distance_metric = _comparison_metric(
+            context.planned_session.expected_distance_km,
+            actual_distance_km,
+            evaluated=False,
+            confidence="low",
+            note="Distancia no evaluada por modalidad indoor.",
+        )
+        elevation_metric = _comparison_metric(
+            context.planned_session.expected_elevation_gain_m,
+            context.activity.elevation_gain_m,
+            evaluated=False,
+            confidence="ignored",
+            note="Desnivel ignorado por modalidad indoor.",
+        )
+    elif modality_info["sport_family"] == "run" and modality_info["effective_modality"] == "indoor":
+        note = "Distancia de cinta tomada como referencia, no como metrica principal."
+        if actual_distance_km in (None, 0):
+            distance_metric = _comparison_metric(
+                context.planned_session.expected_distance_km,
+                actual_distance_km,
+                evaluated=False,
+                confidence="low",
+                note=note,
+            )
+        else:
+            distance_metric = _comparison_metric(
+                context.planned_session.expected_distance_km,
+                actual_distance_km,
+                confidence="low",
+                note=note,
+            )
+
     return {
         "duration": _comparison_metric(context.planned_session.expected_duration_min, actual_duration_min),
-        "distance": _comparison_metric(context.planned_session.expected_distance_km, actual_distance_km),
-        "elevation": _comparison_metric(context.planned_session.expected_elevation_gain_m, context.activity.elevation_gain_m),
+        "distance": distance_metric,
+        "elevation": elevation_metric,
     }
 
 
-def _build_compliance_metrics(planned_vs_actual: dict[str, Any], laps: dict[str, Any]) -> dict[str, Any]:
-    duration_score = closeness_score_from_delta_pct(planned_vs_actual["duration"]["delta_pct"])
-    distance_score = closeness_score_from_delta_pct(planned_vs_actual["distance"]["delta_pct"])
-    elevation_score = closeness_score_from_delta_pct(planned_vs_actual["elevation"]["delta_pct"])
+def _build_compliance_metrics(
+    context: Any,
+    planned_vs_actual: dict[str, Any],
+    laps: dict[str, Any],
+    intensity: dict[str, Any],
+    modality_info: dict[str, Any],
+) -> dict[str, Any]:
+    duration_score = _metric_closeness_score(planned_vs_actual["duration"])
+    distance_score = _metric_closeness_score(planned_vs_actual["distance"])
+    elevation_score = _metric_closeness_score(planned_vs_actual["elevation"])
     lap_alignment_score = laps.get("alignment_score")
-    global_basic_score = average_scores([duration_score, distance_score, elevation_score])
+    intensity_score = (intensity.get("target_compliance") or {}).get("score") if isinstance(intensity, dict) else None
+    notes = _modality_analysis_notes(context, modality_info, planned_vs_actual)
+    has_planned_incline = _has_planned_incline(context)
+
+    if modality_info["sport_family"] == "bike" and modality_info["effective_modality"] in {"indoor", "virtual"}:
+        global_basic_score = _weighted_average_scores(
+            [
+                (duration_score, 0.5),
+                (intensity_score, 0.25),
+                (lap_alignment_score, 0.25),
+            ]
+        )
+    elif modality_info["sport_family"] == "run" and modality_info["effective_modality"] == "indoor":
+        global_basic_score = _weighted_average_scores(
+            [
+                (duration_score, 0.5),
+                (distance_score, 0.1 if has_planned_incline else 0.2),
+                (intensity_score, 0.2 if has_planned_incline else 0.15),
+                (lap_alignment_score, 0.2 if has_planned_incline else 0.15),
+            ]
+        )
+    else:
+        global_basic_score = average_scores([duration_score, distance_score, elevation_score])
     global_score = average_scores([global_basic_score, lap_alignment_score])
     return {
         "duration_score": duration_score,
         "distance_score": distance_score,
         "elevation_score": elevation_score,
+        "intensity_score": intensity_score,
         "lap_alignment_score": lap_alignment_score,
         "global_basic_score": global_basic_score,
         "global_score": global_score,
+        "notes": notes,
         "formula": {
             "duration_distance_elevation": "100 - abs(delta_pct), limitado a 0-100",
             "global_basic_score": "promedio simple de los componentes disponibles",
@@ -551,7 +620,14 @@ def _build_scores(
     }
 
 
-def _comparison_metric(planned: float | None, actual: float | None) -> dict[str, float | None]:
+def _comparison_metric(
+    planned: float | None,
+    actual: float | None,
+    *,
+    evaluated: bool = True,
+    confidence: str = "normal",
+    note: str | None = None,
+) -> dict[str, float | str | bool | None]:
     delta_abs = None if planned is None or actual is None else round(actual - planned, 2)
     delta_pct = None if planned is None or actual is None or planned == 0 else round(((actual - planned) / planned) * 100.0, 1)
     ratio = None if planned is None or actual is None or planned == 0 else round(actual / planned, 3)
@@ -561,7 +637,80 @@ def _comparison_metric(planned: float | None, actual: float | None) -> dict[str,
         "delta_abs": delta_abs,
         "delta_pct": delta_pct,
         "actual_to_planned_ratio": ratio,
+        "evaluated": evaluated,
+        "confidence": confidence,
+        "note": note,
     }
+
+
+def _metric_closeness_score(metric: dict[str, Any]) -> float | None:
+    if not metric or metric.get("evaluated") is False:
+        return None
+    return closeness_score_from_delta_pct(metric.get("delta_pct"))
+
+
+def _weighted_average_scores(weighted_values: list[tuple[float | None, float]]) -> float | None:
+    usable = [(float(value), weight) for value, weight in weighted_values if value is not None and weight > 0]
+    if not usable:
+        return None
+    total_weight = sum(weight for _, weight in usable)
+    if total_weight <= 0:
+        return None
+    return round(sum(value * weight for value, weight in usable) / total_weight, 1)
+
+
+def _build_modality_info(context: Any) -> dict[str, Any]:
+    planned_modality = normalize_modality(getattr(context.planned_session, "modality", None))
+    activity_modality = normalize_modality(getattr(context.activity, "modality", None))
+    sport_family = _sport_family(context.planned_session.sport_type or context.activity.sport_type)
+    effective_modality = preferred_modality(activity_modality, planned_modality)
+    return {
+        "planned_modality": planned_modality,
+        "activity_modality": activity_modality,
+        "effective_modality": effective_modality,
+        "sport_family": sport_family,
+    }
+
+
+def _modality_analysis_notes(context: Any, modality_info: dict[str, Any], planned_vs_actual: dict[str, Any]) -> list[str]:
+    notes: list[str] = []
+    distance_note = (planned_vs_actual.get("distance") or {}).get("note")
+    if distance_note:
+        notes.append(distance_note)
+    if modality_info["sport_family"] == "bike" and modality_info["effective_modality"] in {"indoor", "virtual"}:
+        notes.append("En bici indoor se priorizo duracion e intensidad sobre distancia.")
+    if (
+        modality_info["sport_family"] == "run"
+        and modality_info["effective_modality"] == "indoor"
+        and _has_planned_incline(context)
+    ):
+        notes.append("Sesion en cinta con inclinacion planificada: se prioriza duracion e intensidad sobre ritmo/distancia.")
+    return notes
+
+
+def _has_planned_incline(context: Any) -> bool:
+    for step in list(getattr(context.planned_session, "steps", []) or []):
+        if getattr(step, "incline_pct", None) is not None:
+            return True
+    return False
+
+
+def _sport_family(value: str | None) -> str | None:
+    normalized = _normalized(value)
+    mapping = {
+        "running": "run",
+        "run": "run",
+        "trail_running": "run",
+        "treadmill_running": "run",
+        "cycling": "bike",
+        "bike": "bike",
+        "road_cycling": "bike",
+        "indoor_cycling": "bike",
+        "virtual_ride": "bike",
+    }
+    if not normalized:
+        return None
+    return mapping.get(normalized, normalized)
 
 
 def _estimate_zone_distribution(laps: list[Any], total_duration_sec: int | None, *, avg_value: float | int | None, zone_rows: list[dict[str, Any]], field_name: str) -> dict[str, Any]:

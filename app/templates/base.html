@@ -15,10 +15,9 @@
                 <a href="/athletes">Atletas</a>
                 <a href="/training_plans{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Planes</a>
                 <a href="/calendar">Calendario</a>
-                <a href="/session_templates">Biblioteca</a>
                 <a href="/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% if request.state.current_training_plan %}&training_plan_id={{ request.state.current_training_plan.id }}{% endif %}{% endif %}">Actividades</a>
                 <a href="/health{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Salud</a>
-                <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Sincronizar Garmin</a>
+                <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Garmin</a>
             </nav>
             <div class="top-context">
                 {% if request.state.current_athlete %}

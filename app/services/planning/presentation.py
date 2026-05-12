@@ -28,6 +28,7 @@ class SessionDisplaySimpleStep:
     target_rpe_zone: str | None
     target_cadence_min: int | None
     target_cadence_max: int | None
+    incline_pct: float | None
     target_notes: str | None
     source_step_id: int | None
 
@@ -93,6 +94,7 @@ def build_session_display_blocks(
             target_rpe_zone=getattr(raw_step, "target_rpe_zone", None),
             target_cadence_min=raw_step.target_cadence_min,
             target_cadence_max=raw_step.target_cadence_max,
+            incline_pct=getattr(raw_step, "incline_pct", None),
             target_notes=raw_step.target_notes,
             source_step_id=raw_step.id,
         )
@@ -146,6 +148,7 @@ def build_session_display_blocks_for_session(planned_session: object) -> list[Se
             target_rpe_zone=getattr(planned_session, "target_rpe_zone", None),
             target_cadence_min=None,
             target_cadence_max=None,
+            incline_pct=None,
             target_notes=getattr(planned_session, "target_notes", None),
             source_step_id=None,
         )
@@ -210,7 +213,10 @@ def build_session_summary(planned_session: object) -> str | None:
     if not parts:
         return None
 
-    sport_label = _summary_sport_label(getattr(planned_session, "sport_type", None))
+    sport_label = _summary_sport_label(
+        getattr(planned_session, "sport_type", None),
+        getattr(planned_session, "modality", None),
+    )
     summary = " + ".join(parts)
     return f"{sport_label} {summary}".strip() if sport_label else summary
 
@@ -226,7 +232,10 @@ def build_session_summary_with_ranges(planned_session: object, *, html: bool = F
     if not parts:
         return None
 
-    sport_label = _summary_sport_label(getattr(planned_session, "sport_type", None))
+    sport_label = _summary_sport_label(
+        getattr(planned_session, "sport_type", None),
+        getattr(planned_session, "modality", None),
+    )
     summary = " + ".join(parts)
     return f"{sport_label} {summary}".strip() if sport_label else summary
 
@@ -361,6 +370,9 @@ def _display_blocks_title(planned_session: object, blocks: list[SessionDisplayBl
         "swimming": "Natacion",
         "multisport": "Multideporte",
     }.get(sport, "")
+    modality = getattr(planned_session, "modality", None)
+    if sport_label and modality in {"indoor", "outdoor", "virtual"}:
+        sport_label = f"{sport_label} {modality}"
 
     priority_blocks = [block for block in blocks if _block_is_title_priority(block)]
     source_blocks = priority_blocks or blocks
@@ -441,7 +453,9 @@ def _display_repeat_fragment_short(block: SessionDisplayRepeatBlock) -> str:
 
 def _display_repeat_intensity(block: SessionDisplayRepeatBlock) -> str:
     work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
-    return _display_step_intensity(work_step)
+    intensity = _display_step_intensity(work_step)
+    incline = _display_step_incline_short(work_step)
+    return " ".join(part for part in (intensity, incline) if part).strip()
 
 
 def _display_block_title_fragment(block: SessionDisplayBlock) -> str:
@@ -467,33 +481,45 @@ def _describe_display_block(block: SessionDisplayBlock) -> str:
 
 def _describe_display_block_short(block: SessionDisplayBlock) -> str:
     if isinstance(block, SessionDisplayRepeatBlock):
-        work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
-        recovery_step = next(
-            (
-                step
-                for step in block.steps
-                if step.step_type == "recovery" and (step.duration_sec is not None or step.distance_m is not None)
-            ),
-            None,
-        )
-        work_fragment = _display_step_measurement(work_step)
-        work_intensity = (work_step.target_notes or "").strip()
-        if recovery_step is None:
-            return " ".join(part for part in (f"{block.repeat_count}x{work_fragment}", work_intensity) if part)
+        has_incline = any(step.incline_pct is not None for step in block.steps)
+        if not has_incline:
+            work_step = next((step for step in block.steps if step.step_type == "work"), block.steps[0])
+            recovery_step = next(
+                (
+                    step
+                    for step in block.steps
+                    if step.step_type == "recovery" and (step.duration_sec is not None or step.distance_m is not None)
+                ),
+                None,
+            )
+            work_fragment = _display_step_measurement(work_step)
+            work_intensity = (work_step.target_notes or "").strip()
+            if recovery_step is None:
+                return " ".join(part for part in (f"{block.repeat_count}x{work_fragment}", work_intensity) if part)
 
-        recovery_fragment = _display_step_measurement(recovery_step)
-        return " ".join(
-            part for part in (f"{block.repeat_count}x({work_fragment}+{recovery_fragment})", work_intensity) if part
-        )
+            recovery_fragment = _display_step_measurement(recovery_step)
+            return " ".join(
+                part for part in (f"{block.repeat_count}x({work_fragment}+{recovery_fragment})", work_intensity) if part
+            )
+        nested = [_summary_simple_step(step) for step in block.steps]
+        nested = [part for part in nested if part]
+        if not nested:
+            return ""
+        return f"{block.repeat_count}x({'+'.join(nested)})"
     return _describe_simple_step(block)
 
 
 def _describe_simple_step(step: SessionDisplaySimpleStep) -> str:
     measurement = _display_step_measurement(step)
     label = _display_step_intensity(step)
+    incline = _display_step_incline_long(step)
     if measurement and label:
-        return f"{measurement} {label}"
-    return measurement or label
+        text = f"{measurement} {label}"
+    else:
+        text = measurement or label
+    if incline:
+        return f"{text} · {incline}" if text else incline
+    return text
 
 
 def _summary_display_block(block: SessionDisplayBlock) -> str:
@@ -535,9 +561,14 @@ def _summary_display_block_with_ranges(
 def _summary_simple_step(step: SessionDisplaySimpleStep) -> str:
     measurement = _display_step_measurement(step)
     zone_label = _summary_step_zone(step)
+    incline = _display_step_incline_short(step)
     if measurement and zone_label:
-        return f"{measurement} {zone_label}"
-    return measurement or zone_label
+        text = f"{measurement} {zone_label}"
+    else:
+        text = measurement or zone_label
+    if incline:
+        return f"{text} {incline}" if text else incline
+    return text
 
 
 def _summary_simple_step_with_ranges(
@@ -557,9 +588,14 @@ def _summary_simple_step_with_ranges(
             classes = f"{classes} recovery-step"
         zone_label = f'<span class="{classes}">{zone_label}</span>'
 
+    incline = _display_step_incline_long(step)
     if measurement and zone_label:
-        return f"{measurement} {zone_label}"
-    return measurement or zone_label or ""
+        text = f"{measurement} {zone_label}"
+    else:
+        text = measurement or zone_label or ""
+    if incline:
+        return f"{text} · {incline}" if text else incline
+    return text
 
 
 def _summary_step_zone(step: SessionDisplaySimpleStep) -> str | None:
@@ -762,7 +798,7 @@ def _step_range_label(
     return None
 
 
-def _summary_sport_label(raw: str | None) -> str:
+def _summary_sport_label(raw: str | None, modality: str | None = None) -> str:
     if not raw:
         return ""
     mapping = {
@@ -777,7 +813,11 @@ def _summary_sport_label(raw: str | None) -> str:
         "multisport": "Multisport",
     }
     normalized = str(raw).strip().lower()
-    return mapping.get(normalized, normalized.capitalize())
+    label = mapping.get(normalized, normalized.capitalize())
+    normalized_modality = (modality or "").strip().lower()
+    if normalized_modality in {"indoor", "outdoor", "virtual"}:
+        return f"{label} {normalized_modality}"
+    return label
 
 
 def _display_step_intensity(step: SessionDisplaySimpleStep) -> str:
@@ -795,6 +835,27 @@ def _display_step_intensity(step: SessionDisplaySimpleStep) -> str:
         if zone:
             return str(zone).strip()
     return ""
+
+
+def _display_step_incline_short(step: SessionDisplaySimpleStep) -> str:
+    if step.incline_pct is None:
+        return ""
+    return f"@{_format_incline_pct(step.incline_pct)}"
+
+
+def _display_step_incline_long(step: SessionDisplaySimpleStep) -> str:
+    if step.incline_pct is None:
+        return ""
+    return f"inclinacion {_format_incline_pct(step.incline_pct)}"
+
+
+def _format_incline_pct(value: float | None) -> str:
+    if value is None:
+        return ""
+    numeric = float(value)
+    if numeric.is_integer():
+        return f"{int(numeric)}%"
+    return f"{str(round(numeric, 2)).rstrip('0').rstrip('.')}%"
 
 
 def _custom_target_label(target_type: str | None, *, include_range: bool) -> str:

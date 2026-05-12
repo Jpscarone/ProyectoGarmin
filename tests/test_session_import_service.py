@@ -127,6 +127,31 @@ END"""
         self.assertEqual(step.repeat_count, 2)
         self.assertEqual(step.duration_sec, 300)
 
+    def test_create_import_persists_modality(self) -> None:
+        raw = """SESSION
+DATE: 2026-04-05
+SPORT: cycling
+MODALITY: indoor
+NAME: Bici indoor Z2
+
+BLOCK
+VALUE: 50
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+
+END"""
+        result = create_session_import(
+            self.db,
+            training_day_id=self.training_day.id,
+            training_plan_id=None,
+            base_date_str=None,
+            raw_text=raw,
+        )
+        self.assertTrue(result.ok)
+        planned_session = self.db.query(PlannedSession).first()
+        self.assertEqual(planned_session.modality, "indoor")
+
     def test_create_import_persists_estimated_distance(self) -> None:
         raw = """SESSION
 DATE: 2026-04-05
@@ -309,6 +334,118 @@ END"""
         self.assertIsNone(power_step.target_power_zone)
         self.assertEqual(power_step.target_power_min, 280)
         self.assertEqual(power_step.target_power_max, 310)
+
+    def test_preview_shows_incline_when_present(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+MODALITY: indoor
+NAME: Cinta subida
+
+BLOCK
+VALUE: 10
+UNIT: min
+INTENSITY: hr
+ZONE: z1
+INCLINE_PCT: 1
+
+END"""
+        result = preview_session_import(
+            self.db,
+            training_day_id=self.training_day.id,
+            training_plan_id=None,
+            base_date_str=None,
+            raw_text=raw,
+        )
+        self.assertTrue(result.ok)
+        block = result.preview["sessions"][0]["blocks"][0]
+        self.assertEqual(block["incline_label"], "inclinacion 1%")
+        self.assertEqual(block["target_label"], "FC Z1 · inclinacion 1%")
+
+    def test_create_import_persists_incline_pct_in_normal_block(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+MODALITY: indoor
+
+BLOCK
+VALUE: 6
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+INCLINE_PCT: 8.5
+
+END"""
+        result = create_session_import(
+            self.db,
+            training_day_id=self.training_day.id,
+            training_plan_id=None,
+            base_date_str=None,
+            raw_text=raw,
+        )
+        self.assertTrue(result.ok)
+        step = self.db.query(PlannedSession).first().planned_session_steps[0]
+        self.assertEqual(step.incline_pct, 8.5)
+
+    def test_create_import_persists_incline_pct_in_repeat_block(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+MODALITY: indoor
+
+REPEAT
+COUNT: 2
+
+BLOCK
+VALUE: 6
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+INCLINE_PCT: 8
+
+BLOCK
+VALUE: 3
+UNIT: min
+INTENSITY: hr
+ZONE: z1
+INCLINE_PCT: 1
+
+END_REPEAT
+
+END"""
+        result = create_session_import(
+            self.db,
+            training_day_id=self.training_day.id,
+            training_plan_id=None,
+            base_date_str=None,
+            raw_text=raw,
+        )
+        self.assertTrue(result.ok)
+        steps = self.db.query(PlannedSession).first().planned_session_steps
+        self.assertEqual([step.incline_pct for step in steps], [8.0, 1.0])
+
+    def test_create_import_without_incline_keeps_null(self) -> None:
+        raw = """SESSION
+DATE: 2026-05-02
+SPORT: running
+
+BLOCK
+VALUE: 30
+UNIT: min
+INTENSITY: hr
+ZONE: z2
+
+END"""
+        result = create_session_import(
+            self.db,
+            training_day_id=self.training_day.id,
+            training_plan_id=None,
+            base_date_str=None,
+            raw_text=raw,
+        )
+        self.assertTrue(result.ok)
+        step = self.db.query(PlannedSession).first().planned_session_steps[0]
+        self.assertIsNone(step.incline_pct)
 
 
 if __name__ == "__main__":

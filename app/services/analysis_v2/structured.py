@@ -114,6 +114,7 @@ def build_block_structure(expanded_steps: list[dict[str, Any]]) -> list[dict[str
                 "target_zone": step["target_zone"],
                 "duration_sec": step["duration_sec"],
                 "distance_m": step["distance_m"],
+                "incline_pct": step.get("incline_pct"),
                 "repeat_group_id": step["repeat_group_id"],
                 "repeat_iteration": step["repeat_iteration"],
             }
@@ -627,6 +628,7 @@ def _expanded_step(step: Any, repeat_group_id: int | None, repeat_iteration: int
         "target_pace_min_sec_km": step.target_pace_min_sec_km,
         "target_pace_max_sec_km": step.target_pace_max_sec_km,
         "target_notes": step.target_notes,
+        "incline_pct": getattr(step, "incline_pct", None),
         "target_min": _target_min(step),
         "target_max": _target_max(step),
         "target_source": "explicit" if explicit_target else None,
