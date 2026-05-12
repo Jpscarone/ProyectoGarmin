@@ -37,6 +37,29 @@ from sqlalchemy.sql.compiler import IdentifierPreparer
 
 INTERNAL_TABLES = {"alembic_version", "sqlite_sequence"}
 MAX_TABLE_WARNINGS = 10
+MANUAL_TABLE_PRIORITY = [
+    "athletes",
+    "goals",
+    "training_plans",
+    "training_days",
+    "session_groups",
+    "planned_sessions",
+    "planned_session_steps",
+    "garmin_activities",
+    "garmin_activity_laps",
+    "activity_weather",
+    "analysis_reports",
+    "analysis_report_items",
+    "session_analyses",
+    "activity_session_matches",
+    "daily_health_metrics",
+    "health_ai_analyses",
+    "health_sync_states",
+    "weekly_analyses",
+    "session_templates",
+    "session_template_steps",
+    "garmin_accounts",
+]
 
 
 @dataclass
@@ -98,6 +121,13 @@ def build_dependency_order(pg_engine: Engine, tables: list[str]) -> tuple[list[s
     cyclic = sorted(pending)
     ordered.extend(cyclic)
     return ordered, cyclic, dependencies
+
+
+def apply_manual_priority(automatic_order: list[str], manual_priority: list[str], available_tables: list[str]) -> list[str]:
+    available_set = set(available_tables)
+    manual_order = [table for table in manual_priority if table in available_set]
+    remaining = [table for table in automatic_order if table not in set(manual_order)]
+    return manual_order + remaining
 
 
 def detect_deferred_cycle_columns(pg_engine: Engine, cyclic_tables: list[str]) -> dict[str, set[str]]:
@@ -265,7 +295,7 @@ def migrate_table(
             if result.rowcount == 0:
                 summary.skipped += 1
             else:
-                summary.inserted += result.rowcount
+                summary.inserted += 1
                 if pk_columns:
                     inserted_pk_rows.append({column: payload[column] for column in pk_columns})
         except IntegrityError as exc:
@@ -424,7 +454,8 @@ def main() -> int:
         print("No shared tables found between SQLite and PostgreSQL after exclusions.", file=sys.stderr)
         return 1
 
-    ordered_tables, cyclic_tables, dependencies = build_dependency_order(pg_engine, shared_tables)
+    automatic_order, cyclic_tables, dependencies = build_dependency_order(pg_engine, shared_tables)
+    ordered_tables = apply_manual_priority(automatic_order, MANUAL_TABLE_PRIORITY, shared_tables)
     warnings: dict[str, list[str]] = defaultdict(list)
     deferred_cycle_columns = detect_deferred_cycle_columns(pg_engine, cyclic_tables)
 
@@ -461,9 +492,12 @@ def main() -> int:
     print(", ".join(shared_tables))
 
     print("\nDependencias detectadas:")
-    for table in ordered_tables:
+    for table in automatic_order:
         deps = sorted(dependencies.get(table, set()))
         print(f"- {table}: {format_column_list(deps)}")
+
+    print("\nOrden final de migracion:")
+    print(", ".join(ordered_tables))
 
     if warnings.get("_global"):
         print("\nAvisos globales:")

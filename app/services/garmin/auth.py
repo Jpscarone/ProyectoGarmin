@@ -189,10 +189,48 @@ def get_garmin_auth_diagnostics(settings: Settings) -> dict[str, object]:
 
 
 def _save_tokens(client: Garmin, token_dir: Path) -> None:
+    save_targets: list[tuple[str, Any]] = []
+
+    nested_client = getattr(client, "client", None)
+    if nested_client is not None and callable(getattr(nested_client, "dump", None)):
+        save_targets.append(("client.client.dump", nested_client))
+
+    session = getattr(client, "session", None)
+    if session is not None and callable(getattr(session, "dump", None)):
+        save_targets.append(("client.session.dump", session))
+
+    if callable(getattr(client, "dump", None)):
+        save_targets.append(("client.dump", client))
+
+    if not save_targets:
+        logger.warning(
+            "Could not persist Garmin tokens in %s because no compatible dump() method was found.",
+            token_dir,
+        )
+        return
+
+    for method_name, target in save_targets:
+        try:
+            target.dump(str(token_dir))
+            logger.info("Persisted Garmin tokens in %s using %s", token_dir, method_name)
+            return
+        except Exception:
+            logger.warning(
+                "Failed to persist Garmin tokens in %s using %s",
+                token_dir,
+                method_name,
+                exc_info=True,
+            )
+
     try:
-        client.client.dump(str(token_dir))
+        available_attrs = sorted(attr for attr in ("client", "session", "dump") if hasattr(client, attr))
+        logger.warning(
+            "Could not persist Garmin tokens in %s after trying all compatible dump() methods. Available Garmin attrs: %s",
+            token_dir,
+            ", ".join(available_attrs) if available_attrs else "(none)",
+        )
     except Exception:
-        logger.warning("Could not persist Garmin tokens in %s", token_dir, exc_info=True)
+        logger.warning("Could not determine Garmin token persistence capabilities for %s", token_dir, exc_info=True)
 
 
 def _clear_last_auth_error(settings: Settings) -> None:
