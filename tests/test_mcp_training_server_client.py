@@ -56,6 +56,23 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["date"], "2026-05-13")
 
+    async def test_get_next_session_recommendation_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/next-session-recommendation")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-13")
+            self.assertEqual(request.url.params.get("planned_session_id"), "44")
+            return httpx.Response(200, json={"reference_date": "2026-05-13", "recommendation": {"decision": "keep"}})
+
+        client = _build_client(handler)
+        payload = await client.get_next_session_recommendation(
+            athlete_id=1,
+            reference_date="2026-05-13",
+            planned_session_id=44,
+        )
+
+        self.assertEqual(payload["recommendation"]["decision"], "keep")
+
 
 def _build_client(handler) -> TrainingAppApiClient:
     settings = Settings(

@@ -27,12 +27,15 @@ from app.db.models import weekly_analysis  # noqa: F401
 from app.db.models.activity_session_match import ActivitySessionMatch
 from app.db.models.analysis_report import AnalysisReport
 from app.db.models.athlete import Athlete
+from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
+from app.db.models.health_ai_analysis import HealthAiAnalysis
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
+from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
 from app.main import app
 
@@ -321,3 +324,122 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["activity"]["id"], activity.id)
         self.assertEqual(payload["match"]["source"], "none")
         self.assertIn("No hay sesion programada asociada", payload["analysis"]["warnings"][0])
+
+    def test_next_session_recommendation_returns_reduce_when_fatigue_signals_exist(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 13),
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            name="Tempo controlado",
+            sport_type="running",
+            modality="outdoor",
+            session_type="tempo",
+            expected_duration_min=45,
+            expected_distance_km=9,
+            target_notes="Trabajo en Z4 controlada",
+            session_order=1,
+            is_key_session=True,
+        )
+        self.db.add(planned_session)
+
+        self.db.add(
+            GarminActivity(
+                athlete_id=self.athlete.id,
+                garmin_activity_id=700001,
+                activity_name="Series duras",
+                sport_type="running",
+                start_time=datetime(2026, 5, 12, 8, 0, 0),
+                duration_sec=4200,
+                distance_m=12000,
+                avg_hr=158,
+                max_hr=181,
+                training_load=175,
+                training_effect_aerobic=4.2,
+                training_effect_anaerobic=2.6,
+            )
+        )
+
+        self.db.add(
+            DailyHealthMetric(
+                athlete_id=self.athlete.id,
+                metric_date=date(2026, 5, 13),
+                sleep_duration_minutes=300,
+                body_battery_morning=28,
+                hrv_value=35.0,
+                resting_hr=62,
+                stress_avg=68,
+            )
+        )
+
+        for offset in range(1, 6):
+            self.db.add(
+                DailyHealthMetric(
+                    athlete_id=self.athlete.id,
+                    metric_date=date(2026, 5, 13).fromordinal(date(2026, 5, 13).toordinal() - offset),
+                    sleep_duration_minutes=470,
+                    body_battery_morning=72,
+                    hrv_value=62.0,
+                    resting_hr=50,
+                    stress_avg=24,
+                )
+            )
+
+        self.db.add(
+            HealthAiAnalysis(
+                athlete_id=self.athlete.id,
+                reference_date=date(2026, 5, 13),
+                summary="Fatiga reciente.",
+                training_recommendation="Bajar intensidad hoy.",
+                risk_level="high",
+            )
+        )
+        self.db.add(
+            WeeklyAnalysis(
+                athlete_id=self.athlete.id,
+                week_start_date=date(2026, 5, 12),
+                week_end_date=date(2026, 5, 18),
+                analysis_version="v2",
+                status="completed",
+                summary_short="Semana cargada.",
+                total_duration_sec=15000,
+                total_distance_m=36000,
+                total_sessions=4,
+                load_score=82,
+                fatigue_score=79,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/next-session-recommendation?athlete_id={self.athlete.id}&reference_date=2026-05-13",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["next_session"]["id"], planned_session.id)
+        self.assertEqual(payload["health"]["date"], "2026-05-13")
+        self.assertEqual(payload["weekly"]["risk_level"], "moderate")
+        self.assertIn(payload["recommendation"]["decision"], {"replace_easy", "reduce", "caution", "rest"})
+        self.assertTrue(payload["data_quality"]["has_next_session"])
+        self.assertTrue(payload["data_quality"]["has_health"])
+
+    def test_next_session_recommendation_returns_no_data_without_session(self) -> None:
+        response = self.client.get(
+            f"/api/mcp/training/next-session-recommendation?athlete_id={self.athlete.id}&reference_date=2026-05-20",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsNone(payload["next_session"])
+        self.assertEqual(payload["recommendation"]["decision"], "no_data")
+        self.assertFalse(payload["data_quality"]["has_next_session"])

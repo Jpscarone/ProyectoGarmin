@@ -307,12 +307,14 @@ curl http://127.0.0.1:8000
 ```bash
 curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:8000/api/mcp/ping
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
 ```
 
 Prompt de prueba desde ChatGPT:
 
 ```text
 Usando ProyectoGarmin, comparame la ultima actividad de Pablo Scarone con lo que tenia programado.
+Usando ProyectoGarmin, dame una recomendacion para la proxima sesion de Pablo Scarone segun su estado actual.
 ```
 
 ### MCP local

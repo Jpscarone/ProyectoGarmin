@@ -7,6 +7,7 @@ from app.services.analysis_v2 import rules
 from app.services.analysis_v2.scoring import average_scores, closeness_score_from_delta_pct, range_target_score, stability_score_from_cv
 from app.services.modality import normalize_modality, preferred_modality
 from app.services.analysis_v2.structured import (
+    _step_label,
     apply_block_short_notes,
     build_block_analysis,
     build_block_structure,
@@ -31,6 +32,8 @@ def compute_session_metrics(context: Any) -> dict[str, Any]:
     cadence = _build_cadence_metrics(context)
     laps = _build_lap_metrics(context, structured_plan)
     block_analysis = build_block_analysis(laps.get("structured_match", {})) if laps.get("structured_match") else []
+    if not block_analysis and structured_plan["expanded_steps"]:
+        block_analysis = _build_planned_only_block_analysis(structured_plan["expanded_steps"])
     intensity = _build_intensity_metrics(context, structured_plan)
     recent_comparisons = _build_recent_similar_comparisons(context)
     weekly_context = _build_weekly_context(context)
@@ -382,6 +385,36 @@ def _build_lap_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[st
         "pairs": pairings,
         "structured_match": structured_match,
     }
+
+
+def _build_planned_only_block_analysis(expanded_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {
+            "planned_label": _step_label(step),
+            "role": step["role"],
+            "target_type": step["target_type"],
+            "target_zone": step.get("target_zone"),
+            "target_source": step.get("target_source"),
+            "planned_target_min": step.get("target_min"),
+            "planned_target_max": step.get("target_max"),
+            "target_range": {"min": step.get("target_min"), "max": step.get("target_max")}
+            if step.get("target_min") is not None or step.get("target_max") is not None
+            else None,
+            "planned_duration_sec": step.get("duration_sec"),
+            "planned_distance_m": step.get("distance_m"),
+            "actual_duration_sec": None,
+            "actual_distance_m": None,
+            "duration_delta_pct": None,
+            "distance_delta_pct": None,
+            "consistency_score": None,
+            "actual_value": None,
+            "activity_lap_index": None,
+            "within_range": None,
+            "score": None,
+            "short_note": None,
+        }
+        for step in expanded_steps
+    ]
 
 
 def _build_intensity_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[str, Any]:

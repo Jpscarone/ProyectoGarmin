@@ -21,6 +21,7 @@ from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
+from app.services.health_readiness_service import build_health_readiness_summary, evaluate_health_readiness
 from app.services.planning.presentation import describe_session_structure_short, derive_session_metrics
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
 from app.services.mcp_context_service import (
@@ -350,6 +351,66 @@ def compare_planned_vs_done(
     }
 
 
+@router.get("/training/next-session-recommendation")
+def get_next_session_recommendation(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    planned_session_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else date.today()
+    plan = select_default_training_plan(db, athlete_id=athlete.id, today=target_date)
+
+    target_session = (
+        _load_planned_session_for_compare(db, athlete.id, planned_session_id)
+        if planned_session_id is not None else None
+    )
+    if target_session is None:
+        target_session = _get_next_session_inclusive(db, athlete.id, plan, target_date)
+
+    last_activity = _get_latest_activity_until(db, athlete.id, target_date)
+    latest_metric = _get_latest_daily_health_metric_until(db, athlete.id, target_date)
+    latest_ai_analysis = _get_latest_health_ai_analysis_until(db, athlete.id, target_date)
+    latest_weekly = _get_latest_weekly_analysis_until(db, athlete.id, target_date)
+
+    health_payload, health_context = _build_health_recommendation_payload(
+        db,
+        athlete.id,
+        target_date,
+        latest_metric,
+        latest_ai_analysis,
+    )
+    weekly_payload = _build_weekly_recommendation_payload(latest_weekly)
+    data_quality = _build_next_session_data_quality(
+        target_session=target_session,
+        last_activity=last_activity,
+        latest_metric=latest_metric,
+        latest_weekly=latest_weekly,
+        latest_ai_analysis=latest_ai_analysis,
+    )
+    recommendation = _build_next_session_recommendation_payload(
+        target_session=target_session,
+        last_activity=last_activity,
+        health_context=health_context,
+        weekly_analysis=latest_weekly,
+        weekly_payload=weekly_payload,
+        data_quality=data_quality,
+    )
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": target_date.isoformat(),
+        "plan": _serialize_training_plan_recommendation(plan),
+        "next_session": _serialize_next_session_recommendation(target_session),
+        "last_activity": _serialize_last_activity_recommendation(last_activity),
+        "health": health_payload,
+        "weekly": weekly_payload,
+        "recommendation": recommendation,
+        "data_quality": data_quality,
+    }
+
+
 def _parse_iso_date(raw_value: str, field_name: str) -> date:
     try:
         return date.fromisoformat(raw_value)
@@ -624,6 +685,91 @@ def _get_latest_weekly_analysis(db: Session, athlete_id: int) -> WeeklyAnalysis 
         select(WeeklyAnalysis)
         .where(WeeklyAnalysis.athlete_id == athlete_id)
         .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.id.desc())
+    )
+
+
+def _get_next_session_inclusive(
+    db: Session,
+    athlete_id: int,
+    plan: TrainingPlan | None,
+    target_date: date,
+) -> PlannedSession | None:
+    primary = _get_next_session_by_range(db, athlete_id, plan, target_date, target_date + date.resolution)
+    if primary is not None:
+        return primary
+    return _get_next_session_by_range(db, athlete_id, plan, target_date, None)
+
+
+def _get_next_session_by_range(
+    db: Session,
+    athlete_id: int,
+    plan: TrainingPlan | None,
+    start_date: date,
+    end_date: date | None,
+) -> PlannedSession | None:
+    statement = (
+        select(PlannedSession)
+        .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+        .options(
+            selectinload(PlannedSession.training_day),
+            selectinload(PlannedSession.planned_session_steps),
+        )
+        .where(
+            PlannedSession.athlete_id == athlete_id,
+            TrainingDay.day_date >= start_date,
+        )
+        .order_by(TrainingDay.day_date.asc(), PlannedSession.session_order.asc(), PlannedSession.id.asc())
+        .limit(1)
+    )
+    if end_date is not None:
+        statement = statement.where(TrainingDay.day_date <= end_date)
+    if plan is not None:
+        statement = statement.where(TrainingDay.training_plan_id == plan.id)
+    return db.scalar(statement)
+
+
+def _get_latest_activity_until(db: Session, athlete_id: int, reference_date: date) -> GarminActivity | None:
+    return db.scalar(
+        select(GarminActivity)
+        .where(
+            GarminActivity.athlete_id == athlete_id,
+            GarminActivity.start_time.is_not(None),
+            func.date(GarminActivity.start_time) <= reference_date.isoformat(),
+        )
+        .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
+    )
+
+
+def _get_latest_daily_health_metric_until(db: Session, athlete_id: int, reference_date: date) -> DailyHealthMetric | None:
+    return db.scalar(
+        select(DailyHealthMetric)
+        .where(
+            DailyHealthMetric.athlete_id == athlete_id,
+            DailyHealthMetric.metric_date <= reference_date,
+        )
+        .order_by(DailyHealthMetric.metric_date.desc(), DailyHealthMetric.id.desc())
+    )
+
+
+def _get_latest_health_ai_analysis_until(db: Session, athlete_id: int, reference_date: date) -> HealthAiAnalysis | None:
+    return db.scalar(
+        select(HealthAiAnalysis)
+        .where(
+            HealthAiAnalysis.athlete_id == athlete_id,
+            HealthAiAnalysis.reference_date <= reference_date,
+        )
+        .order_by(HealthAiAnalysis.reference_date.desc(), HealthAiAnalysis.created_at.desc(), HealthAiAnalysis.id.desc())
+    )
+
+
+def _get_latest_weekly_analysis_until(db: Session, athlete_id: int, reference_date: date) -> WeeklyAnalysis | None:
+    return db.scalar(
+        select(WeeklyAnalysis)
+        .where(
+            WeeklyAnalysis.athlete_id == athlete_id,
+            WeeklyAnalysis.week_start_date <= reference_date,
+        )
+        .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
     )
 
 
@@ -1111,3 +1257,281 @@ def _resolve_compare_recommendation(
         if duration_ratio < 0.8:
             return "La duracion realizada quedo por debajo de lo planificado; conviene revisar si hubo recorte por fatiga, tiempo o terreno."
     return None
+
+
+def _serialize_training_plan_recommendation(plan: TrainingPlan | None) -> dict[str, Any] | None:
+    if plan is None:
+        return None
+    return {
+        "id": plan.id,
+        "name": plan.name,
+        "status": plan.status,
+        "start_date": plan.start_date.isoformat() if plan.start_date else None,
+        "end_date": plan.end_date.isoformat() if plan.end_date else None,
+    }
+
+
+def _serialize_next_session_recommendation(session: PlannedSession | None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "date": session.training_day.day_date.isoformat() if session.training_day and session.training_day.day_date else None,
+        "name": session.name,
+        "sport": session.sport_type,
+        "modality": session.modality,
+        "planned_duration_sec": metrics.duration_sec,
+        "planned_distance_m": metrics.distance_m,
+        "target_summary": _build_planned_target_summary(session),
+    }
+
+
+def _serialize_last_activity_recommendation(activity: GarminActivity | None) -> dict[str, Any] | None:
+    if activity is None:
+        return None
+    return {
+        "id": activity.id,
+        "activity_name": activity.activity_name,
+        "sport_type": activity.sport_type,
+        "start_time": activity.start_time.isoformat() if activity.start_time else None,
+        "duration_sec": activity.duration_sec,
+        "distance_m": activity.distance_m,
+        "avg_hr": activity.avg_hr,
+        "max_hr": activity.max_hr,
+        "training_load": activity.training_load,
+        "training_effect_aerobic": activity.training_effect_aerobic,
+        "training_effect_anaerobic": activity.training_effect_anaerobic,
+    }
+
+
+def _build_health_recommendation_payload(
+    db: Session,
+    athlete_id: int,
+    reference_date: date,
+    latest_metric: DailyHealthMetric | None,
+    latest_ai_analysis: HealthAiAnalysis | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    if latest_metric is None:
+        return None, {
+            "readiness_score": None,
+            "readiness_label": None,
+            "main_limiter": None,
+            "risk_level": latest_ai_analysis.risk_level if latest_ai_analysis is not None else None,
+            "has_health": False,
+            "confidence": "low",
+        }
+
+    summary = build_health_readiness_summary(db, athlete_id, latest_metric.metric_date)
+    evaluation = evaluate_health_readiness(summary)
+    payload = {
+        "date": latest_metric.metric_date.isoformat(),
+        "readiness_score": evaluation.readiness_score,
+        "readiness_label": evaluation.readiness_label,
+        "sleep_duration_minutes": latest_metric.sleep_duration_minutes,
+        "body_battery_morning": latest_metric.body_battery_morning,
+        "hrv_value": latest_metric.hrv_value or latest_metric.hrv_avg_ms,
+        "resting_hr": latest_metric.resting_hr,
+        "main_limiter": evaluation.main_limiter,
+    }
+    return payload, {
+        "readiness_score": evaluation.readiness_score,
+        "readiness_label": evaluation.readiness_label,
+        "main_limiter": evaluation.main_limiter,
+        "risk_level": latest_ai_analysis.risk_level if latest_ai_analysis is not None else None,
+        "has_health": True,
+        "confidence": "low" if evaluation.data_quality == "poor" else "medium" if evaluation.data_quality == "fair" else "high",
+        "reference_date": latest_metric.metric_date.isoformat(),
+    }
+
+
+def _build_weekly_recommendation_payload(analysis: WeeklyAnalysis | None) -> dict[str, Any] | None:
+    if analysis is None:
+        return None
+    return {
+        "week_start_date": analysis.week_start_date.isoformat(),
+        "summary": analysis.summary_short or analysis.coach_conclusion,
+        "risk_level": _weekly_risk_level(analysis),
+        "load_summary": _weekly_load_summary_text(analysis),
+    }
+
+
+def _weekly_risk_level(analysis: WeeklyAnalysis) -> str:
+    fatigue = float(analysis.fatigue_score or 0)
+    load = float(analysis.load_score or 0)
+    if fatigue >= 80 or load >= 85:
+        return "high"
+    if fatigue >= 60 or load >= 65:
+        return "moderate"
+    return "low"
+
+
+def _weekly_load_summary_text(analysis: WeeklyAnalysis) -> str | None:
+    parts: list[str] = []
+    if analysis.total_sessions is not None:
+        parts.append(f"{analysis.total_sessions} sesiones")
+    if analysis.total_duration_sec is not None:
+        parts.append(f"{int(round(analysis.total_duration_sec / 60.0))} min")
+    if analysis.total_distance_m is not None:
+        parts.append(f"{round(float(analysis.total_distance_m) / 1000.0, 1)} km")
+    return ", ".join(parts) if parts else None
+
+
+def _build_next_session_data_quality(
+    *,
+    target_session: PlannedSession | None,
+    last_activity: GarminActivity | None,
+    latest_metric: DailyHealthMetric | None,
+    latest_weekly: WeeklyAnalysis | None,
+    latest_ai_analysis: HealthAiAnalysis | None,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    if target_session is None:
+        warnings.append("No hay proxima sesion planificada disponible para analizar.")
+    if last_activity is None:
+        warnings.append("No hay actividad reciente registrada hasta la fecha de referencia.")
+    if latest_metric is None:
+        warnings.append("No hay metricas de salud disponibles hasta la fecha de referencia.")
+    if latest_weekly is None:
+        warnings.append("No hay analisis semanal disponible.")
+    if latest_ai_analysis is None:
+        warnings.append("No hay analisis AI de salud disponible; la recomendacion usa reglas locales.")
+    return {
+        "has_next_session": target_session is not None,
+        "has_last_activity": last_activity is not None,
+        "has_health": latest_metric is not None,
+        "has_weekly_analysis": latest_weekly is not None,
+        "warnings": warnings,
+    }
+
+
+def _build_next_session_recommendation_payload(
+    *,
+    target_session: PlannedSession | None,
+    last_activity: GarminActivity | None,
+    health_context: dict[str, Any],
+    weekly_analysis: WeeklyAnalysis | None,
+    weekly_payload: dict[str, Any] | None,
+    data_quality: dict[str, Any],
+) -> dict[str, Any]:
+    if target_session is None:
+        return {
+            "decision": "no_data",
+            "title": "Sin proxima sesion planificada",
+            "summary": "No hay una sesion objetivo para evaluar desde la fecha de referencia.",
+            "reasons": ["No se encontro proxima sesion planificada."],
+            "suggested_adjustment": "Revisar el plan y definir la siguiente sesion antes de ajustar la carga.",
+            "risk_flags": [],
+            "confidence": "low",
+        }
+
+    reasons: list[str] = []
+    risk_flags: list[str] = []
+    decision = "keep"
+    title = "Mantener la proxima sesion"
+    summary = "El contexto actual permite sostener la sesion prevista."
+    suggested_adjustment = "Mantener la sesion segun lo planificado."
+
+    readiness_score = health_context.get("readiness_score")
+    readiness_label = health_context.get("readiness_label")
+    risk_level = (health_context.get("risk_level") or (weekly_payload or {}).get("risk_level") or "").lower()
+    is_intense = _is_intense_planned_session(target_session)
+
+    if readiness_score is not None:
+        reasons.append(f"Readiness actual: {readiness_score} ({readiness_label}).")
+    if health_context.get("main_limiter"):
+        risk_flags.append(f"main_limiter:{health_context['main_limiter']}")
+    if risk_level in {"high", "moderate"}:
+        risk_flags.append(f"risk_level:{risk_level}")
+
+    if readiness_score is not None and readiness_score < 50:
+        decision = "rest"
+        title = "Priorizar descanso o recuperacion"
+        summary = "El estado actual no acompana una sesion exigente."
+        suggested_adjustment = "Cambiar la sesion por descanso, movilidad o recuperacion muy suave."
+        reasons.append("El readiness aparece en zona roja.")
+    elif readiness_score is not None and readiness_score < 65:
+        decision = "replace_easy"
+        title = "Conviene pasar a una sesion facil"
+        summary = "El estado actual sugiere evitar una carga exigente."
+        suggested_adjustment = "Reemplazar por rodaje suave, tecnica o trabajo regenerativo."
+        reasons.append("El readiness aparece limitado para sostener intensidad.")
+    elif risk_level == "high":
+        decision = "caution"
+        title = "Entrenar con cautela"
+        summary = "Hay senales de riesgo elevadas en el contexto reciente."
+        suggested_adjustment = "Si se hace la sesion, bajar volumen o intensidad y monitorear sensaciones."
+        reasons.append("El riesgo reciente figura como alto.")
+
+    if last_activity is not None and is_intense:
+        if (last_activity.training_load or 0) >= 150:
+            if decision == "keep":
+                decision = "reduce"
+                title = "Reducir la carga de la proxima sesion"
+                summary = "La carga reciente fue alta para encadenar otra sesion intensa sin ajuste."
+                suggested_adjustment = "Recortar volumen, bloques de calidad o tiempo total."
+            reasons.append("La ultima actividad tuvo training load alto.")
+            risk_flags.append("high_recent_training_load")
+        if (last_activity.training_effect_aerobic or 0) >= 4.0:
+            if decision in {"keep", "caution"}:
+                decision = "reduce"
+                title = "Conviene moderar la sesion"
+                summary = "La ultima actividad dejo una carga aerobica significativa."
+                suggested_adjustment = "Bajar la intensidad o convertir parte de la sesion en trabajo controlado."
+            reasons.append("La ultima actividad tuvo training effect aerobico alto.")
+            risk_flags.append("high_recent_aerobic_te")
+
+    if weekly_analysis is not None and _weekly_risk_level(weekly_analysis) == "high" and decision == "keep":
+        decision = "caution"
+        title = "Sostener con cautela"
+        summary = "La semana viene cargada aunque no hay una alerta aguda clara hoy."
+        suggested_adjustment = "Mantener solo si las sensaciones son buenas; si no, bajar un escalon."
+        reasons.append("El analisis semanal muestra carga o fatiga altas.")
+
+    if not reasons:
+        reasons.append("No aparecen alertas fuertes en los datos disponibles.")
+
+    confidence = _recommendation_confidence(data_quality, health_context)
+
+    return {
+        "decision": decision,
+        "title": title,
+        "summary": summary,
+        "reasons": reasons,
+        "suggested_adjustment": suggested_adjustment,
+        "risk_flags": risk_flags,
+        "confidence": confidence,
+    }
+
+
+def _is_intense_planned_session(session: PlannedSession) -> bool:
+    text = " ".join(
+        str(item).lower()
+        for item in (
+            session.session_type,
+            session.target_notes,
+            session.description_text,
+            session.name,
+            session.target_hr_zone,
+            session.target_pace_zone,
+            session.target_power_zone,
+            session.target_rpe_zone,
+        )
+        if item
+    )
+    return bool(session.is_key_session) or any(
+        token in text
+        for token in ("z4", "z5", "interval", "series", "tempo", "threshold", "umbral", "vo2", "intenso", "hard")
+    )
+
+
+def _recommendation_confidence(data_quality: dict[str, Any], health_context: dict[str, Any]) -> str:
+    if not data_quality.get("has_next_session"):
+        return "low"
+    if not data_quality.get("has_health"):
+        return "low"
+    if health_context.get("confidence") == "low":
+        return "low"
+    if not data_quality.get("has_last_activity") or not data_quality.get("has_weekly_analysis"):
+        return "medium"
+    return "high"

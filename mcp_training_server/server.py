@@ -79,6 +79,20 @@ async def compare_planned_vs_done(
     )
 
 
+@mcp.tool()
+async def get_next_session_recommendation(
+    athlete_id: int,
+    reference_date: str | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Devuelve una recomendacion read-only para la proxima sesion segun estado actual."""
+    return await CLIENT.get_next_session_recommendation(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+    )
+
+
 def main() -> None:
     transport = SETTINGS.mcp_transport
     if transport == "http":

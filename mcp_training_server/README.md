@@ -17,6 +17,7 @@ No modifica el estado del sistema.
 - `get_latest_weekly_analysis(athlete_id: int)`
 - `get_training_status(athlete_id: int)`
 - `compare_planned_vs_done(athlete_id: int, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+- `get_next_session_recommendation(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
 
 ## Nueva tool comparativa
 
@@ -34,6 +35,23 @@ La tool esta pensada para prompts como:
 - `Comparame la ultima actividad de Pablo con lo que tenia programado`
 - `Que tan bien cumplio la sesion del 2026-05-13`
 - `Dame feedback entre programado y realizado`
+
+## Nueva tool de recomendacion
+
+`get_next_session_recommendation` consulta `GET /api/mcp/training/next-session-recommendation` y devuelve un JSON read-only con:
+
+- atleta, fecha de referencia y plan activo o mas relevante
+- proxima sesion objetivo
+- ultima actividad realizada
+- ultimo contexto de salud/readiness disponible
+- ultimo contexto semanal disponible
+- recomendacion operativa: `keep`, `reduce`, `replace_easy`, `rest`, `caution` o `no_data`
+
+La tool esta pensada para prompts como:
+
+- `Mantengo la sesion de manana o la ajusto`
+- `Estoy para hacer calidad hoy`
+- `Dame una recomendacion para la proxima sesion`
 
 ## Dependencias
 
@@ -145,6 +163,9 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&date=2026-05-13"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&activity_id=123"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&planned_session_id=456"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1&reference_date=2026-05-13"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1&planned_session_id=456"
 ```
 
 ### Smoke test remoto MCP
