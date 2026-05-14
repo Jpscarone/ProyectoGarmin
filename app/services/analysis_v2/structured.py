@@ -722,6 +722,7 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
         return block.get("short_note")
 
     direction, delta_value = _target_delta_direction(
+        target_type,
         block.get("actual_value"),
         block.get("planned_target_min"),
         block.get("planned_target_max"),
@@ -744,6 +745,8 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
         if within_range:
             return "trabajo dentro de rango"
         if direction == "above":
+            if target_type == "hr":
+                return "intensidad por encima del objetivo"
             if _is_slight_delta(target_type, delta_value):
                 return "trabajo ligeramente exigente"
             return "trabajo demasiado exigente"
@@ -751,7 +754,7 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
             if target_type == "pace" and _is_slight_delta(target_type, delta_value):
                 return "trabajo ligeramente por debajo"
             if target_type == "hr":
-                return "intensidad insuficiente"
+                return "intensidad por encima del objetivo"
             return "trabajo por debajo del objetivo"
         return "trabajo fuera de rango"
 
@@ -760,13 +763,25 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
     return "fuera de rango"
 
 
-def _target_delta_direction(actual: float | int | None, min_value: float | int | None, max_value: float | int | None) -> tuple[str | None, float | None]:
+def _target_delta_direction(
+    target_type: str | None,
+    actual: float | int | None,
+    min_value: float | int | None,
+    max_value: float | int | None,
+) -> tuple[str | None, float | None]:
     if actual is None or (min_value is None and max_value is None):
         return None, None
+    if target_type == "pace":
+        if max_value is not None and actual > max_value:
+            return "below", float(actual - max_value)
+        if min_value is not None and actual < min_value:
+            return "above", float(min_value - actual)
+        return "within", 0.0
+
     if max_value is not None and actual > max_value:
-        return "below", float(actual - max_value)
+        return "above", float(actual - max_value)
     if min_value is not None and actual < min_value:
-        return "above", float(min_value - actual)
+        return "below", float(min_value - actual)
     return "within", 0.0
 
 

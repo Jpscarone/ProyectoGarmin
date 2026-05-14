@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+from unicodedata import normalize
 
 from app.services.analysis_v2.metrics import compute_session_metrics
 from app.services.analysis_v2.structured import detect_session_intent, expand_planned_steps, match_steps_to_laps
@@ -333,7 +334,8 @@ def test_short_note_recovery_messages():
     context = _make_context(steps, laps)
     metrics = compute_session_metrics(context)
     block_notes = [block["short_note"] for block in metrics["block_analysis"]]
-    assert any("recuperacion" in note for note in block_notes if note)
+    normalized_notes = [normalize("NFKD", note).encode("ascii", "ignore").decode("ascii") for note in block_notes if note]
+    assert any("recuperacion" in note for note in normalized_notes)
 
 
 def test_pace_direction_fast_vs_slow():
@@ -350,6 +352,16 @@ def test_pace_direction_fast_vs_slow():
     notes = [block["short_note"] for block in metrics["block_analysis"]]
     assert any("exigente" in (note or "") for note in notes)
     assert any("debajo" in (note or "") for note in notes)
+
+
+def test_hr_work_above_target_uses_correct_short_note():
+    steps = [_make_step(1, target_type="hr", target_hr_min=125, target_hr_max=140, duration_sec=600)]
+    laps = [_make_lap(1, duration_sec=600, distance_m=2000, avg_hr=147, avg_pace_sec_km=330)]
+    context = _make_context(steps, laps)
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["block_analysis"][0]["short_note"] == "intensidad por encima del objetivo"
 
 
 def test_infer_zone_from_target_notes():
