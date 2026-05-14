@@ -41,6 +41,8 @@ def main() -> int:
         "/api/mcp/activities/recent?athlete_id=1&limit=5",
         "/api/mcp/compare/planned-vs-done?athlete_id=1",
         "/api/mcp/training/next-session-recommendation?athlete_id=1",
+        "/api/mcp/training/week-load-summary?athlete_id=1",
+        "/api/mcp/analysis/session-payload?athlete_id=1",
         "/api/mcp/health/summary?athlete_id=1",
         "/api/mcp/weekly/latest?athlete_id=1",
         "/api/mcp/training/status?athlete_id=1",

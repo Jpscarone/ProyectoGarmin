@@ -16,6 +16,7 @@ from app.db.models import analysis_report  # noqa: F401
 from app.db.models import athlete  # noqa: F401
 from app.db.models import daily_health_metric  # noqa: F401
 from app.db.models import garmin_activity  # noqa: F401
+from app.db.models import garmin_activity_lap  # noqa: F401
 from app.db.models import goal  # noqa: F401
 from app.db.models import health_ai_analysis  # noqa: F401
 from app.db.models import planned_session  # noqa: F401
@@ -29,6 +30,7 @@ from app.db.models.analysis_report import AnalysisReport
 from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
+from app.db.models.garmin_activity_lap import GarminActivityLap
 from app.db.models.health_ai_analysis import HealthAiAnalysis
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
@@ -443,3 +445,328 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertIsNone(payload["next_session"])
         self.assertEqual(payload["recommendation"]["decision"], "no_data")
         self.assertFalse(payload["data_quality"]["has_next_session"])
+
+    def test_week_load_summary_returns_comparison_and_recommendation(self) -> None:
+        current_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 12),
+        )
+        previous_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 5),
+        )
+        self.db.add_all([current_day, previous_day])
+        self.db.commit()
+        self.db.refresh(current_day)
+        self.db.refresh(previous_day)
+
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.athlete.id,
+                training_day_id=current_day.id,
+                name="Fondo progresivo",
+                sport_type="running",
+                session_type="long",
+                expected_duration_min=80,
+                expected_distance_km=16,
+                session_order=1,
+            )
+        )
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.athlete.id,
+                training_day_id=previous_day.id,
+                name="Rodaje base",
+                sport_type="running",
+                session_type="base",
+                expected_duration_min=45,
+                expected_distance_km=8,
+                session_order=1,
+            )
+        )
+
+        self.db.add_all(
+            [
+                GarminActivity(
+                    athlete_id=self.athlete.id,
+                    garmin_activity_id=800001,
+                    activity_name="Bici fuerte",
+                    sport_type="cycling",
+                    start_time=datetime(2026, 5, 12, 8, 0, 0),
+                    duration_sec=5400,
+                    distance_m=45000,
+                    avg_hr=142,
+                    training_load=210,
+                    training_effect_aerobic=4.1,
+                    training_effect_anaerobic=1.2,
+                ),
+                GarminActivity(
+                    athlete_id=self.athlete.id,
+                    garmin_activity_id=800002,
+                    activity_name="Running tempo",
+                    sport_type="running",
+                    start_time=datetime(2026, 5, 14, 7, 0, 0),
+                    duration_sec=3600,
+                    distance_m=11000,
+                    avg_hr=156,
+                    training_load=165,
+                    training_effect_aerobic=4.3,
+                    training_effect_anaerobic=2.3,
+                ),
+                GarminActivity(
+                    athlete_id=self.athlete.id,
+                    garmin_activity_id=800003,
+                    activity_name="Semana previa",
+                    sport_type="running",
+                    start_time=datetime(2026, 5, 6, 7, 0, 0),
+                    duration_sec=2400,
+                    distance_m=7000,
+                    avg_hr=138,
+                    training_load=80,
+                    training_effect_aerobic=2.5,
+                    training_effect_anaerobic=0.2,
+                ),
+            ]
+        )
+        self.db.add_all(
+            [
+                DailyHealthMetric(
+                    athlete_id=self.athlete.id,
+                    metric_date=date(2026, 5, 12),
+                    sleep_duration_minutes=420,
+                    body_battery_morning=58,
+                    hrv_value=55,
+                    resting_hr=52,
+                ),
+                DailyHealthMetric(
+                    athlete_id=self.athlete.id,
+                    metric_date=date(2026, 5, 14),
+                    sleep_duration_minutes=390,
+                    body_battery_morning=49,
+                    hrv_value=50,
+                    resting_hr=54,
+                ),
+            ]
+        )
+        self.db.add(
+            WeeklyAnalysis(
+                athlete_id=self.athlete.id,
+                week_start_date=date(2026, 5, 11),
+                week_end_date=date(2026, 5, 17),
+                analysis_version="v2",
+                status="completed",
+                summary_short="Semana intensa pero util.",
+                next_week_recommendation="Controlar la descarga.",
+                load_score=78,
+                fatigue_score=72,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/week-load-summary?athlete_id={self.athlete.id}&week_start_date=2026-05-11",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["week"]["start_date"], "2026-05-11")
+        self.assertEqual(payload["week"]["completed_activities_count"], 2)
+        self.assertTrue(payload["data_quality"]["has_activities"])
+        self.assertTrue(payload["data_quality"]["has_health"])
+        self.assertEqual(payload["weekly_analysis"]["risk_level"], "moderate")
+        self.assertIsNotNone(payload["previous_week"])
+        self.assertIsNotNone(payload["previous_week"]["delta_training_load"])
+        self.assertIn(payload["recommendation"]["status"], {"balanced", "building", "high_load", "recovery_needed", "underloaded"})
+
+    def test_week_load_summary_handles_missing_data(self) -> None:
+        response = self.client.get(
+            f"/api/mcp/training/week-load-summary?athlete_id={self.athlete.id}&week_start_date=2026-05-11&compare_previous=false",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["data_quality"]["has_activities"])
+        self.assertFalse(payload["data_quality"]["has_health"])
+        self.assertEqual(payload["recommendation"]["status"], "no_data")
+
+    def test_session_analysis_payload_returns_saved_analysis_and_laps(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 15),
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            name="Intervalos 5x1000",
+            sport_type="running",
+            modality="outdoor",
+            expected_duration_min=60,
+            expected_distance_km=12,
+            target_notes="Z4 controlada",
+            session_order=1,
+        )
+        self.db.add(planned_session)
+        self.db.commit()
+        self.db.refresh(planned_session)
+
+        self.db.add(
+            PlannedSessionStep(
+                planned_session_id=planned_session.id,
+                step_order=1,
+                step_type="work",
+                repeat_count=5,
+                duration_sec=240,
+                target_type="pace",
+                target_pace_zone="Z4",
+                target_notes="5x1000",
+            )
+        )
+
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=910001,
+            activity_name="Pista viernes",
+            sport_type="running",
+            modality="outdoor",
+            start_time=datetime(2026, 5, 15, 7, 0, 0),
+            duration_sec=3500,
+            distance_m=11800,
+            avg_hr=154,
+            max_hr=178,
+            avg_pace_sec_km=320,
+            avg_power=280,
+            normalized_power=295,
+            avg_cadence=172,
+            training_load=140,
+            training_effect_aerobic=3.8,
+            training_effect_anaerobic=2.0,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        self.db.add(
+            GarminActivityLap(
+                garmin_activity_id_fk=activity.id,
+                lap_number=1,
+                lap_type="work",
+                duration_sec=238,
+                distance_m=1000,
+                avg_hr=160,
+                max_hr=171,
+                avg_pace_sec_km=238,
+                avg_power=310,
+                avg_cadence=178,
+            )
+        )
+        self.db.add(
+            ActivitySessionMatch(
+                athlete_id=self.athlete.id,
+                garmin_activity_id_fk=activity.id,
+                planned_session_id_fk=planned_session.id,
+                training_day_id_fk=training_day.id,
+                match_confidence=0.95,
+                match_method="manual",
+            )
+        )
+        self.db.add(
+            SessionAnalysis(
+                athlete_id=self.athlete.id,
+                planned_session_id=planned_session.id,
+                activity_id=activity.id,
+                status="completed",
+                summary_short="Bloques bien resueltos.",
+                coach_conclusion="Buena alineacion entre plan y ejecucion.",
+                next_recommendation="Mantener recuperacion activa.",
+                metrics_json={
+                    "context": {
+                        "activity_laps": [
+                            {
+                                "index": 1,
+                                "lap_type": "work",
+                                "duration_sec": 238,
+                                "distance_m": 1000,
+                                "avg_hr": 160,
+                                "avg_pace_sec_km": 238,
+                                "avg_power": 310,
+                                "avg_cadence": 178,
+                            }
+                        ]
+                    },
+                    "metrics": {
+                        "laps": {
+                            "pairs": [
+                                {
+                                    "planned_step_order": 1,
+                                    "activity_lap_index": 1,
+                                    "chosen_match_reason": "distance_match",
+                                    "total_penalty": 2,
+                                    "rejected_candidates": [
+                                        {
+                                            "lap_index": 2,
+                                            "reason": "lap 2 descartada",
+                                        }
+                                    ],
+                                }
+                            ]
+                        }
+                    },
+                },
+                llm_json={
+                    "provider": "openai",
+                    "status": "completed",
+                    "structured_output": {"overall_assessment": "correcto"},
+                },
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/analysis/session-payload?athlete_id={self.athlete.id}&planned_session_id={planned_session.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["resolved_by"], "planned_session_id")
+        self.assertEqual(payload["planned_session"]["id"], planned_session.id)
+        self.assertEqual(payload["activity"]["id"], activity.id)
+        self.assertEqual(len(payload["laps"]), 1)
+        self.assertEqual(len(payload["step_vs_lap_comparison"]), 1)
+        self.assertTrue(payload["data_quality"]["has_metrics_json"])
+        self.assertTrue(payload["data_quality"]["has_llm_json"])
+
+    def test_session_analysis_payload_handles_missing_analysis(self) -> None:
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=910002,
+            activity_name="Actividad sin analisis",
+            sport_type="running",
+            start_time=datetime(2026, 5, 16, 8, 0, 0),
+            duration_sec=1800,
+            distance_m=5000,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        response = self.client.get(
+            f"/api/mcp/analysis/session-payload?athlete_id={self.athlete.id}&activity_id={activity.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["resolved_by"], "activity_id")
+        self.assertEqual(payload["activity"]["id"], activity.id)
+        self.assertFalse(payload["data_quality"]["has_metrics_json"])
+        self.assertIn("No hay SessionAnalysis guardado", " ".join(payload["data_quality"]["warnings"]))

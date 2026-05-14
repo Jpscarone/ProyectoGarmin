@@ -73,6 +73,42 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["recommendation"]["decision"], "keep")
 
+    async def test_get_week_load_summary_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/week-load-summary")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-11")
+            self.assertEqual(request.url.params.get("compare_previous"), "false")
+            return httpx.Response(200, json={"week": {"start_date": "2026-05-11"}, "recommendation": {"status": "balanced"}})
+
+        client = _build_client(handler)
+        payload = await client.get_week_load_summary(
+            athlete_id=1,
+            week_start_date="2026-05-11",
+            compare_previous=False,
+        )
+
+        self.assertEqual(payload["recommendation"]["status"], "balanced")
+
+    async def test_get_session_analysis_payload_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/analysis/session-payload")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("planned_session_id"), "12")
+            self.assertEqual(request.url.params.get("activity_id"), "34")
+            self.assertEqual(request.url.params.get("date"), "2026-05-13")
+            return httpx.Response(200, json={"resolved_by": "planned_session_id", "data_quality": {"has_metrics_json": False}})
+
+        client = _build_client(handler)
+        payload = await client.get_session_analysis_payload(
+            athlete_id=1,
+            planned_session_id=12,
+            activity_id=34,
+            date="2026-05-13",
+        )
+
+        self.assertEqual(payload["resolved_by"], "planned_session_id")
+
 
 def _build_client(handler) -> TrainingAppApiClient:
     settings = Settings(

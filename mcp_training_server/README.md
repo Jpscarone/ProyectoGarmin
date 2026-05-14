@@ -18,6 +18,8 @@ No modifica el estado del sistema.
 - `get_training_status(athlete_id: int)`
 - `compare_planned_vs_done(athlete_id: int, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `get_next_session_recommendation(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
+- `get_week_load_summary(athlete_id: int, week_start_date: str | None = None, compare_previous: bool = True)`
+- `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 
 ## Nueva tool comparativa
 
@@ -52,6 +54,40 @@ La tool esta pensada para prompts como:
 - `Mantengo la sesion de manana o la ajusto`
 - `Estoy para hacer calidad hoy`
 - `Dame una recomendacion para la proxima sesion`
+
+## Nueva tool de carga semanal
+
+`get_week_load_summary` consulta `GET /api/mcp/training/week-load-summary` y devuelve un JSON read-only con:
+
+- resumen de la semana actual o indicada
+- actividades realizadas y sesiones planificadas
+- carga total, distancia, duracion e intensidad
+- promedio semanal de salud/readiness cuando haya datos
+- weekly_analysis si existe
+- comparacion con la semana previa
+
+La tool esta pensada para prompts como:
+
+- `Como viene mi semana de carga`
+- `Comparame esta semana con la anterior`
+- `Estoy acumulando demasiada intensidad`
+- `Dame un resumen de carga semanal del atleta 1`
+
+## Nueva tool de payload tecnico
+
+`get_session_analysis_payload` consulta `GET /api/mcp/analysis/session-payload` y devuelve un JSON read-only con:
+
+- sesion programada y pasos planificados
+- actividad realizada y laps
+- tabla step-vs-lap
+- `metrics_json` y `llm_json` del analisis guardado
+- warnings de calidad cuando falte vinculacion o analisis
+
+La tool esta pensada para prompts como:
+
+- `Traeme el payload de analisis de la ultima actividad de Pablo`
+- `Dame feedback tecnico por bloques usando el payload de sesion`
+- `Mostrame laps, steps y metrics_json de la sesion del 2026-05-15`
 
 ## Dependencias
 
@@ -166,6 +202,13 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1&reference_date=2026-05-13"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1&planned_session_id=456"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-load-summary?athlete_id=1"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-load-summary?athlete_id=1&week_start_date=2026-05-11"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-load-summary?athlete_id=1&week_start_date=2026-05-11&compare_previous=false"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1&planned_session_id=456"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1&activity_id=123"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1&date=2026-05-15"
 ```
 
 ### Smoke test remoto MCP

@@ -89,6 +89,44 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def get_week_load_summary(
+        self,
+        *,
+        athlete_id: int,
+        week_start_date: str | None = None,
+        compare_previous: bool = True,
+    ) -> dict[str, Any]:
+        params = {
+            "athlete_id": str(int(athlete_id)),
+            "compare_previous": "true" if compare_previous else "false",
+        }
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json(
+            "/api/mcp/training/week-load-summary",
+            params=params,
+        )
+
+    async def get_session_analysis_payload(
+        self,
+        *,
+        athlete_id: int,
+        planned_session_id: int | None = None,
+        activity_id: int | None = None,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/analysis/session-payload",
+            params=params,
+        )
+
     async def _get_json(self, path: str, *, params: dict[str, str] | None = None) -> dict[str, Any] | list[dict[str, Any]]:
         base_url, token = self._require_config()
         headers = {"Authorization": f"Bearer {token}"}

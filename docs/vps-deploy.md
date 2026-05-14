@@ -308,6 +308,8 @@ curl http://127.0.0.1:8000
 curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:8000/api/mcp/ping
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/week-load-summary?athlete_id=1"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1"
 ```
 
 Prompt de prueba desde ChatGPT:
@@ -315,6 +317,8 @@ Prompt de prueba desde ChatGPT:
 ```text
 Usando ProyectoGarmin, comparame la ultima actividad de Pablo Scarone con lo que tenia programado.
 Usando ProyectoGarmin, dame una recomendacion para la proxima sesion de Pablo Scarone segun su estado actual.
+Usando ProyectoGarmin, dame un resumen de carga semanal de Pablo Scarone y comparalo con la semana anterior.
+Usando ProyectoGarmin, traeme el payload de analisis de la ultima actividad de Pablo y dame feedback tecnico por bloques.
 ```
 
 ### MCP local

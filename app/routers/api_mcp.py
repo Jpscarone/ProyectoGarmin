@@ -16,11 +16,13 @@ from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.health_ai_analysis import HealthAiAnalysis
 from app.db.models.planned_session import PlannedSession
+from app.db.models.garmin_activity_lap import GarminActivityLap
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
+from app.services.analysis_v2.weekly_analysis_service import build_week_context, compute_week_metrics
 from app.services.health_readiness_service import build_health_readiness_summary, evaluate_health_readiness
 from app.services.planning.presentation import describe_session_structure_short, derive_session_metrics
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
@@ -32,6 +34,7 @@ from app.services.mcp_context_service import (
 )
 from app.services.mcp_security import verify_mcp_bearer_token
 from app.services.training_plan_service import select_default_training_plan
+from app.routers.planned_sessions import _build_technical_view, _get_preferred_session_analysis
 
 
 router = APIRouter(
@@ -411,6 +414,136 @@ def get_next_session_recommendation(
     }
 
 
+@router.get("/training/week-load-summary")
+def get_week_load_summary(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    compare_previous: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    selected_start = _parse_iso_date(week_start_date, "week_start_date") if week_start_date else _week_start_from_date(date.today())
+    week_end = _week_end_from_start(selected_start)
+
+    context = build_week_context(db, athlete.id, selected_start)
+    metrics = compute_week_metrics(context)
+    weekly_analysis = _get_weekly_analysis_for_start(db, athlete.id, selected_start)
+
+    previous_payload = None
+    previous_summary = None
+    if compare_previous:
+        previous_start = selected_start - 7 * date.resolution
+        previous_context = build_week_context(db, athlete.id, previous_start)
+        previous_metrics = compute_week_metrics(previous_context)
+        previous_summary = _build_previous_week_summary_payload(selected_start, previous_context, previous_metrics)
+        previous_payload = previous_summary
+
+    health_payload = _build_week_load_health_payload(db, athlete.id, selected_start, week_end)
+    week_payload = _build_week_load_week_payload(context, metrics)
+    intensity_payload = _build_week_load_intensity_payload(context, metrics)
+    weekly_analysis_payload = _build_week_load_weekly_analysis_payload(weekly_analysis)
+    data_quality = _build_week_load_data_quality(context, weekly_analysis, health_payload)
+    recommendation = _build_week_load_recommendation(
+        week_payload=week_payload,
+        intensity_payload=intensity_payload,
+        health_payload=health_payload,
+        weekly_analysis=weekly_analysis,
+        previous_summary=previous_summary,
+        data_quality=data_quality,
+    )
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "week": week_payload,
+        "intensity": intensity_payload,
+        "health": health_payload,
+        "weekly_analysis": weekly_analysis_payload,
+        "previous_week": previous_payload,
+        "recommendation": recommendation,
+        "data_quality": data_quality,
+    }
+
+
+@router.get("/analysis/session-payload")
+def get_session_analysis_payload(
+    athlete_id: int = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    activity_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    resolved_by = "latest_activity"
+    target_date = _parse_iso_date(date_value, "date") if date_value else None
+
+    planned_session = None
+    activity = None
+    if planned_session_id is not None:
+        resolved_by = "planned_session_id"
+        planned_session = _load_planned_session_analysis_payload(db, athlete.id, planned_session_id)
+        activity = (
+            planned_session.activity_match.garmin_activity
+            if planned_session.activity_match and planned_session.activity_match.garmin_activity is not None
+            else _find_fallback_activity_for_planned(db, planned_session)
+        )
+    elif activity_id is not None:
+        resolved_by = "activity_id"
+        activity = _load_activity_analysis_payload(db, athlete.id, activity_id)
+        planned_session = (
+            activity.activity_match.planned_session
+            if activity.activity_match and activity.activity_match.planned_session is not None
+            else _find_fallback_planned_for_activity(db, activity)
+        )
+    elif target_date is not None:
+        resolved_by = "date"
+        planned_session = _find_planned_session_by_date(db, athlete.id, target_date)
+        activity = _find_activity_by_date_analysis_payload(db, athlete.id, target_date)
+        if planned_session is None and activity is not None:
+            planned_session = _find_fallback_planned_for_activity(db, activity)
+        if activity is None and planned_session is not None:
+            activity = _find_fallback_activity_for_planned(db, planned_session)
+    else:
+        activity = _get_latest_activity_analysis_payload(db, athlete.id)
+        if activity is not None:
+            planned_session = (
+                activity.activity_match.planned_session
+                if activity.activity_match and activity.activity_match.planned_session is not None
+                else _find_fallback_planned_for_activity(db, activity)
+            )
+        else:
+            planned_session = _get_latest_planned_session_for_compare(db, athlete.id)
+
+    analysis = _resolve_session_payload_analysis(db, planned_session, activity)
+    metrics_payload = analysis.metrics_json if analysis and isinstance(analysis.metrics_json, dict) else {}
+    context_payload = metrics_payload.get("context", {}) if isinstance(metrics_payload, dict) else {}
+    technical_view = _build_technical_view(metrics_payload, context_payload, analysis)
+    analysis_report = _resolve_analysis_report(activity, planned_session)
+
+    data_quality = _build_session_payload_data_quality(
+        planned_session=planned_session,
+        activity=activity,
+        analysis=analysis,
+        technical_view=technical_view,
+    )
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "resolved_by": resolved_by,
+        "planned_session": _serialize_analysis_payload_planned_session(planned_session),
+        "planned_steps": _serialize_analysis_payload_planned_steps(planned_session),
+        "activity": _serialize_analysis_payload_activity(activity),
+        "laps": _serialize_analysis_payload_laps(activity),
+        "step_vs_lap_comparison": _serialize_step_vs_lap_comparison(technical_view),
+        "metrics_json": technical_view.get("metrics_json") or {},
+        "llm_json": technical_view.get("llm_json") or {},
+        "saved_analysis": {
+            "session_analysis": _serialize_session_analysis_summary(analysis),
+            "analysis_report": _serialize_analysis_report_summary(analysis_report),
+        },
+        "data_quality": data_quality,
+    }
+
+
 def _parse_iso_date(raw_value: str, field_name: str) -> date:
     try:
         return date.fromisoformat(raw_value)
@@ -770,6 +903,86 @@ def _get_latest_weekly_analysis_until(db: Session, athlete_id: int, reference_da
             WeeklyAnalysis.week_start_date <= reference_date,
         )
         .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
+    )
+
+
+def _get_weekly_analysis_for_start(db: Session, athlete_id: int, week_start_date: date) -> WeeklyAnalysis | None:
+    return db.scalar(
+        select(WeeklyAnalysis)
+        .where(
+            WeeklyAnalysis.athlete_id == athlete_id,
+            WeeklyAnalysis.week_start_date == week_start_date,
+        )
+        .order_by(WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
+    )
+
+
+def _analysis_payload_loader_options() -> tuple[Any, ...]:
+    return (
+        selectinload(GarminActivity.laps),
+        selectinload(GarminActivity.activity_match).selectinload(ActivitySessionMatch.planned_session).selectinload(PlannedSession.training_day),
+        selectinload(GarminActivity.activity_match).selectinload(ActivitySessionMatch.planned_session).selectinload(PlannedSession.planned_session_steps),
+        selectinload(GarminActivity.session_analyses),
+        selectinload(GarminActivity.analysis_reports),
+    )
+
+
+def _planned_analysis_payload_loader_options() -> tuple[Any, ...]:
+    return (
+        selectinload(PlannedSession.training_day),
+        selectinload(PlannedSession.planned_session_steps),
+        selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity).selectinload(GarminActivity.laps),
+        selectinload(PlannedSession.session_analyses),
+        selectinload(PlannedSession.analysis_reports),
+    )
+
+
+def _load_activity_analysis_payload(db: Session, athlete_id: int, activity_id: int) -> GarminActivity | None:
+    activity = db.scalar(
+        select(GarminActivity)
+        .where(
+            GarminActivity.id == int(activity_id),
+            GarminActivity.athlete_id == athlete_id,
+        )
+        .options(*_analysis_payload_loader_options())
+    )
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    return activity
+
+
+def _load_planned_session_analysis_payload(db: Session, athlete_id: int, planned_session_id: int) -> PlannedSession | None:
+    session = db.scalar(
+        select(PlannedSession)
+        .where(
+            PlannedSession.id == int(planned_session_id),
+            PlannedSession.athlete_id == athlete_id,
+        )
+        .options(*_planned_analysis_payload_loader_options())
+    )
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    return session
+
+
+def _find_activity_by_date_analysis_payload(db: Session, athlete_id: int, target_date: date) -> GarminActivity | None:
+    return db.scalar(
+        select(GarminActivity)
+        .where(
+            GarminActivity.athlete_id == athlete_id,
+            func.date(GarminActivity.start_time) == target_date.isoformat(),
+        )
+        .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
+        .options(*_analysis_payload_loader_options())
+    )
+
+
+def _get_latest_activity_analysis_payload(db: Session, athlete_id: int) -> GarminActivity | None:
+    return db.scalar(
+        select(GarminActivity)
+        .where(GarminActivity.athlete_id == athlete_id)
+        .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
+        .options(*_analysis_payload_loader_options())
     )
 
 
@@ -1535,3 +1748,465 @@ def _recommendation_confidence(data_quality: dict[str, Any], health_context: dic
     if not data_quality.get("has_last_activity") or not data_quality.get("has_weekly_analysis"):
         return "medium"
     return "high"
+
+
+def _week_start_from_date(value: date) -> date:
+    return value - ((value.weekday()) * date.resolution)
+
+
+def _week_end_from_start(value: date) -> date:
+    return value + (6 * date.resolution)
+
+
+def _build_week_load_week_payload(context: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    totals = metrics.get("totals", {})
+    compliance = metrics.get("compliance", {})
+    activities = list(getattr(context, "activities", []) or [])
+    weighted_hr = _weighted_average_hr(activities)
+    return {
+        "start_date": context.week_start_date.isoformat(),
+        "end_date": context.week_end_date.isoformat(),
+        "completed_activities_count": totals.get("activity_count") or 0,
+        "planned_sessions_count": compliance.get("planned_sessions") or 0,
+        "completed_sessions_count": compliance.get("completed_sessions") or 0,
+        "total_duration_sec": totals.get("total_duration_sec") or 0,
+        "total_distance_m": totals.get("total_distance_m") or 0,
+        "total_training_load": _total_training_load(activities),
+        "avg_hr_weighted": weighted_hr,
+        "sports_breakdown": _sports_breakdown(activities),
+    }
+
+
+def _weighted_average_hr(activities: list[Any]) -> float | None:
+    weighted_sum = 0.0
+    total_duration = 0.0
+    for activity in activities:
+        avg_hr = getattr(activity, "avg_hr", None)
+        duration = getattr(activity, "duration_sec", None)
+        if avg_hr is None or duration in (None, 0):
+            continue
+        weighted_sum += float(avg_hr) * float(duration)
+        total_duration += float(duration)
+    if total_duration <= 0:
+        return None
+    return round(weighted_sum / total_duration, 1)
+
+
+def _total_training_load(activities: list[Any]) -> float:
+    total = sum(float(getattr(activity, "training_load", 0) or 0) for activity in activities)
+    return round(total, 1)
+
+
+def _sports_breakdown(activities: list[Any]) -> dict[str, Any]:
+    buckets: dict[str, dict[str, float | int]] = {
+        "running": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "cycling": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "strength": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "other": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+    }
+    for activity in activities:
+        bucket = _sport_bucket(getattr(activity, "sport_type", None))
+        current = buckets[bucket]
+        current["activities_count"] += 1
+        current["total_duration_sec"] += int(getattr(activity, "duration_sec", 0) or 0)
+        current["total_distance_m"] += float(getattr(activity, "distance_m", 0) or 0)
+        current["total_training_load"] += float(getattr(activity, "training_load", 0) or 0)
+    for item in buckets.values():
+        item["total_distance_m"] = round(float(item["total_distance_m"]), 1)
+        item["total_training_load"] = round(float(item["total_training_load"]), 1)
+    return buckets
+
+
+def _sport_bucket(value: str | None) -> str:
+    normalized = _normalize_sport_value(value)
+    if normalized in {"running", "trail_running"}:
+        return "running"
+    if normalized in {"cycling", "mtb"}:
+        return "cycling"
+    if normalized == "strength":
+        return "strength"
+    return "other"
+
+
+def _build_week_load_intensity_payload(context: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    activities = list(getattr(context, "activities", []) or [])
+    hard_count = 0
+    high_aerobic_count = 0
+    anaerobic_count = 0
+    flags: list[str] = []
+    for activity in activities:
+        if _is_hard_week_activity(activity):
+            hard_count += 1
+        if (getattr(activity, "training_effect_aerobic", None) or 0) >= 4.0:
+            high_aerobic_count += 1
+        if (getattr(activity, "training_effect_anaerobic", None) or 0) >= 2.0:
+            anaerobic_count += 1
+    if high_aerobic_count >= 2:
+        flags.append("multiple_high_aerobic_te")
+    if hard_count >= 3:
+        flags.append("many_hard_activities")
+    if _total_training_load(activities) >= 350:
+        flags.append("high_weekly_training_load")
+    if metrics.get("derived_flags", {}).get("intensity_distribution_imbalance_flag"):
+        flags.append("intensity_distribution_imbalance")
+    return {
+        "hard_activities_count": hard_count,
+        "high_aerobic_te_count": high_aerobic_count,
+        "anaerobic_stimulus_count": anaerobic_count,
+        "estimated_distribution": _estimated_distribution_label(metrics),
+        "flags": flags,
+    }
+
+
+def _is_hard_week_activity(activity: Any) -> bool:
+    if (getattr(activity, "training_effect_anaerobic", None) or 0) >= 2.5:
+        return True
+    if (getattr(activity, "training_effect_aerobic", None) or 0) >= 4.0:
+        return True
+    if (getattr(activity, "training_load", None) or 0) >= 150:
+        return True
+    return False
+
+
+def _estimated_distribution_label(metrics: dict[str, Any]) -> str:
+    summary = metrics.get("distribution", {}).get("intensity_zone_summary", {}) or {}
+    pct_z2 = summary.get("pct_z2")
+    pct_z4_plus = summary.get("pct_z4_plus")
+    pct_z3 = summary.get("pct_z3")
+    if pct_z2 is None and pct_z4_plus is None and pct_z3 is None:
+        return "insufficient_data"
+    if (pct_z4_plus or 0) > 25 or ((pct_z3 or 0) + (pct_z4_plus or 0)) > 60:
+        return "intensity_heavy"
+    if (pct_z2 or 0) >= 40 and (pct_z4_plus or 0) <= 20:
+        return "mostly_aerobic"
+    return "mixed"
+
+
+def _build_week_load_health_payload(db: Session, athlete_id: int, start_date: date, end_date: date) -> dict[str, Any]:
+    metrics = list(
+        db.scalars(
+            select(DailyHealthMetric)
+            .where(
+                DailyHealthMetric.athlete_id == athlete_id,
+                DailyHealthMetric.metric_date >= start_date,
+                DailyHealthMetric.metric_date <= end_date,
+            )
+            .order_by(DailyHealthMetric.metric_date.asc(), DailyHealthMetric.id.asc())
+        ).all()
+    )
+    if not metrics:
+        return {
+            "days_available": 0,
+            "avg_readiness_score": None,
+            "avg_sleep_minutes": None,
+            "avg_body_battery_morning": None,
+            "avg_hrv": None,
+            "main_limiters": [],
+        }
+    readiness_scores: list[float] = []
+    main_limiters: list[str] = []
+    for metric in metrics:
+        evaluation = evaluate_health_readiness(build_health_readiness_summary(db, athlete_id, metric.metric_date))
+        if evaluation.readiness_score is not None:
+            readiness_scores.append(float(evaluation.readiness_score))
+        if evaluation.main_limiter:
+            main_limiters.append(str(evaluation.main_limiter))
+    return {
+        "days_available": len(metrics),
+        "avg_readiness_score": round(sum(readiness_scores) / len(readiness_scores), 1) if readiness_scores else None,
+        "avg_sleep_minutes": _average_numeric([item.sleep_duration_minutes for item in metrics]),
+        "avg_body_battery_morning": _average_numeric([item.body_battery_morning or item.body_battery_start for item in metrics]),
+        "avg_hrv": _average_numeric([item.hrv_value or item.hrv_avg_ms for item in metrics]),
+        "main_limiters": sorted(set(main_limiters)),
+    }
+
+
+def _average_numeric(values: list[float | int | None]) -> float | None:
+    usable = [float(value) for value in values if value is not None]
+    if not usable:
+        return None
+    return round(sum(usable) / len(usable), 1)
+
+
+def _build_week_load_weekly_analysis_payload(analysis: WeeklyAnalysis | None) -> dict[str, Any] | None:
+    if analysis is None:
+        return None
+    return {
+        "id": analysis.id,
+        "summary": analysis.summary_short or analysis.coach_conclusion,
+        "risk_level": _weekly_risk_level(analysis),
+        "recommendation": analysis.next_week_recommendation,
+    }
+
+
+def _build_previous_week_summary_payload(current_start: date, context: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+    week_payload = _build_week_load_week_payload(context, metrics)
+    del current_start
+    return {
+        "start_date": context.week_start_date.isoformat(),
+        "total_duration_sec": week_payload["total_duration_sec"],
+        "total_distance_m": week_payload["total_distance_m"],
+        "total_training_load": week_payload["total_training_load"],
+        "delta_training_load": None,
+        "delta_duration_sec": None,
+        "delta_distance_m": None,
+    }
+
+
+def _resolve_session_payload_analysis(
+    db: Session,
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+) -> SessionAnalysis | None:
+    if planned_session is not None:
+        linked_activity_id = activity.id if activity is not None else (
+            planned_session.activity_match.garmin_activity_id_fk
+            if planned_session.activity_match is not None else None
+        )
+        analysis = _get_preferred_session_analysis(db, planned_session.id, linked_activity_id)
+        if analysis is not None:
+            return analysis
+    return _resolve_session_analysis(activity, planned_session)
+
+
+def _serialize_analysis_payload_planned_session(session: PlannedSession | None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "name": session.name,
+        "date": session.training_day.day_date.isoformat() if session.training_day and session.training_day.day_date else None,
+        "sport": session.sport_type,
+        "modality": session.modality,
+        "planned_duration_sec": metrics.duration_sec,
+        "planned_distance_m": metrics.distance_m,
+        "notes": session.target_notes or session.description_text,
+    }
+
+
+def _serialize_analysis_payload_planned_steps(session: PlannedSession | None) -> list[dict[str, Any]]:
+    if session is None:
+        return []
+    return [
+        {
+            "id": step.id,
+            "step_order": step.step_order,
+            "repeat_group": step.repeat_count,
+            "duration_sec": step.duration_sec,
+            "distance_m": step.distance_m,
+            "target_type": step.target_type,
+            "target_hr_zone": step.target_hr_zone,
+            "target_hr_min": step.target_hr_min,
+            "target_hr_max": step.target_hr_max,
+            "target_pace_zone": step.target_pace_zone,
+            "target_pace_min_sec_km": step.target_pace_min_sec_km,
+            "target_pace_max_sec_km": step.target_pace_max_sec_km,
+            "target_notes": step.target_notes,
+        }
+        for step in session.planned_session_steps
+    ]
+
+
+def _serialize_analysis_payload_activity(activity: GarminActivity | None) -> dict[str, Any] | None:
+    if activity is None:
+        return None
+    return {
+        "id": activity.id,
+        "garmin_activity_id": activity.garmin_activity_id,
+        "activity_name": activity.activity_name,
+        "sport_type": activity.sport_type,
+        "modality": activity.modality,
+        "start_time": activity.start_time.isoformat() if activity.start_time else None,
+        "duration_sec": activity.duration_sec,
+        "distance_m": activity.distance_m,
+        "avg_hr": activity.avg_hr,
+        "max_hr": activity.max_hr,
+        "avg_pace_sec_km": activity.avg_pace_sec_km,
+        "avg_power": activity.avg_power,
+        "normalized_power": activity.normalized_power,
+        "avg_cadence": activity.avg_cadence,
+        "training_load": activity.training_load,
+        "training_effect_aerobic": activity.training_effect_aerobic,
+        "training_effect_anaerobic": activity.training_effect_anaerobic,
+    }
+
+
+def _serialize_analysis_payload_laps(activity: GarminActivity | None) -> list[dict[str, Any]]:
+    if activity is None:
+        return []
+    return [
+        {
+            "lap_number": lap.lap_number,
+            "lap_type": lap.lap_type,
+            "duration_sec": lap.duration_sec,
+            "distance_m": lap.distance_m,
+            "avg_hr": lap.avg_hr,
+            "max_hr": lap.max_hr,
+            "avg_pace_sec_km": lap.avg_pace_sec_km,
+            "avg_power": lap.avg_power,
+            "avg_cadence": lap.avg_cadence,
+        }
+        for lap in sorted(activity.laps, key=lambda item: (item.lap_number, item.id))
+    ]
+
+
+def _serialize_step_vs_lap_comparison(technical_view: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = technical_view.get("matching_rows") or []
+    return [
+        {
+            "step_order": row.get("step_order"),
+            "lap_number": row.get("lap_index"),
+            "planned": row.get("planned"),
+            "real": row.get("actual"),
+            "status": row.get("status"),
+            "reason": row.get("reason"),
+            "penalties": {
+                "summary": row.get("penalties"),
+                "total_penalty": row.get("total_penalty"),
+            },
+            "discarded": _normalize_discarded_candidates(row.get("rejected")),
+        }
+        for row in rows
+    ]
+
+
+def _normalize_discarded_candidates(value: Any) -> list[str]:
+    if value in (None, "", "-"):
+        return []
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    return [str(value)]
+
+
+def _build_session_payload_data_quality(
+    *,
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+    analysis: SessionAnalysis | None,
+    technical_view: dict[str, Any],
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    has_laps = bool(activity is not None and getattr(activity, "laps", []))
+    has_metrics_json = bool(technical_view.get("metrics_json"))
+    has_llm_json = bool(technical_view.get("llm_json"))
+    if planned_session is None:
+        warnings.append("No hay sesion programada resuelta para este payload.")
+    if activity is None:
+        warnings.append("No hay actividad resuelta para este payload.")
+    if activity is not None and not has_laps:
+        warnings.append("La actividad no tiene laps cargados.")
+    if analysis is None:
+        warnings.append("No hay SessionAnalysis guardado para esta combinacion sesion-actividad.")
+    if analysis is not None and not has_metrics_json:
+        warnings.append("El SessionAnalysis existe pero no tiene metrics_json disponible.")
+    if analysis is not None and not has_llm_json:
+        warnings.append("El SessionAnalysis existe pero no tiene llm_json disponible.")
+    return {
+        "has_planned_session": planned_session is not None,
+        "has_activity": activity is not None,
+        "has_laps": has_laps,
+        "has_metrics_json": has_metrics_json,
+        "has_llm_json": has_llm_json,
+        "warnings": warnings,
+    }
+
+
+def _build_week_load_data_quality(context: Any, weekly_analysis: WeeklyAnalysis | None, health_payload: dict[str, Any]) -> dict[str, Any]:
+    has_activities = bool(getattr(context, "activities", []) or [])
+    has_planned = bool(getattr(context, "planned_sessions", []) or [])
+    has_health = bool(health_payload.get("days_available"))
+    warnings: list[str] = []
+    if not has_activities:
+        warnings.append("No hay actividades realizadas cargadas para esa semana.")
+    if not has_planned:
+        warnings.append("No hay sesiones planificadas cargadas para esa semana.")
+    if not has_health:
+        warnings.append("Hay pocos o ningun dato de salud para esa semana.")
+    if weekly_analysis is None:
+        warnings.append("No hay weekly_analysis guardado para esa semana.")
+    return {
+        "has_activities": has_activities,
+        "has_planned_sessions": has_planned,
+        "has_health": has_health,
+        "has_weekly_analysis": weekly_analysis is not None,
+        "warnings": warnings,
+    }
+
+
+def _build_week_load_recommendation(
+    *,
+    week_payload: dict[str, Any],
+    intensity_payload: dict[str, Any],
+    health_payload: dict[str, Any],
+    weekly_analysis: WeeklyAnalysis | None,
+    previous_summary: dict[str, Any] | None,
+    data_quality: dict[str, Any],
+) -> dict[str, Any]:
+    status = "balanced"
+    reasons: list[str] = []
+    next_step = "Mantener el seguimiento de la carga y revisar sensaciones en los proximos dias."
+
+    if not data_quality.get("has_activities"):
+        return {
+            "status": "no_data",
+            "summary": "No hay actividades suficientes para construir un resumen de carga semanal.",
+            "reasons": ["La semana no tiene actividades registradas."],
+            "next_step": "Sincronizar actividades o revisar la semana consultada.",
+        }
+
+    current_load = float(week_payload.get("total_training_load") or 0)
+    planned = int(week_payload.get("planned_sessions_count") or 0)
+    completed = int(week_payload.get("completed_sessions_count") or 0)
+    avg_readiness = health_payload.get("avg_readiness_score")
+    hard_count = int(intensity_payload.get("hard_activities_count") or 0)
+    high_aerobic = int(intensity_payload.get("high_aerobic_te_count") or 0)
+
+    if previous_summary is not None:
+        prev_load = float(previous_summary.get("total_training_load") or 0)
+        previous_summary["delta_training_load"] = round(current_load - prev_load, 1)
+        previous_summary["delta_duration_sec"] = int((week_payload.get("total_duration_sec") or 0) - (previous_summary.get("total_duration_sec") or 0))
+        previous_summary["delta_distance_m"] = round(float(week_payload.get("total_distance_m") or 0) - float(previous_summary.get("total_distance_m") or 0), 1)
+        if prev_load > 0 and current_load >= prev_load * 1.25:
+            status = "building"
+            reasons.append("La carga subio de forma marcada versus la semana anterior.")
+        if prev_load > 0 and current_load >= prev_load * 1.5:
+            status = "high_load"
+            reasons.append("La carga semanal salto muy por encima de la semana anterior.")
+
+    if high_aerobic >= 2 or hard_count >= 3 or "high_weekly_training_load" in intensity_payload.get("flags", []):
+        if status == "balanced":
+            status = "high_load"
+        reasons.append("Se acumularon varias sesiones exigentes o una carga alta.")
+
+    if planned > 0 and completed < max(1, planned // 2):
+        status = "underloaded"
+        reasons.append("La carga realizada quedo baja respecto de lo planificado.")
+        next_step = "Revisar si hubo recortes por agenda, fatiga o falta de sincronizacion."
+
+    if avg_readiness is not None and avg_readiness < 65 and status in {"high_load", "building", "balanced"}:
+        status = "recovery_needed"
+        reasons.append("La carga semanal se combina con readiness promedio bajo.")
+        next_step = "Priorizar descarga, trabajo facil o recuperacion antes de volver a exigir."
+
+    if weekly_analysis is not None and _weekly_risk_level(weekly_analysis) == "high" and status == "balanced":
+        status = "high_load"
+        reasons.append("El weekly_analysis marca riesgo alto de carga o fatiga.")
+
+    if not reasons:
+        reasons.append("La carga semanal aparece razonable y sin alertas fuertes en los datos disponibles.")
+
+    summary_map = {
+        "balanced": "La semana se ve bastante equilibrada.",
+        "building": "La semana viene en construccion, con una carga en aumento.",
+        "high_load": "La semana esta cargada y conviene vigilar la acumulacion de intensidad.",
+        "underloaded": "La semana quedo por debajo de lo esperado.",
+        "recovery_needed": "La semana sugiere necesidad de descarga o recuperacion.",
+        "no_data": "No hay datos suficientes para resumir la carga semanal.",
+    }
+    return {
+        "status": status,
+        "summary": summary_map.get(status, "Resumen semanal disponible."),
+        "reasons": reasons,
+        "next_step": next_step,
+    }

@@ -93,6 +93,36 @@ async def get_next_session_recommendation(
     )
 
 
+@mcp.tool()
+async def get_week_load_summary(
+    athlete_id: int,
+    week_start_date: str | None = None,
+    compare_previous: bool = True,
+) -> dict[str, Any]:
+    """Devuelve un resumen read-only de carga semanal, opcionalmente comparado con la semana previa."""
+    return await CLIENT.get_week_load_summary(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+        compare_previous=compare_previous,
+    )
+
+
+@mcp.tool()
+async def get_session_analysis_payload(
+    athlete_id: int,
+    planned_session_id: int | None = None,
+    activity_id: int | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve el payload tecnico del analisis de sesion para evitar copiado manual desde la web."""
+    return await CLIENT.get_session_analysis_payload(
+        athlete_id=athlete_id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date=date,
+    )
+
+
 def main() -> None:
     transport = SETTINGS.mcp_transport
     if transport == "http":
