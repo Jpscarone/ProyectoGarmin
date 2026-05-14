@@ -52,6 +52,26 @@ class TrainingAppApiClient:
             params={"athlete_id": str(int(athlete_id))},
         )
 
+    async def compare_planned_vs_done(
+        self,
+        *,
+        athlete_id: int,
+        date: str | None = None,
+        activity_id: int | None = None,
+        planned_session_id: int | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if date:
+            params["date"] = date
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        return await self._get_json(
+            "/api/mcp/compare/planned-vs-done",
+            params=params,
+        )
+
     async def _get_json(self, path: str, *, params: dict[str, str] | None = None) -> dict[str, Any] | list[dict[str, Any]]:
         base_url, token = self._require_config()
         headers = {"Authorization": f"Bearer {token}"}

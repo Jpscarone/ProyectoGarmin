@@ -2,7 +2,7 @@
 
 ## Que hace
 
-Este servidor MCP remoto consume la API interna read-only de ProyectoGarmin bajo `/api/mcp` y expone tools para consultar atletas, actividades, salud y estado de entrenamiento.
+Este servidor MCP remoto consume la API interna read-only de ProyectoGarmin bajo `/api/mcp` y expone tools para consultar atletas, actividades, salud, estado de entrenamiento y comparaciones entre sesion programada y actividad realizada.
 
 No se conecta directo a PostgreSQL.
 No escribe datos.
@@ -16,6 +16,24 @@ No modifica el estado del sistema.
 - `get_health_summary(athlete_id: int)`
 - `get_latest_weekly_analysis(athlete_id: int)`
 - `get_training_status(athlete_id: int)`
+- `compare_planned_vs_done(athlete_id: int, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+
+## Nueva tool comparativa
+
+`compare_planned_vs_done` consulta `GET /api/mcp/compare/planned-vs-done` y devuelve un JSON read-only con:
+
+- atleta y fecha resuelta
+- sesion programada normalizada
+- actividad realizada normalizada
+- metadata de match: `explicit`, `date_sport` o `none`
+- analisis comparativo existente si ya fue generado
+- diferencias simples de duracion y distancia
+
+La tool esta pensada para prompts como:
+
+- `Comparame la ultima actividad de Pablo con lo que tenia programado`
+- `Que tan bien cumplio la sesion del 2026-05-13`
+- `Dame feedback entre programado y realizado`
 
 ## Dependencias
 
@@ -118,6 +136,15 @@ $env:TRAINING_APP_BASE_URL = "http://127.0.0.1:8000"
 $env:TRAINING_APP_MCP_TOKEN = "change-me"
 .\mcp_training_server\.venv\Scripts\Activate.ps1
 python .\mcp_training_server\smoke_test_api.py
+```
+
+### Probar solo la comparacion interna
+
+```powershell
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&date=2026-05-13"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&activity_id=123"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&planned_session_id=456"
 ```
 
 ### Smoke test remoto MCP

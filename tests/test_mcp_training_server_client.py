@@ -37,6 +37,25 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("TRAINING_APP_MCP_TOKEN", str(ctx.exception))
 
+    async def test_compare_planned_vs_done_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/compare/planned-vs-done")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("date"), "2026-05-13")
+            self.assertEqual(request.url.params.get("activity_id"), "22")
+            self.assertEqual(request.url.params.get("planned_session_id"), "33")
+            return httpx.Response(200, json={"date": "2026-05-13", "match": {"source": "none"}})
+
+        client = _build_client(handler)
+        payload = await client.compare_planned_vs_done(
+            athlete_id=1,
+            date="2026-05-13",
+            activity_id=22,
+            planned_session_id=33,
+        )
+
+        self.assertEqual(payload["date"], "2026-05-13")
+
 
 def _build_client(handler) -> TrainingAppApiClient:
     settings = Settings(

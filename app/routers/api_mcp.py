@@ -4,7 +4,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +21,7 @@ from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
+from app.services.planning.presentation import describe_session_structure_short, derive_session_metrics
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
 from app.services.mcp_context_service import (
     build_last_activity_feedback_payload,
@@ -266,6 +267,87 @@ def read_next_session_context(
         athlete=athlete,
         training_plan=training_plan,
     )
+
+
+@router.get("/compare/planned-vs-done")
+def compare_planned_vs_done(
+    athlete_id: int = Query(...),
+    date_value: str | None = Query(default=None, alias="date"),
+    activity_id: int | None = Query(default=None),
+    planned_session_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(date_value, "date") if date_value else None
+
+    activity = _load_activity_for_compare(db, athlete.id, activity_id) if activity_id is not None else None
+    planned_session = (
+        _load_planned_session_for_compare(db, athlete.id, planned_session_id)
+        if planned_session_id is not None else None
+    )
+
+    if activity is None and planned_session is None and target_date is not None:
+        planned_session = _find_planned_session_by_date(db, athlete.id, target_date)
+        activity = _find_activity_by_date(db, athlete.id, target_date)
+
+    if activity is None and planned_session is None and target_date is None:
+        activity = _get_latest_activity_for_compare(db, athlete.id)
+        if activity is None:
+            planned_session = _get_latest_planned_session_for_compare(db, athlete.id)
+
+    match_payload: dict[str, Any] = {
+        "source": "none",
+        "match_id": None,
+        "score": None,
+        "confidence": None,
+    }
+
+    explicit_match = _resolve_explicit_match(activity, planned_session)
+    if explicit_match is not None:
+        activity = explicit_match.garmin_activity
+        planned_session = explicit_match.planned_session
+        match_payload = _serialize_match_payload(explicit_match, source="explicit")
+    else:
+        if activity is not None and planned_session is None:
+            fallback_planned = _find_fallback_planned_for_activity(db, activity)
+            if fallback_planned is not None:
+                planned_session = fallback_planned
+                match_payload = {"source": "date_sport", "match_id": None, "score": None, "confidence": None}
+        elif planned_session is not None and activity is None:
+            fallback_activity = _find_fallback_activity_for_planned(db, planned_session)
+            if fallback_activity is not None:
+                activity = fallback_activity
+                match_payload = {"source": "date_sport", "match_id": None, "score": None, "confidence": None}
+        elif activity is not None and planned_session is not None and _entities_match_by_date_sport(activity, planned_session):
+            match_payload = {"source": "date_sport", "match_id": None, "score": None, "confidence": None}
+
+    derived_date = (
+        target_date
+        or _activity_local_date(activity)
+        or _planned_session_date(planned_session)
+    )
+
+    session_analysis = _resolve_session_analysis(activity, planned_session)
+    analysis_report = _resolve_analysis_report(activity, planned_session)
+    differences = _build_differences_payload(planned_session, activity)
+    analysis = _build_compare_analysis_payload(
+        planned_session=planned_session,
+        activity=activity,
+        session_analysis=session_analysis,
+        analysis_report=analysis_report,
+        match_payload=match_payload,
+        differences=differences,
+    )
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "date": derived_date.isoformat() if derived_date is not None else None,
+        "planned_session": _serialize_planned_session_compare(planned_session),
+        "activity": _serialize_activity_compare(activity),
+        "match": match_payload,
+        "analysis": analysis,
+        "differences": differences,
+    }
 
 
 def _parse_iso_date(raw_value: str, field_name: str) -> date:
@@ -543,3 +625,489 @@ def _get_latest_weekly_analysis(db: Session, athlete_id: int) -> WeeklyAnalysis 
         .where(WeeklyAnalysis.athlete_id == athlete_id)
         .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.id.desc())
     )
+
+
+def _compare_loader_options() -> tuple[Any, ...]:
+    return (
+        selectinload(GarminActivity.activity_match).selectinload(ActivitySessionMatch.planned_session).selectinload(PlannedSession.training_day),
+        selectinload(GarminActivity.activity_match).selectinload(ActivitySessionMatch.planned_session).selectinload(PlannedSession.planned_session_steps),
+        selectinload(GarminActivity.session_analyses),
+        selectinload(GarminActivity.analysis_reports),
+    )
+
+
+def _planned_compare_loader_options() -> tuple[Any, ...]:
+    return (
+        selectinload(PlannedSession.training_day),
+        selectinload(PlannedSession.planned_session_steps),
+        selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity),
+        selectinload(PlannedSession.session_analyses),
+        selectinload(PlannedSession.analysis_reports),
+    )
+
+
+def _load_activity_for_compare(db: Session, athlete_id: int, activity_id: int) -> GarminActivity | None:
+    activity = db.scalar(
+        select(GarminActivity)
+        .where(
+            GarminActivity.id == int(activity_id),
+            GarminActivity.athlete_id == athlete_id,
+        )
+        .options(*_compare_loader_options())
+    )
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    return activity
+
+
+def _load_planned_session_for_compare(db: Session, athlete_id: int, planned_session_id: int) -> PlannedSession | None:
+    planned_session = db.scalar(
+        select(PlannedSession)
+        .where(
+            PlannedSession.id == int(planned_session_id),
+            PlannedSession.athlete_id == athlete_id,
+        )
+        .options(*_planned_compare_loader_options())
+    )
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    return planned_session
+
+
+def _find_planned_session_by_date(db: Session, athlete_id: int, target_date: date) -> PlannedSession | None:
+    return db.scalar(
+        select(PlannedSession)
+        .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+        .where(
+            PlannedSession.athlete_id == athlete_id,
+            TrainingDay.day_date == target_date,
+        )
+        .order_by(PlannedSession.session_order.asc(), PlannedSession.id.asc())
+        .options(*_planned_compare_loader_options())
+    )
+
+
+def _find_activity_by_date(db: Session, athlete_id: int, target_date: date) -> GarminActivity | None:
+    return db.scalar(
+        select(GarminActivity)
+        .where(
+            GarminActivity.athlete_id == athlete_id,
+            func.date(GarminActivity.start_time) == target_date.isoformat(),
+        )
+        .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
+        .options(*_compare_loader_options())
+    )
+
+
+def _get_latest_activity_for_compare(db: Session, athlete_id: int) -> GarminActivity | None:
+    return db.scalar(
+        select(GarminActivity)
+        .where(GarminActivity.athlete_id == athlete_id)
+        .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
+        .options(*_compare_loader_options())
+    )
+
+
+def _get_latest_planned_session_for_compare(db: Session, athlete_id: int) -> PlannedSession | None:
+    return db.scalar(
+        select(PlannedSession)
+        .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+        .where(PlannedSession.athlete_id == athlete_id)
+        .order_by(TrainingDay.day_date.desc(), PlannedSession.session_order.desc(), PlannedSession.id.desc())
+        .options(*_planned_compare_loader_options())
+    )
+
+
+def _resolve_explicit_match(
+    activity: GarminActivity | None,
+    planned_session: PlannedSession | None,
+) -> ActivitySessionMatch | None:
+    if activity is not None and activity.activity_match is not None:
+        if planned_session is None or activity.activity_match.planned_session_id_fk == planned_session.id:
+            return activity.activity_match
+    if planned_session is not None and planned_session.activity_match is not None:
+        if activity is None or planned_session.activity_match.garmin_activity_id_fk == activity.id:
+            return planned_session.activity_match
+    return None
+
+
+def _find_fallback_planned_for_activity(db: Session, activity: GarminActivity) -> PlannedSession | None:
+    activity_date = _activity_local_date(activity)
+    if activity_date is None:
+        return None
+    candidates = list(
+        db.scalars(
+            select(PlannedSession)
+            .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+            .where(
+                PlannedSession.athlete_id == activity.athlete_id,
+                TrainingDay.day_date == activity_date,
+            )
+            .order_by(PlannedSession.session_order.asc(), PlannedSession.id.asc())
+            .options(*_planned_compare_loader_options())
+        ).all()
+    )
+    return _pick_planned_candidate_for_activity(candidates, activity)
+
+
+def _find_fallback_activity_for_planned(db: Session, planned_session: PlannedSession) -> GarminActivity | None:
+    session_date = _planned_session_date(planned_session)
+    if session_date is None:
+        return None
+    candidates = list(
+        db.scalars(
+            select(GarminActivity)
+            .where(
+                GarminActivity.athlete_id == planned_session.athlete_id,
+                func.date(GarminActivity.start_time) == session_date.isoformat(),
+            )
+            .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
+            .options(*_compare_loader_options())
+        ).all()
+    )
+    return _pick_activity_candidate_for_planned(candidates, planned_session)
+
+
+def _pick_planned_candidate_for_activity(
+    candidates: list[PlannedSession],
+    activity: GarminActivity,
+) -> PlannedSession | None:
+    if not candidates:
+        return None
+    exact = [item for item in candidates if _sports_match(item.sport_type, activity.sport_type) and _modalities_match(item.modality, activity.modality)]
+    if exact:
+        return exact[0]
+    sport_only = [item for item in candidates if _sports_match(item.sport_type, activity.sport_type)]
+    if sport_only:
+        return sport_only[0]
+    return None
+
+
+def _pick_activity_candidate_for_planned(
+    candidates: list[GarminActivity],
+    planned_session: PlannedSession,
+) -> GarminActivity | None:
+    if not candidates:
+        return None
+    exact = [item for item in candidates if _sports_match(item.sport_type, planned_session.sport_type) and _modalities_match(item.modality, planned_session.modality)]
+    if exact:
+        return exact[0]
+    sport_only = [item for item in candidates if _sports_match(item.sport_type, planned_session.sport_type)]
+    if sport_only:
+        return sport_only[0]
+    return None
+
+
+def _entities_match_by_date_sport(activity: GarminActivity, planned_session: PlannedSession) -> bool:
+    activity_date = _activity_local_date(activity)
+    planned_date = _planned_session_date(planned_session)
+    return (
+        activity_date is not None
+        and planned_date is not None
+        and activity_date == planned_date
+        and _sports_match(activity.sport_type, planned_session.sport_type)
+        and _modalities_match(activity.modality, planned_session.modality)
+    )
+
+
+def _sports_match(left: str | None, right: str | None) -> bool:
+    return _normalize_sport_value(left) == _normalize_sport_value(right) if left and right else False
+
+
+def _modalities_match(left: str | None, right: str | None) -> bool:
+    if left and right:
+        return left.strip().lower() == right.strip().lower()
+    return True
+
+
+def _normalize_sport_value(value: str | None) -> str | None:
+    if not value:
+        return None
+    normalized = value.strip().lower()
+    aliases = {
+        "run": "running",
+        "road_cycling": "cycling",
+        "bike": "cycling",
+        "trail_run": "trail_running",
+        "strength_training": "strength",
+        "functional_strength_training": "strength",
+        "gym": "strength",
+        "lap_swimming": "swimming",
+        "pool_swim": "swimming",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _activity_local_date(activity: GarminActivity | None) -> date | None:
+    if activity is None or activity.start_time is None:
+        return None
+    return activity.start_time.date()
+
+
+def _planned_session_date(planned_session: PlannedSession | None) -> date | None:
+    if planned_session is None or planned_session.training_day is None:
+        return None
+    return planned_session.training_day.day_date
+
+
+def _serialize_match_payload(match: ActivitySessionMatch, *, source: str) -> dict[str, Any]:
+    confidence = round(float(match.match_confidence), 3) if match.match_confidence is not None else None
+    score = round(float(match.match_confidence) * 100.0, 1) if match.match_confidence is not None else None
+    return {
+        "source": source,
+        "match_id": match.id,
+        "score": score,
+        "confidence": confidence,
+    }
+
+
+def _serialize_planned_session_compare(session: PlannedSession | None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "name": session.name,
+        "sport": session.sport_type,
+        "modality": session.modality,
+        "planned_duration_sec": metrics.duration_sec,
+        "planned_distance_m": metrics.distance_m,
+        "target_type": session.target_type,
+        "target_summary": _build_planned_target_summary(session),
+        "steps": [_serialize_planned_step(item) for item in session.planned_session_steps],
+    }
+
+
+def _build_planned_target_summary(session: PlannedSession) -> str | None:
+    return (
+        session.target_notes
+        or describe_session_structure_short(session)
+        or session.description_text
+    )
+
+
+def _serialize_planned_step(step: Any) -> dict[str, Any]:
+    return {
+        "id": step.id,
+        "step_order": step.step_order,
+        "step_type": step.step_type,
+        "repeat_count": step.repeat_count,
+        "duration_sec": step.duration_sec,
+        "distance_m": step.distance_m,
+        "target_type": step.target_type,
+        "target_hr_zone": step.target_hr_zone,
+        "target_hr_min": step.target_hr_min,
+        "target_hr_max": step.target_hr_max,
+        "target_power_zone": step.target_power_zone,
+        "target_power_min": step.target_power_min,
+        "target_power_max": step.target_power_max,
+        "target_pace_zone": step.target_pace_zone,
+        "target_pace_min_sec_km": step.target_pace_min_sec_km,
+        "target_pace_max_sec_km": step.target_pace_max_sec_km,
+        "target_rpe_zone": step.target_rpe_zone,
+        "target_cadence_min": step.target_cadence_min,
+        "target_cadence_max": step.target_cadence_max,
+        "incline_pct": step.incline_pct,
+        "target_notes": step.target_notes,
+    }
+
+
+def _serialize_activity_compare(activity: GarminActivity | None) -> dict[str, Any] | None:
+    if activity is None:
+        return None
+    return {
+        "id": activity.id,
+        "garmin_activity_id": activity.garmin_activity_id,
+        "activity_name": activity.activity_name,
+        "sport_type": activity.sport_type,
+        "modality": activity.modality,
+        "start_time": activity.start_time.isoformat() if activity.start_time else None,
+        "duration_sec": activity.duration_sec,
+        "distance_m": activity.distance_m,
+        "avg_hr": activity.avg_hr,
+        "max_hr": activity.max_hr,
+        "avg_pace_sec_km": activity.avg_pace_sec_km,
+        "training_load": activity.training_load,
+        "training_effect_aerobic": activity.training_effect_aerobic,
+        "training_effect_anaerobic": activity.training_effect_anaerobic,
+    }
+
+
+def _resolve_session_analysis(
+    activity: GarminActivity | None,
+    planned_session: PlannedSession | None,
+) -> SessionAnalysis | None:
+    if activity is not None and planned_session is not None:
+        matching = [
+            item for item in activity.session_analyses
+            if item.planned_session_id == planned_session.id
+        ]
+        if matching:
+            return _latest_completed_session_analysis(matching)
+    if activity is not None:
+        return _latest_completed_session_analysis(activity.session_analyses)
+    if planned_session is not None:
+        return _latest_completed_session_analysis(planned_session.session_analyses)
+    return None
+
+
+def _resolve_analysis_report(
+    activity: GarminActivity | None,
+    planned_session: PlannedSession | None,
+) -> AnalysisReport | None:
+    if activity is not None and planned_session is not None:
+        matching = [
+            item for item in activity.analysis_reports
+            if item.planned_session_id == planned_session.id
+        ]
+        if matching:
+            return _latest_analysis_report(matching)
+    if activity is not None and activity.analysis_reports:
+        return _latest_analysis_report(activity.analysis_reports)
+    if planned_session is not None and planned_session.analysis_reports:
+        return _latest_analysis_report(planned_session.analysis_reports)
+    return None
+
+
+def _build_differences_payload(
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+) -> dict[str, Any]:
+    planned_duration = None
+    planned_distance = None
+    if planned_session is not None:
+        metrics = derive_session_metrics(planned_session)
+        planned_duration = metrics.duration_sec
+        planned_distance = metrics.distance_m
+
+    actual_duration = activity.duration_sec if activity is not None else None
+    actual_distance = activity.distance_m if activity is not None else None
+
+    return {
+        "duration_delta_sec": _safe_delta(actual_duration, planned_duration),
+        "distance_delta_m": _safe_delta(actual_distance, planned_distance),
+        "duration_ratio": _safe_ratio(actual_duration, planned_duration),
+        "distance_ratio": _safe_ratio(actual_distance, planned_distance),
+    }
+
+
+def _safe_delta(actual: float | int | None, planned: float | int | None) -> float | int | None:
+    if actual is None or planned is None:
+        return None
+    delta = float(actual) - float(planned)
+    if isinstance(actual, int) and isinstance(planned, int):
+        return int(round(delta))
+    return round(delta, 1)
+
+
+def _safe_ratio(actual: float | int | None, planned: float | int | None) -> float | None:
+    if actual is None or planned in (None, 0):
+        return None
+    return round(float(actual) / float(planned), 3)
+
+
+def _build_compare_analysis_payload(
+    *,
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+    session_analysis: SessionAnalysis | None,
+    analysis_report: AnalysisReport | None,
+    match_payload: dict[str, Any],
+    differences: dict[str, Any],
+) -> dict[str, Any]:
+    warnings = _build_compare_warnings(
+        planned_session=planned_session,
+        activity=activity,
+        session_analysis=session_analysis,
+        match_payload=match_payload,
+    )
+    adherence_score = _resolve_adherence_score(session_analysis, analysis_report)
+    summary = _resolve_compare_summary(planned_session, activity, session_analysis, analysis_report)
+    recommendation = _resolve_compare_recommendation(planned_session, activity, session_analysis, analysis_report, differences)
+    return {
+        "session_analysis": _serialize_session_analysis_summary(session_analysis),
+        "analysis_report": _serialize_analysis_report_summary(analysis_report),
+        "adherence_score": adherence_score,
+        "summary": summary,
+        "warnings": warnings,
+        "recommendation": recommendation,
+    }
+
+
+def _build_compare_warnings(
+    *,
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+    session_analysis: SessionAnalysis | None,
+    match_payload: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    if planned_session is None:
+        warnings.append("No hay sesion programada asociada a la actividad consultada.")
+    if activity is None:
+        warnings.append("No hay actividad realizada asociada a la sesion programada consultada.")
+    if planned_session is not None and activity is not None and match_payload.get("source") == "none":
+        warnings.append("Se encontraron ambos registros pero sin un vinculo confiable por match explicito ni por fecha/deporte.")
+    if session_analysis is None and planned_session is not None and activity is not None:
+        warnings.append("No hay analisis comparativo guardado para esta combinacion sesion-actividad.")
+    return warnings
+
+
+def _resolve_adherence_score(
+    session_analysis: SessionAnalysis | None,
+    analysis_report: AnalysisReport | None,
+) -> float | None:
+    if session_analysis is not None and session_analysis.compliance_score is not None:
+        return round(float(session_analysis.compliance_score), 1)
+    if analysis_report is not None and analysis_report.overall_score is not None:
+        return round(float(analysis_report.overall_score), 1)
+    return None
+
+
+def _resolve_compare_summary(
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+    session_analysis: SessionAnalysis | None,
+    analysis_report: AnalysisReport | None,
+) -> str | None:
+    for value in (
+        session_analysis.summary_short if session_analysis else None,
+        session_analysis.coach_conclusion if session_analysis else None,
+        analysis_report.summary_text if analysis_report else None,
+        analysis_report.final_conclusion_text if analysis_report else None,
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if planned_session is None and activity is not None:
+        return "Hay actividad realizada, pero no se encontro una sesion programada asociada para comparar."
+    if activity is None and planned_session is not None:
+        return "Hay sesion programada, pero no se encontro una actividad realizada asociada para comparar."
+    if planned_session is not None and activity is not None:
+        return "Se encontro una sesion programada y una actividad realizada para comparar, sin analisis narrativo guardado."
+    return "No se encontraron datos suficientes para construir la comparacion."
+
+
+def _resolve_compare_recommendation(
+    planned_session: PlannedSession | None,
+    activity: GarminActivity | None,
+    session_analysis: SessionAnalysis | None,
+    analysis_report: AnalysisReport | None,
+    differences: dict[str, Any],
+) -> str | None:
+    for value in (
+        session_analysis.next_recommendation if session_analysis else None,
+        analysis_report.recommendation_text if analysis_report else None,
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    if planned_session is None and activity is not None:
+        return "Revisar si corresponde vincular manualmente esta actividad a una sesion programada para habilitar mejor feedback."
+    if activity is None and planned_session is not None:
+        return "Verificar si la actividad todavia no fue sincronizada o si la sesion finalmente no se realizo."
+    duration_ratio = differences.get("duration_ratio")
+    if isinstance(duration_ratio, float):
+        if duration_ratio > 1.2:
+            return "La duracion realizada quedo por encima de lo planificado; conviene revisar impacto de carga y recuperacion."
+        if duration_ratio < 0.8:
+            return "La duracion realizada quedo por debajo de lo planificado; conviene revisar si hubo recorte por fatiga, tiempo o terreno."
+    return None

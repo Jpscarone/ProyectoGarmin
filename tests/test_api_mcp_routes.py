@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
-from datetime import date
+from datetime import date, datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -12,18 +12,25 @@ from sqlalchemy.pool import StaticPool
 from app.config import get_settings
 from app.db.base import Base
 from app.db.models import activity_session_match  # noqa: F401
+from app.db.models import analysis_report  # noqa: F401
 from app.db.models import athlete  # noqa: F401
 from app.db.models import daily_health_metric  # noqa: F401
 from app.db.models import garmin_activity  # noqa: F401
 from app.db.models import goal  # noqa: F401
 from app.db.models import health_ai_analysis  # noqa: F401
 from app.db.models import planned_session  # noqa: F401
+from app.db.models import planned_session_step  # noqa: F401
 from app.db.models import session_analysis  # noqa: F401
 from app.db.models import training_day  # noqa: F401
 from app.db.models import training_plan  # noqa: F401
 from app.db.models import weekly_analysis  # noqa: F401
+from app.db.models.activity_session_match import ActivitySessionMatch
+from app.db.models.analysis_report import AnalysisReport
 from app.db.models.athlete import Athlete
 from app.db.models.garmin_activity import GarminActivity
+from app.db.models.planned_session import PlannedSession
+from app.db.models.planned_session_step import PlannedSessionStep
+from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.session import get_db
@@ -157,3 +164,160 @@ class ApiMcpRoutesTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["schema_version"], "mcp_next_session_context_v1")
         self.assertIsNone(payload["next_session"])
+
+    def test_compare_planned_vs_done_uses_explicit_match_and_analysis(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 13),
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            name="Series en pista",
+            sport_type="running",
+            modality="outdoor",
+            session_type="intervals",
+            expected_duration_min=50,
+            expected_distance_km=10,
+            target_type="pace",
+            target_notes="8x400m ritmo 5k",
+            session_order=1,
+        )
+        self.db.add(planned_session)
+        self.db.commit()
+        self.db.refresh(planned_session)
+
+        self.db.add(
+            PlannedSessionStep(
+                planned_session_id=planned_session.id,
+                step_order=1,
+                step_type="warmup",
+                duration_sec=900,
+            )
+        )
+        self.db.add(
+            PlannedSessionStep(
+                planned_session_id=planned_session.id,
+                step_order=2,
+                step_type="work",
+                duration_sec=1800,
+                distance_m=8000,
+            )
+        )
+        self.db.add(
+            PlannedSessionStep(
+                planned_session_id=planned_session.id,
+                step_order=3,
+                step_type="cooldown",
+                duration_sec=300,
+                distance_m=2000,
+            )
+        )
+
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=555777,
+            activity_name="Pista miercoles",
+            sport_type="running",
+            modality="outdoor",
+            start_time=datetime(2026, 5, 13, 7, 30, 0),
+            duration_sec=3120,
+            distance_m=9800,
+            avg_hr=154,
+            max_hr=176,
+            avg_pace_sec_km=318,
+            training_load=82,
+            training_effect_aerobic=3.4,
+            training_effect_anaerobic=2.1,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        match_row = ActivitySessionMatch(
+            athlete_id=self.athlete.id,
+            garmin_activity_id_fk=activity.id,
+            planned_session_id_fk=planned_session.id,
+            training_day_id_fk=training_day.id,
+            match_confidence=0.96,
+            match_method="manual",
+        )
+        self.db.add(match_row)
+        self.db.add(
+            SessionAnalysis(
+                athlete_id=self.athlete.id,
+                planned_session_id=planned_session.id,
+                activity_id=activity.id,
+                status="completed",
+                summary_short="Cumplio bien la estructura principal.",
+                coach_conclusion="Sesion bien resuelta y estable.",
+                next_recommendation="Mantener el jueves muy suave.",
+                compliance_score=88,
+                execution_score=84,
+            )
+        )
+        self.db.add(
+            AnalysisReport(
+                athlete_id=self.athlete.id,
+                report_type="session",
+                planned_session_id=planned_session.id,
+                garmin_activity_id_fk=activity.id,
+                title="Reporte de series",
+                overall_status="correct",
+                overall_score=86,
+                summary_text="La carga estuvo alineada con lo esperado.",
+                recommendation_text="Sostener la progresion semanal.",
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/compare/planned-vs-done?athlete_id={self.athlete.id}&activity_id={activity.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["date"], "2026-05-13")
+        self.assertEqual(payload["planned_session"]["id"], planned_session.id)
+        self.assertEqual(payload["activity"]["id"], activity.id)
+        self.assertEqual(payload["match"]["source"], "explicit")
+        self.assertEqual(payload["match"]["match_id"], match_row.id)
+        self.assertEqual(payload["analysis"]["adherence_score"], 88.0)
+        self.assertEqual(payload["analysis"]["summary"], "Cumplio bien la estructura principal.")
+        self.assertEqual(payload["analysis"]["recommendation"], "Mantener el jueves muy suave.")
+        self.assertEqual(payload["differences"]["duration_delta_sec"], 120)
+        self.assertEqual(payload["differences"]["distance_delta_m"], -200.0)
+
+    def test_compare_planned_vs_done_returns_activity_without_programming(self) -> None:
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=555999,
+            activity_name="Rodaje libre",
+            sport_type="running",
+            modality="outdoor",
+            start_time=datetime(2026, 5, 14, 8, 0, 0),
+            duration_sec=2400,
+            distance_m=7000,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        response = self.client.get(
+            f"/api/mcp/compare/planned-vs-done?athlete_id={self.athlete.id}&activity_id={activity.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIsNone(payload["planned_session"])
+        self.assertEqual(payload["activity"]["id"], activity.id)
+        self.assertEqual(payload["match"]["source"], "none")
+        self.assertIn("No hay sesion programada asociada", payload["analysis"]["warnings"][0])

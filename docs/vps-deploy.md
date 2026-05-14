@@ -214,6 +214,7 @@ curl http://127.0.0.1:8000
 
 ```bash
 curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:8000/api/mcp/ping
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1"
 ```
 
 ### MCP local

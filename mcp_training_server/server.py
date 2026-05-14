@@ -63,6 +63,22 @@ async def get_training_status(athlete_id: int) -> dict[str, Any]:
     return await CLIENT.get_training_status(athlete_id=athlete_id)
 
 
+@mcp.tool()
+async def compare_planned_vs_done(
+    athlete_id: int,
+    date: str | None = None,
+    activity_id: int | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Compara una sesion programada contra la actividad realizada, sin modificar datos."""
+    return await CLIENT.compare_planned_vs_done(
+        athlete_id=athlete_id,
+        date=date,
+        activity_id=activity_id,
+        planned_session_id=planned_session_id,
+    )
+
+
 def main() -> None:
     transport = SETTINGS.mcp_transport
     if transport == "http":
