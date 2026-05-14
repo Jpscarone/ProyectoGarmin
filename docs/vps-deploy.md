@@ -31,6 +31,7 @@ Resumen:
 
 - Archivo: `/etc/systemd/system/training_app.service`
 - Working directory: `/home/pablo/ProyectoGarmin`
+- Virtualenv: `/home/pablo/ProyectoGarmin/.venv`
 - Comando:
 
 ```bash
@@ -47,23 +48,73 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000
 
 - Archivo: `/etc/systemd/system/training_mcp.service`
 - Working directory: `/home/pablo/ProyectoGarmin`
-- Comando:
-
-```bash
-python /home/pablo/ProyectoGarmin/mcp_training_server/server.py
-```
-
+- Virtualenv propia: `/home/pablo/ProyectoGarmin/mcp_training_server/.venv`
 - Archivo de entorno usado por el MCP:
 
 ```text
 /home/pablo/ProyectoGarmin/mcp_training_server/.env
 ```
 
+- Unit file correcto:
+
+```ini
+[Unit]
+Description=ProyectoGarmin MCP Server
+After=network.target training_app.service
+Requires=training_app.service
+
+[Service]
+User=pablo
+Group=www-data
+WorkingDirectory=/home/pablo/ProyectoGarmin
+EnvironmentFile=/home/pablo/ProyectoGarmin/mcp_training_server/.env
+Environment="PATH=/home/pablo/ProyectoGarmin/mcp_training_server/.venv/bin"
+ExecStart=/home/pablo/ProyectoGarmin/mcp_training_server/.venv/bin/python /home/pablo/ProyectoGarmin/mcp_training_server/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
 Importante:
 
+- No usar `/home/pablo/ProyectoGarmin/.venv/bin/python` para `training_mcp`.
+- No usar `/home/pablo/ProyectoGarmin/.env` como `EnvironmentFile` del MCP.
 - No usar el `.env` principal para el MCP.
+- No usar la misma `.venv` para la app FastAPI y para `mcp_training_server`.
 - `app/config.py` es estricto y rechaza variables extra.
 - Si se mezclan variables del MCP en el `.env` principal, la app puede fallar al iniciar con `ValidationError`.
+- Si se instala `mcp_training_server/requirements.txt` dentro de la `.venv` principal, la app puede romperse por conflicto de dependencias.
+
+### Cambio real aplicado en produccion
+
+Problema detectado:
+
+- Se estaba usando la misma `.venv` para la app principal y para el MCP.
+- `FastAPI 0.116.1` requiere `starlette < 0.48`.
+- `mcp` / `sse-starlette` termino instalando `starlette 1.0.0`.
+- Resultado: la app principal podia romperse despues de instalar dependencias del MCP.
+
+Solucion aplicada:
+
+- La app principal usa `/home/pablo/ProyectoGarmin/.venv`.
+- El MCP usa `/home/pablo/ProyectoGarmin/mcp_training_server/.venv`.
+
+Comandos para reparar o recrear esas venv:
+
+```bash
+cd ~/ProyectoGarmin
+source .venv/bin/activate
+pip install -r requirements.txt
+deactivate
+
+cd ~/ProyectoGarmin/mcp_training_server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+deactivate
+```
 
 ## 3. Variables de entorno
 
@@ -73,6 +124,12 @@ Los valores reales no se commitean al repositorio.
 - Verificar que `.env` este incluido en `.gitignore`.
 
 ### `.env` principal de la app
+
+Ubicacion:
+
+```text
+/home/pablo/ProyectoGarmin/.env
+```
 
 Debe contener variables como:
 
@@ -110,7 +167,7 @@ MCP_MESSAGE_PATH
 Ubicacion:
 
 ```text
-mcp_training_server/.env
+/home/pablo/ProyectoGarmin/mcp_training_server/.env
 ```
 
 Debe contener:
@@ -130,6 +187,20 @@ Notas:
 
 - `TRAINING_APP_MCP_TOKEN` y `MCP_API_TOKEN` deben coincidir.
 - El MCP consume la API interna de la app usando `http://127.0.0.1:8000`.
+- No commitear tokens reales ni `.env` reales.
+
+### Cambio real aplicado en produccion
+
+Problema detectado:
+
+- El `.env` principal de la app contenia variables del MCP.
+- `app/config.py` usa Pydantic Settings estricto con `extra forbidden`.
+- Resultado: la app principal caia con `pydantic_core.ValidationError: Extra inputs are not permitted`.
+
+Solucion aplicada:
+
+- El `.env` principal `/home/pablo/ProyectoGarmin/.env` debe contener solo variables de la app y `MCP_API_TOKEN`.
+- El `.env` del MCP debe estar separado en `/home/pablo/ProyectoGarmin/mcp_training_server/.env`.
 
 ## 4. Nginx
 
@@ -185,12 +256,20 @@ git push
 
 ```bash
 cd ~/ProyectoGarmin
-git status
-git restore .   # solo si hay cambios generados tipo __pycache__ o .pyc
 git pull
+
+# app principal
 source .venv/bin/activate
 pip install -r requirements.txt
-pip install -r mcp_training_server/requirements.txt
+deactivate
+
+# MCP
+cd ~/ProyectoGarmin/mcp_training_server
+source .venv/bin/activate
+pip install -r requirements.txt
+deactivate
+
+cd ~/ProyectoGarmin
 alembic upgrade head
 sudo systemctl restart training_app
 sudo systemctl restart training_mcp
@@ -198,8 +277,21 @@ sudo systemctl restart training_mcp
 
 Nota:
 
+- No instalar `mcp_training_server/requirements.txt` dentro de `~/ProyectoGarmin/.venv`.
 - Evitar `git restore .` si hay cambios manuales validos en produccion que todavia no fueron revisados.
 - Usarlo solo para limpiar artefactos generados.
+
+### Si se modifica el unit file de systemd
+
+Despues de cambiar `/etc/systemd/system/training_mcp.service` o el de la app, correr:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl reset-failed training_app
+sudo systemctl reset-failed training_mcp
+sudo systemctl restart training_app
+sudo systemctl restart training_mcp
+```
 
 ## 6. Comandos de verificacion
 
@@ -215,6 +307,12 @@ curl http://127.0.0.1:8000
 ```bash
 curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:8000/api/mcp/ping
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1"
+```
+
+Prompt de prueba desde ChatGPT:
+
+```text
+Usando ProyectoGarmin, comparame la ultima actividad de Pablo Scarone con lo que tenia programado.
 ```
 
 ### MCP local
@@ -264,6 +362,40 @@ Solucion:
 
 - Mover esas variables a `mcp_training_server/.env`.
 - Dejar el `.env` principal solo con variables de la app.
+- Revisar que `TRAINING_APP_*` y `MCP_*` no esten en `/home/pablo/ProyectoGarmin/.env`.
+
+### `pip install` del MCP rompio FastAPI / Starlette de la app
+
+Significa:
+
+- Se instalaron dependencias del MCP dentro de la `.venv` principal.
+
+Solucion:
+
+- Reinstalar la app en `~/ProyectoGarmin/.venv`.
+- Mantener el MCP en `~/ProyectoGarmin/mcp_training_server/.venv`.
+
+Verificar version Starlette de la app:
+
+```bash
+cd ~/ProyectoGarmin
+source .venv/bin/activate
+python -c "import starlette; print(starlette.__version__)"
+deactivate
+```
+
+Debe ser compatible con FastAPI, por ejemplo `0.47.x`.
+
+Verificar version Starlette del MCP:
+
+```bash
+cd ~/ProyectoGarmin/mcp_training_server
+source .venv/bin/activate
+python -c "import starlette; print(starlette.__version__)"
+deactivate
+```
+
+Puede ser diferente porque usa venv separada.
 
 ### MCP devuelve `421 Invalid Host header`
 
@@ -300,6 +432,20 @@ Probar con:
 
 ```bash
 curl http://127.0.0.1:8000
+```
+
+### `training_mcp` sigue arrancando con la venv vieja
+
+Revisar:
+
+```bash
+sudo cat /etc/systemd/system/training_mcp.service
+```
+
+Confirmar que `ExecStart` use:
+
+```text
+/home/pablo/ProyectoGarmin/mcp_training_server/.venv/bin/python
 ```
 
 ## 8. Backup PostgreSQL
