@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("password_hash", sa.String(length=512), nullable=False),
         sa.Column("role", sa.String(length=32), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default="1"),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -39,9 +39,9 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("athlete_id", sa.Integer(), nullable=False),
         sa.Column("permission_role", sa.String(length=32), nullable=False, server_default="viewer"),
-        sa.Column("can_view", sa.Boolean(), nullable=False, server_default="1"),
-        sa.Column("can_edit", sa.Boolean(), nullable=False, server_default="0"),
-        sa.Column("can_sync_garmin", sa.Boolean(), nullable=False, server_default="0"),
+        sa.Column("can_view", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("can_edit", sa.Boolean(), nullable=False, server_default=sa.false()),
+        sa.Column("can_sync_garmin", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.ForeignKeyConstraint(["athlete_id"], ["athletes.id"]),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"]),
@@ -53,7 +53,7 @@ def upgrade() -> None:
 
     op.add_column("garmin_accounts", sa.Column("garmin_email", sa.String(length=255), nullable=True))
     op.add_column("garmin_accounts", sa.Column("garmin_password_encrypted", sa.String(length=1024), nullable=True))
-    op.add_column("garmin_accounts", sa.Column("is_active", sa.Boolean(), nullable=False, server_default="1"))
+    op.add_column("garmin_accounts", sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()))
     op.add_column("garmin_accounts", sa.Column("last_sync_at", sa.DateTime(timezone=True), nullable=True))
 
     op.execute("UPDATE garmin_accounts SET garmin_email = username WHERE garmin_email IS NULL AND username IS NOT NULL")
@@ -62,7 +62,7 @@ def upgrade() -> None:
         "SET garmin_password_encrypted = encrypted_password "
         "WHERE garmin_password_encrypted IS NULL AND encrypted_password IS NOT NULL"
     )
-    op.execute("UPDATE garmin_accounts SET is_active = CASE WHEN status = 'active' THEN 1 ELSE 0 END")
+    op.execute("UPDATE garmin_accounts SET is_active = CASE WHEN status = 'active' THEN TRUE ELSE FALSE END")
     op.execute(
         "UPDATE garmin_accounts "
         "SET last_sync_at = CASE "
