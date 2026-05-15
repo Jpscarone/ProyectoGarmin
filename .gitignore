@@ -1,12 +1,15 @@
 .garmin_tokens/
+
+# Python cache / bytecode
 __pycache__/
-*.pyc
-.venv/
-.env
 *.py[cod]
 *$py.class
+*.pyc
 *.pyo
 *.pyd
+
+.venv/
+.env
 training_app.db
 temp_migration_test.db
 alembic_postgres_preview.sql
