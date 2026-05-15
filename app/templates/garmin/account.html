@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Cuenta Garmin{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Garmin</p>
+            <h1>Cuenta Garmin por atleta</h1>
+            <p class="text-muted">Las credenciales quedan guardadas cifradas y asociadas al atleta seleccionado.</p>
+        </div>
+    </div>
+    <p><strong>Atleta:</strong> {{ athlete.name }}</p>
+    <p><strong>Última sincronización:</strong> {{ format_local_datetime(last_sync_at) if last_sync_at else "-" }}</p>
+    <p><strong>Token dir:</strong> {{ account.token_dir or "-" }}</p>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+    {% if not can_manage %}
+    <div class="alert alert-danger">No tenés permisos para editar esta cuenta Garmin.</div>
+    {% endif %}
+
+    <form method="post" action="/garmin/account" class="form-grid">
+        <label class="field">
+            <span>Email Garmin</span>
+            <input name="garmin_email" type="email" value="{{ account.garmin_email or '' }}" {% if not can_manage %}disabled{% endif %} required>
+        </label>
+        <label class="field">
+            <span>Contraseña Garmin</span>
+            <input name="garmin_password" type="password" {% if not can_manage %}disabled{% endif %}>
+        </label>
+        {% if password_exists %}
+        <p class="text-muted">Ya existe una contraseña Garmin guardada de forma cifrada.</p>
+        {% endif %}
+        <label class="field">
+            <span>Cuenta activa</span>
+            <input name="is_active" type="checkbox" {% if account.is_active %}checked{% endif %} {% if not can_manage %}disabled{% endif %}>
+        </label>
+        {% if can_manage %}
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar cuenta Garmin</button>
+        </div>
+        {% endif %}
+    </form>
+</section>
+{% endblock %}

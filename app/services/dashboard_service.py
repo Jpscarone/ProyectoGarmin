@@ -7,21 +7,29 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.db.models.activity_session_match import ActivitySessionMatch
+from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.health_ai_analysis import HealthAiAnalysis
 from app.db.models.health_sync_state import HealthSyncState
+from app.db.models.pending_training_item import PendingTrainingItem
 from app.db.models.planned_session import PlannedSession
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.services.health_readiness_service import build_health_readiness_summary, evaluate_health_readiness
+from app.services.pending_training_service import ACTIVE_PENDING_STATUSES
 from app.services.planning.presentation import derive_session_metrics, describe_session_structure_short
+from app.services.scheduled_sync_service import get_latest_scheduled_sync_overview
 from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
-
-
-APP_LOCAL_TIMEZONE = timezone(timedelta(hours=-3), name="America/Buenos_Aires")
+from app.utils.datetime_utils import (
+    format_local_datetime,
+    get_athlete_timezone_name,
+    local_date_range_utc_bounds,
+    today_local,
+    to_local_date,
+)
 
 
 def format_duration_minutes(minutes: int | None) -> str:
@@ -41,7 +49,7 @@ def build_dashboard_context(
     training_plan: TrainingPlan | None,
     selected_date: date | None = None,
 ) -> dict[str, Any]:
-    reference_date = selected_date or date.today()
+    reference_date = selected_date or today_local(athlete=athlete)
     today_sessions = _get_sessions_for_date(db, athlete.id, training_plan, reference_date)
     today_session = today_sessions[0] if today_sessions else None
     next_session = _get_next_session(db, athlete.id, training_plan, reference_date)
@@ -81,20 +89,35 @@ def build_dashboard_context(
         **today_status,
         **coach_summary,
     }
+    pending_active_count = _count_active_pending_items(db, athlete.id)
+    day_state = _build_day_state_card(
+        athlete=athlete,
+        training_plan=training_plan,
+        reference_date=reference_date,
+        today_session=today_session,
+        today_activity=today_activity_card,
+        health=health,
+        pending_active_count=pending_active_count,
+        scheduled_syncs=get_latest_scheduled_sync_overview(db),
+    )
 
     return {
         "athlete": athlete,
+        "athlete_timezone_name": get_athlete_timezone_name(athlete),
         "training_plan": training_plan,
         "selected_date": reference_date,
         "selected_date_iso": reference_date.isoformat(),
         "prev_date_iso": (reference_date - timedelta(days=1)).isoformat(),
         "next_date_iso": (reference_date + timedelta(days=1)).isoformat(),
-        "today_date_iso": date.today().isoformat(),
+        "today_date_iso": today_local(athlete=athlete).isoformat(),
         "today_status": today_status,
         "today_session": today_session_card,
         "today_activity": today_activity_card,
         "next_session": next_session_card,
         "health": health,
+        "scheduled_syncs": get_latest_scheduled_sync_overview(db),
+        "day_state": day_state,
+        "pending_active_count": pending_active_count,
         "weekly_summary": weekly_summary,
         "alerts": alerts,
         "critical_alerts": [alert for alert in alerts if alert.get("level") == "danger"],
@@ -564,6 +587,72 @@ def _build_weekly_summary(db: Session, athlete_id: int, reference_date: date) ->
     }
 
 
+def _build_day_state_card(
+    *,
+    athlete,
+    training_plan: TrainingPlan | None,
+    reference_date: date,
+    today_session: PlannedSession | None,
+    today_activity: dict[str, Any],
+    health: dict[str, Any],
+    pending_active_count: int,
+    scheduled_syncs: dict[str, dict[str, Any] | None],
+) -> dict[str, Any]:
+    has_training = today_session is not None
+    has_activity = bool(today_activity.get("exists"))
+    if not has_training:
+        link_status = "No aplica"
+        analysis_status = "No aplica"
+    elif has_activity and today_activity.get("is_linked"):
+        link_status = "OK"
+        analysis_status = "OK" if today_activity.get("has_analysis") else "Pendiente"
+    elif has_activity:
+        link_status = "Pendiente"
+        analysis_status = "No aplica"
+    else:
+        link_status = "Pendiente"
+        analysis_status = "No aplica"
+
+    health_status = "Si" if health.get("exists") else "No"
+    readiness_status = "Pendiente"
+    if not health.get("exists"):
+        readiness_status = "Datos insuficientes"
+    elif health.get("readiness_score") is not None:
+        readiness_status = "Calculado"
+
+    activity_sync = scheduled_syncs.get("evening_full")
+    health_sync = scheduled_syncs.get("morning_health")
+    messages: list[str] = []
+    if pending_active_count == 0 and health.get("exists") and (not has_training or (has_activity and today_activity.get("is_linked"))):
+        messages.append("Todo actualizado. No hay acciones pendientes.")
+    if has_activity and not today_activity.get("is_linked"):
+        messages.append("Hay una actividad sin vincular.")
+    if not health.get("exists"):
+        messages.append("La salud de hoy todavia no tiene datos suficientes.")
+    if any(item and item.get("status") == "failed" for item in (activity_sync, health_sync)):
+        messages.append("La ultima sincronizacion Garmin fallo.")
+    if not messages:
+        messages.append("Hay elementos pendientes para revisar o completar.")
+
+    return {
+        "title": "Estado del dia",
+        "timezone_name": get_athlete_timezone_name(athlete),
+        "training_planned": "Si" if has_training else "No",
+        "activity_found": "Si" if has_activity else "No",
+        "link_status": link_status,
+        "analysis_status": analysis_status,
+        "health_updated": health_status,
+        "readiness_status": readiness_status,
+        "last_health_sync_label": health_sync.get("finished_at_label") if health_sync else "-",
+        "last_activity_sync_label": activity_sync.get("finished_at_label") if activity_sync else "-",
+        "pending_active_count": pending_active_count,
+        "messages": messages,
+        "resolve_pending_url": f"/dashboard/resolve-pending?selected_date={reference_date.isoformat()}&athlete_id={athlete.id}" + (
+            f"&training_plan_id={training_plan.id}" if training_plan else ""
+        ),
+    }
+
+
 def _get_sessions_for_date(db: Session, athlete_id: int, training_plan: TrainingPlan | None, reference_date: date) -> list[PlannedSession]:
     statement = (
         select(PlannedSession)
@@ -695,6 +784,20 @@ def _get_health_sync_state(db: Session, athlete_id: int) -> HealthSyncState | No
     )
 
 
+def _count_active_pending_items(db: Session, athlete_id: int) -> int:
+    return len(
+        list(
+            db.scalars(
+                select(PendingTrainingItem)
+                .where(
+                    PendingTrainingItem.athlete_id == athlete_id,
+                    PendingTrainingItem.status.in_(tuple(ACTIVE_PENDING_STATUSES)),
+                )
+            ).all()
+        )
+    )
+
+
 def _get_sessions_in_range(db: Session, athlete_id: int, date_from: date, date_to: date) -> list[PlannedSession]:
     statement = (
         select(PlannedSession)
@@ -714,8 +817,14 @@ def _get_sessions_in_range(db: Session, athlete_id: int, date_from: date, date_t
 
 
 def _get_activities_in_range(db: Session, athlete_id: int, date_from: date, date_to: date) -> list[GarminActivity]:
-    start_dt = datetime.combine(date_from - timedelta(days=1), time.min)
-    end_dt = datetime.combine(date_to + timedelta(days=2), time.min)
+    athlete = db.get(Athlete, athlete_id)
+    start_dt, end_dt = local_date_range_utc_bounds(
+        date_from,
+        date_to,
+        athlete=athlete,
+        days_before=1,
+        days_after=1,
+    )
     statement = (
         select(GarminActivity)
         .options(
@@ -731,7 +840,11 @@ def _get_activities_in_range(db: Session, athlete_id: int, date_from: date, date
         .order_by(GarminActivity.start_time.asc(), GarminActivity.id.asc())
     )
     activities = list(db.scalars(statement).all())
-    return [activity for activity in activities if _activity_local_date(activity.start_time) and date_from <= _activity_local_date(activity.start_time) <= date_to]
+    return [
+        activity
+        for activity in activities
+        if _activity_local_date(activity.start_time) and date_from <= _activity_local_date(activity.start_time) <= date_to
+    ]
 
 
 def _activity_has_completed_analysis(db: Session, activity: GarminActivity, today_session: PlannedSession | None) -> bool:
@@ -969,10 +1082,7 @@ def _main_limiter_label(value: str | None) -> str | None:
 
 
 def _activity_local_date(value: datetime | None) -> date | None:
-    if value is None:
-        return None
-    current = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    return current.astimezone(APP_LOCAL_TIMEZONE).date()
+    return to_local_date(value)
 
 
 def _get_completed_activity_analysis(

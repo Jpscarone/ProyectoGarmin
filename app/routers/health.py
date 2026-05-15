@@ -13,6 +13,7 @@ from app.db.models.athlete import Athlete
 from app.db.session import get_db
 from app.config import get_settings
 from app.schemas.daily_health_metric import DailyHealthMetricRead
+from app.services.auth_context import require_current_user
 from app.services.daily_health_metric_service import get_health_metric, get_health_metrics
 from app.services.athlete_context import get_current_athlete
 from app.services.health_ai_analysis_service import (
@@ -38,6 +39,8 @@ from app.services.health_readiness_service import (
     evaluate_health_readiness,
 )
 from app.services.openai_client import OpenAIIntegrationError, get_openai_model
+from app.services.user_permission_service import require_can_edit_athlete, require_can_sync_garmin, require_can_view_athlete
+from app.utils.datetime_utils import format_local_datetime, today_local
 from app.web.templates import build_templates
 
 
@@ -52,11 +55,11 @@ def _wants_html(request: Request) -> bool:
 
 def _coerce_selected_date(value: str | None) -> tuple[date, bool]:
     if not value:
-        return date.today(), False
+        return today_local(), False
     try:
         return date.fromisoformat(value), False
     except ValueError:
-        return date.today(), True
+        return today_local(), True
 
 
 def _resolve_health_athlete(db: Session, athlete_id: int | None, metrics: list[Any]) -> Athlete | None:
@@ -130,7 +133,7 @@ def _serialize_health_ai_analysis(analysis: Any | None) -> dict[str, Any] | None
         "id": analysis.id,
         "reference_date": analysis.reference_date.isoformat(),
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
-        "created_at_label": analysis.created_at.strftime("%d/%m/%Y %H:%M") if analysis.created_at else None,
+        "created_at_label": format_local_datetime(analysis.created_at),
         "summary": _ui_health_text(analysis.summary),
         "training_recommendation": _ui_health_text(analysis.training_recommendation),
         "risk_level": analysis.risk_level,
@@ -153,7 +156,7 @@ def _serialize_health_ai_analysis_history(analyses: list[Any], athlete_id: int |
                 "reference_date": analysis.reference_date.isoformat(),
                 "reference_date_label": analysis.reference_date.strftime("%d/%m/%Y"),
                 "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
-                "created_at_label": analysis.created_at.strftime("%d/%m/%Y %H:%M") if analysis.created_at else None,
+                "created_at_label": format_local_datetime(analysis.created_at),
                 "readiness_status": readiness_local.get("readiness_status"),
                 "readiness_status_label": _ui_status_recommendation(readiness_local.get("readiness_status") or "insufficient_data"),
                 "readiness_status_class": _health_readiness_status_class(readiness_local.get("readiness_status") or "insufficient_data"),
@@ -582,7 +585,7 @@ def _build_health_readiness_view_model(
         training_context=training_context,
         latest_ai_analysis=latest_ai_analysis,
     )
-    today = date.today()
+    today = today_local(athlete=athlete)
 
     def build_health_url(target_date: date) -> str:
         query = [f"selected_date={target_date.isoformat()}"]
@@ -694,12 +697,14 @@ def list_health_metrics(
     selected_date: str | None = None,
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     metrics = get_health_metrics(db)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is None and _wants_html(request):
         return RedirectResponse(url="/athletes/select", status_code=303)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_view_athlete(db, user, athlete_id)
         metrics = [metric for metric in metrics if metric.athlete_id == current_athlete.id]
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     readiness_view = _build_health_readiness_view_model(
@@ -731,10 +736,12 @@ def read_health_readiness(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_view_athlete(db, user, athlete_id)
     if invalid_selected_date:
         return {
             "error": "invalid_selected_date",
@@ -761,10 +768,12 @@ def auto_sync_health(
     force: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_sync_garmin(db, user, athlete_id)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return JSONResponse(
@@ -795,10 +804,12 @@ def read_health_readiness_llm_json(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_view_athlete(db, user, athlete_id)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return {
@@ -833,10 +844,12 @@ def analyze_health_readiness(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_edit_athlete(db, user, athlete_id)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return JSONResponse(
@@ -917,10 +930,12 @@ def auto_analyze_health_readiness(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_edit_athlete(db, user, athlete_id)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return JSONResponse(
@@ -1005,9 +1020,11 @@ def auto_analyze_health_readiness(
 
 @router.get("/{metric_id}", response_model=DailyHealthMetricRead)
 def read_health_metric(metric_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_current_user(request, db)
     metric = get_health_metric(db, metric_id)
     if metric is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Health metric not found")
+    require_can_view_athlete(db, user, metric.athlete_id)
     if _wants_html(request):
         return templates.TemplateResponse(
             request=request,

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.session import get_db
 from app.schemas.training_day import TrainingDayCreate, TrainingDayRead, TrainingDayUpdate
+from app.services.auth_context import require_current_user
 from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION
 from app.services.training_day_service import (
     create_training_day,
@@ -21,6 +22,7 @@ from app.services.training_day_service import (
     update_training_day,
 )
 from app.services.training_plan_service import get_training_plan, get_training_plans
+from app.services.user_permission_service import require_permission_for_athlete
 from app.web.templates import build_templates
 
 
@@ -46,9 +48,11 @@ def create_training_day_page(
     return_to: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    user = require_current_user(request, db)
     training_plan = get_training_plan(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id, can_edit=True)
 
     prefilled_training_day = None
     if day_date:
@@ -78,9 +82,11 @@ def create_training_day_page(
 
 @router.get("/{training_day_id}", response_model=TrainingDayRead)
 def read_training_day(training_day_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_current_user(request, db)
     training_day = get_training_day(db, training_day_id)
     if training_day is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    require_permission_for_athlete(db, user, training_day.athlete_id)
     if _wants_html(request):
         return_to = (request.query_params.get("return_to") or "").strip().lower()
         if return_to == "plan":
@@ -117,9 +123,11 @@ def edit_training_day_page(
     return_to: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    user = require_current_user(request, db)
     training_day = get_training_day(db, training_day_id)
     if training_day is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    require_permission_for_athlete(db, user, training_day.athlete_id, can_edit=True)
 
     normalized_return_to = (return_to or "").strip().lower()
     if normalized_return_to == "calendar":
@@ -147,7 +155,9 @@ def edit_training_day_page(
 
 
 @router.post("", response_model=TrainingDayRead, status_code=status.HTTP_201_CREATED)
-def create_training_day_endpoint(training_day_in: TrainingDayCreate, db: Session = Depends(get_db)) -> TrainingDayRead:
+def create_training_day_endpoint(request: Request, training_day_in: TrainingDayCreate, db: Session = Depends(get_db)) -> TrainingDayRead:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, training_day_in.athlete_id, can_edit=True)
     try:
         return create_training_day(db, training_day_in)
     except ValueError as exc:
@@ -159,13 +169,16 @@ def create_training_day_endpoint(training_day_in: TrainingDayCreate, db: Session
 
 @router.put("/{training_day_id}", response_model=TrainingDayRead)
 def update_training_day_endpoint(
+    request: Request,
     training_day_id: int,
     training_day_in: TrainingDayUpdate,
     db: Session = Depends(get_db),
 ) -> TrainingDayRead:
+    user = require_current_user(request, db)
     training_day = get_training_day(db, training_day_id)
     if training_day is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    require_permission_for_athlete(db, user, training_day.athlete_id, can_edit=True)
     try:
         return update_training_day(db, training_day, training_day_in)
     except ValueError as exc:
@@ -176,10 +189,12 @@ def update_training_day_endpoint(
 
 
 @router.delete("/{training_day_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-def delete_training_day_endpoint(training_day_id: int, db: Session = Depends(get_db)) -> Response:
+def delete_training_day_endpoint(request: Request, training_day_id: int, db: Session = Depends(get_db)) -> Response:
+    user = require_current_user(request, db)
     training_day = get_training_day(db, training_day_id)
     if training_day is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    require_permission_for_athlete(db, user, training_day.athlete_id, can_edit=True)
     delete_training_day(db, training_day)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

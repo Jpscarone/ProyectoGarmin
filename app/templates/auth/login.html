@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+
+{% block title %}Iniciar sesión{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <h1>Iniciar sesión</h1>
+    {% if bootstrap_mode %}
+    <p>No hay usuarios todavía. Ejecutá <code>python scripts/create_admin_user.py</code> para crear el primer admin.</p>
+    {% else %}
+    <p>Ingresá con tu cuenta para trabajar solo con tus atletas permitidos.</p>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+    <form method="post" action="/login" class="form-grid">
+        <label class="field">
+            <span>Email</span>
+            <input name="email" type="email" required>
+        </label>
+        <label class="field">
+            <span>Contraseña</span>
+            <input name="password" type="password" required>
+        </label>
+        <div class="form-actions">
+            <button class="button" type="submit">Entrar</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

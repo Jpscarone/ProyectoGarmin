@@ -17,10 +17,13 @@ if TYPE_CHECKING:
     from app.db.models.health_ai_analysis import HealthAiAnalysis
     from app.db.models.goal import Goal
     from app.db.models.planned_session import PlannedSession
+    from app.db.models.pending_training_item import PendingTrainingItem
+    from app.db.models.scheduled_sync_job_log import ScheduledSyncJobLog
     from app.db.models.session_analysis import SessionAnalysis
     from app.db.models.weekly_analysis import WeeklyAnalysis
     from app.db.models.training_day import TrainingDay
     from app.db.models.training_plan import TrainingPlan
+    from app.db.models.user_athlete_permission import UserAthletePermission
 
 
 class Athlete(Base):
@@ -29,6 +32,7 @@ class Athlete(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active", default="active", index=True)
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_hr: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -105,8 +109,22 @@ class Athlete(Base):
         back_populates="athlete",
         cascade="all, delete-orphan",
     )
+    scheduled_sync_job_logs: Mapped[list["ScheduledSyncJobLog"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+        order_by="ScheduledSyncJobLog.started_at.desc()",
+    )
+    pending_training_items: Mapped[list["PendingTrainingItem"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+        order_by="PendingTrainingItem.created_at.desc()",
+    )
     weekly_analyses: Mapped[list["WeeklyAnalysis"]] = relationship(
         back_populates="athlete",
         cascade="all, delete-orphan",
         order_by="WeeklyAnalysis.week_start_date.desc()",
+    )
+    user_permissions: Mapped[list["UserAthletePermission"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
     )

@@ -34,6 +34,7 @@ from app.services.mcp_context_service import (
 )
 from app.services.mcp_security import verify_mcp_bearer_token
 from app.services.training_plan_service import select_default_training_plan
+from app.utils.datetime_utils import today_local
 from app.routers.planned_sessions import _build_technical_view, _get_preferred_session_analysis
 
 
@@ -182,8 +183,9 @@ def read_training_status(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     athlete = _get_athlete_or_404(db, athlete_id)
-    plan = select_default_training_plan(db, athlete_id=athlete.id, today=date.today())
-    next_session = _get_next_planned_session(db, athlete.id, plan)
+    reference_date = today_local(athlete=athlete)
+    plan = select_default_training_plan(db, athlete_id=athlete.id, today=reference_date)
+    next_session = _get_next_planned_session(db, athlete.id, plan, reference_date)
     last_activity = _get_latest_activity(db, athlete.id)
     latest_metric = _get_latest_daily_health_metric(db, athlete.id)
     latest_ai_analysis = _get_latest_health_ai_analysis(db, athlete.id)
@@ -362,7 +364,7 @@ def get_next_session_recommendation(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     athlete = _get_athlete_or_404(db, athlete_id)
-    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else date.today()
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
     plan = select_default_training_plan(db, athlete_id=athlete.id, today=target_date)
 
     target_session = (
@@ -422,7 +424,10 @@ def get_week_load_summary(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     athlete = _get_athlete_or_404(db, athlete_id)
-    selected_start = _parse_iso_date(week_start_date, "week_start_date") if week_start_date else _week_start_from_date(date.today())
+    selected_start = (
+        _parse_iso_date(week_start_date, "week_start_date")
+        if week_start_date else _week_start_from_date(today_local(athlete=athlete))
+    )
     week_end = _week_end_from_start(selected_start)
 
     context = build_week_context(db, athlete.id, selected_start)
@@ -772,14 +777,19 @@ def _serialize_planned_session(session: PlannedSession | None) -> dict[str, Any]
     }
 
 
-def _get_next_planned_session(db: Session, athlete_id: int, plan: TrainingPlan | None) -> PlannedSession | None:
+def _get_next_planned_session(
+    db: Session,
+    athlete_id: int,
+    plan: TrainingPlan | None,
+    reference_date: date,
+) -> PlannedSession | None:
     statement = (
         select(PlannedSession)
         .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
         .options(selectinload(PlannedSession.training_day))
         .where(
             PlannedSession.athlete_id == athlete_id,
-            TrainingDay.day_date >= date.today(),
+            TrainingDay.day_date >= reference_date,
         )
         .order_by(TrainingDay.day_date.asc(), PlannedSession.session_order.asc(), PlannedSession.id.asc())
         .limit(1)

@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.services.auth_context import require_current_user
 from app.services.planned_session_service import get_planned_session
 from app.services.session_template_service import (
     SessionTemplateInput,
@@ -25,11 +26,19 @@ from app.services.session_template_service import (
 from app.schemas.training_day import TrainingDayCreate
 from app.services.training_day_service import create_training_day, get_training_day, get_training_day_by_plan_and_date
 from app.services.training_plan_service import get_training_plan
+from app.services.user_permission_service import ROLE_ADMIN, require_can_edit_athlete, require_can_view_athlete
 from app.web.templates import build_templates
 
 
 router = APIRouter(prefix="/session_templates", tags=["session_templates"])
 templates = build_templates(Path(__file__).resolve().parent.parent)
+
+
+def _require_template_admin(request: Request, db: Session):
+    user = require_current_user(request, db)
+    if user.role != ROLE_ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo un administrador puede modificar plantillas globales.")
+    return user
 
 
 @router.get("", response_class=HTMLResponse)
@@ -45,8 +54,13 @@ def list_session_templates_page(
     status_message: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    require_current_user(request, db)
     training_day = get_training_day(db, training_day_id) if training_day_id is not None else None
     training_plan = training_day.training_plan if training_day is not None else (get_training_plan(db, training_plan_id) if training_plan_id is not None else None)
+    if training_day is not None:
+        require_can_edit_athlete(db, require_current_user(request, db), training_day.athlete_id)
+    elif training_plan is not None:
+        require_can_edit_athlete(db, require_current_user(request, db), training_plan.athlete_id)
     return templates.TemplateResponse(
         request=request,
         name="session_templates/list.html",
@@ -70,9 +84,12 @@ def create_session_template_page(
     planned_session_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    user = require_current_user(request, db)
     planned_session = get_planned_session(db, planned_session_id) if planned_session_id is not None else None
     if planned_session_id is not None and planned_session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesion no encontrada")
+    if planned_session is not None:
+        require_can_edit_athlete(db, user, planned_session.athlete_id)
 
     template_input = build_template_input_from_session(planned_session) if planned_session else SessionTemplateInput(title="")
     return templates.TemplateResponse(
@@ -92,6 +109,7 @@ async def create_session_template_endpoint(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    require_current_user(request, db)
     form = await request.form()
     try:
         template_input = _template_input_from_form(form)
@@ -112,9 +130,11 @@ def create_template_from_session_page(
     request: Request,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    user = require_current_user(request, db)
     planned_session = get_planned_session(db, planned_session_id)
     if planned_session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesion no encontrada")
+    require_can_edit_athlete(db, user, planned_session.athlete_id)
 
     template_input = build_template_input_from_session(planned_session)
     return templates.TemplateResponse(
@@ -132,9 +152,15 @@ def create_template_from_session_page(
 @router.post("/from-session/{planned_session_id}")
 def create_template_from_session_endpoint(
     planned_session_id: int,
+    request: Request,
     title: str = Form(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesion no encontrada")
+    require_can_edit_athlete(db, user, planned_session.athlete_id)
     try:
         template = create_template_from_planned_session(db, planned_session_id=planned_session_id, title=title)
     except ValueError as exc:
@@ -156,11 +182,16 @@ def read_session_template_page(
     month: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    require_current_user(request, db)
     session_template = get_session_template(db, session_template_id)
     if session_template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plantilla no encontrada")
     training_day = get_training_day(db, training_day_id) if training_day_id is not None else None
     training_plan = training_day.training_plan if training_day is not None else (get_training_plan(db, training_plan_id) if training_plan_id is not None else None)
+    if training_day is not None:
+        require_can_edit_athlete(db, require_current_user(request, db), training_day.athlete_id)
+    elif training_plan is not None:
+        require_can_edit_athlete(db, require_current_user(request, db), training_plan.athlete_id)
     return templates.TemplateResponse(
         request=request,
         name="session_templates/detail.html",
@@ -182,6 +213,7 @@ def edit_session_template_page(
     request: Request,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    _require_template_admin(request, db)
     session_template = get_session_template(db, session_template_id)
     if session_template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plantilla no encontrada")
@@ -244,6 +276,7 @@ async def update_session_template_endpoint(
     request: Request,
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    _require_template_admin(request, db)
     session_template = get_session_template(db, session_template_id)
     if session_template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plantilla no encontrada")
@@ -262,8 +295,10 @@ async def update_session_template_endpoint(
 @router.post("/{session_template_id}/delete")
 def delete_session_template_endpoint(
     session_template_id: int,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    _require_template_admin(request, db)
     session_template = get_session_template(db, session_template_id)
     if session_template is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plantilla no encontrada")
@@ -274,6 +309,7 @@ def delete_session_template_endpoint(
 @router.post("/{session_template_id}/use")
 def use_session_template_endpoint(
     session_template_id: int,
+    request: Request,
     training_day_id: int | None = Form(default=None),
     training_plan_id: int | None = Form(default=None),
     planned_day_date: str | None = Form(default=None),
@@ -281,9 +317,11 @@ def use_session_template_endpoint(
     month: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
     try:
         effective_training_day_id = _resolve_or_create_template_training_day_id(
             db,
+            user=user,
             training_day_id=training_day_id,
             training_plan_id=training_plan_id,
             planned_day_date=planned_day_date,
@@ -328,6 +366,7 @@ def use_session_template_endpoint(
 def _resolve_or_create_template_training_day_id(
     db: Session,
     *,
+    user,
     training_day_id: int | None,
     training_plan_id: int | None,
     planned_day_date: str | None,
@@ -336,10 +375,15 @@ def _resolve_or_create_template_training_day_id(
         training_day = get_training_day(db, training_day_id)
         if training_day is None:
             raise ValueError("El dia seleccionado no existe.")
+        require_can_edit_athlete(db, user, training_day.athlete_id)
         return training_day.id
 
     if training_plan_id is None:
         raise ValueError("Falta el plan para copiar la plantilla.")
+    training_plan = get_training_plan(db, training_plan_id)
+    if training_plan is None:
+        raise ValueError("El plan seleccionado no existe.")
+    require_can_edit_athlete(db, user, training_plan.athlete_id)
     if not planned_day_date or not planned_day_date.strip():
         raise ValueError("Elegi una fecha para copiar la plantilla.")
     try:
@@ -355,6 +399,7 @@ def _resolve_or_create_template_training_day_id(
         db,
         TrainingDayCreate(
             training_plan_id=training_plan_id,
+            athlete_id=training_plan.athlete_id,
             day_date=parsed_day_date,
             day_notes=None,
             day_type=None,

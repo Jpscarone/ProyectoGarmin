@@ -37,7 +37,7 @@
                     </p>
                     <p class="athlete-row-meta">
                         Ultima comparacion Garmin:
-                        {{ athlete.garmin_profile_last_synced_at.strftime("%d/%m/%Y %H:%M") if athlete.garmin_profile_last_synced_at else "sin comparar" }}
+                        {{ format_local_datetime(athlete.garmin_profile_last_synced_at, empty='sin comparar') }}
                     </p>
                 </div>
                 <div class="actions-inline">

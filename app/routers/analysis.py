@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.db.models.athlete import Athlete
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
+from app.services.auth_context import require_current_user
 from app.services.analysis.bundle_service import (
     build_bundle_for_activity,
     build_bundle_for_report,
@@ -29,6 +30,9 @@ from app.services.analysis_v2.weekly_analysis_service import (
     compute_week_metrics,
     re_run_weekly_analysis,
 )
+from app.services.user_permission_service import require_permission_for_athlete
+from app.services.garmin_activity_service import get_activity
+from app.services.planned_session_service import get_planned_session
 from app.web.templates import build_templates
 
 
@@ -48,10 +52,12 @@ def read_weekly_analysis_v2(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    user = require_current_user(request, db)
     normalized_week_start = _parse_week_start_or_404(week_start_date)
     athlete = db.get(Athlete, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
+    require_permission_for_athlete(db, user, athlete.id)
 
     analysis = _get_weekly_analysis_v2(db, athlete_id, normalized_week_start)
     preview_context = None
@@ -102,7 +108,9 @@ def rerun_weekly_analysis_v2(
     month: str | None = Form(default=None),
     selected_date: str | None = Form(default=None),
     db: Session = Depends(get_db),
-    ) -> RedirectResponse:
+) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     normalized_week_start = _parse_week_start_or_404(week_start_date)
     analysis = re_run_weekly_analysis(
         db,
@@ -128,9 +136,11 @@ def rerun_weekly_analysis_v2(
 # Classic analysis report views kept for day/activity flows and technical detail.
 @router.get("/{report_id}", response_class=HTMLResponse)
 def read_analysis_report(report_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
     report = get_analysis_report(db, report_id)
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis report not found")
+    require_permission_for_athlete(db, user, report.athlete_id)
     report_view = _build_analysis_report_view_model(report)
     return templates.TemplateResponse(
         request=request,
@@ -142,12 +152,15 @@ def read_analysis_report(report_id: int, request: Request, db: Session = Depends
 @router.post("/{report_id}/conclusion")
 def save_final_conclusion(
     report_id: int,
+    request: Request,
     final_conclusion_text: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
     report = get_analysis_report(db, report_id)
     if report is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis report not found")
+    require_permission_for_athlete(db, user, report.athlete_id, can_edit=True)
     update_final_conclusion(db, report, final_conclusion_text)
     return RedirectResponse(
         url=f"/analysis/{report_id}?status={quote('Conclusion final guardada.')}",
@@ -158,6 +171,11 @@ def save_final_conclusion(
 # Bundle endpoints remain available for legacy export/debug flows.
 @router.get("/bundle/session/{planned_session_id}", response_class=HTMLResponse)
 def session_bundle_view(planned_session_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesion planificada no encontrada.")
+    require_permission_for_athlete(db, user, planned_session.athlete_id)
     try:
         bundle = build_bundle_for_session(db, planned_session_id)
     except ValueError as exc:
@@ -171,6 +189,11 @@ def session_bundle_view(planned_session_id: int, request: Request, db: Session =
 
 @router.get("/bundle/activity/{activity_id}", response_class=HTMLResponse)
 def activity_bundle_view(activity_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
+    activity = get_activity(db, activity_id)
+    if activity is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Actividad no encontrada.")
+    require_permission_for_athlete(db, user, activity.athlete_id)
     try:
         bundle = build_bundle_for_activity(db, activity_id)
     except ValueError as exc:
@@ -184,6 +207,11 @@ def activity_bundle_view(activity_id: int, request: Request, db: Session = Depen
 
 @router.get("/bundle/report/{report_id}", response_class=HTMLResponse)
 def report_bundle_view(report_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
+    report = get_analysis_report(db, report_id)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reporte no encontrado.")
+    require_permission_for_athlete(db, user, report.athlete_id)
     try:
         bundle = build_bundle_for_report(db, report_id)
     except ValueError as exc:

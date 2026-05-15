@@ -1255,11 +1255,9 @@ def _infer_primary_sport(athlete: Athlete) -> str | None:
 
 
 def _activity_local_date(activity: GarminActivity) -> date | None:
-    if activity.start_time is None:
-        return None
-    if activity.start_time.tzinfo is not None:
-        return activity.start_time.astimezone().date()
-    return activity.start_time.date()
+    from app.utils.datetime_utils import to_local_date
+
+    return to_local_date(activity.start_time, athlete=activity.athlete)
 
 
 def _week_start(value: date) -> date:

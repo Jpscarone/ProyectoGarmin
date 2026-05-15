@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Training App Evening Full Sync daily at 22:00
+
+[Timer]
+OnCalendar=*-*-* 22:00:00
+Persistent=true
+Unit=training_sync_evening.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Training App Morning Health Sync
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/pablo/ProyectoGarmin
+EnvironmentFile=/home/pablo/ProyectoGarmin/.env
+ExecStart=/home/pablo/ProyectoGarmin/.venv/bin/python -m app.jobs.sync_morning_health
+StandardOutput=journal
+StandardError=journal

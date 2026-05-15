@@ -28,6 +28,7 @@ from app.services.health_readiness_service import (
     build_health_training_context,
     evaluate_health_readiness,
 )
+from app.utils.datetime_utils import today_local
 
 
 def build_session_feedback_payload(
@@ -69,7 +70,7 @@ def build_week_context_payload(
     training_plan: TrainingPlan | None,
     reference_date: date | None = None,
 ) -> dict[str, Any]:
-    selected_date = reference_date or date.today()
+    selected_date = reference_date or today_local(athlete=athlete)
     context = build_week_context(db, athlete.id, selected_date)
     metrics = compute_week_metrics(context)
     weekly_analysis = _get_latest_weekly_analysis(db, athlete.id, context.week_start_date)
@@ -138,7 +139,7 @@ def build_next_session_context_payload(
     training_plan: TrainingPlan | None,
     reference_date: date | None = None,
 ) -> dict[str, Any]:
-    selected_date = reference_date or date.today()
+    selected_date = reference_date or today_local(athlete=athlete)
     dashboard = build_dashboard_context(db, athlete, training_plan, selected_date=selected_date)
     next_session = _get_next_session(db, athlete.id, training_plan, selected_date)
     readiness_today = _build_readiness_summary_payload(db, athlete.id, selected_date)
@@ -553,11 +554,9 @@ def _serialize_session_analysis(analysis: SessionAnalysis | None) -> dict[str, A
 
 
 def _activity_local_date(activity: GarminActivity) -> date | None:
-    if activity.start_time is None:
-        return None
-    if activity.start_time.tzinfo is not None:
-        return activity.start_time.astimezone().date()
-    return activity.start_time.date()
+    from app.utils.datetime_utils import to_local_date
+
+    return to_local_date(activity.start_time, athlete=activity.athlete)
 
 
 def _normalized(value: str | None) -> str:

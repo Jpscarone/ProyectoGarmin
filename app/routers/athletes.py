@@ -10,16 +10,22 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db.session import get_db
 from app.schemas.athlete import AthleteCreate, AthleteRead, AthleteUpdate
+from app.services.auth_context import require_current_user, require_role
 from app.services.athlete_service import (
     ATHLETE_STATUS_ACTIVE,
     create_athlete,
     delete_athlete,
-    get_active_athletes,
     get_athlete,
     get_athletes,
     update_athlete,
 )
 from app.services.athlete_context import clear_current_athlete, set_current_athlete, set_current_training_plan
+from app.services.user_permission_service import (
+    ROLE_ADMIN,
+    ROLE_COACH,
+    list_accessible_athletes,
+    require_permission_for_athlete,
+)
 from app.services.training_plan_service import select_default_training_plan
 from app.services.athlete_zone_service import (
     build_zone_form_rows,
@@ -44,7 +50,8 @@ def _wants_html(request: Request) -> bool:
 
 @router.get("", response_model=list[AthleteRead])
 def list_athletes(request: Request, db: Session = Depends(get_db)):
-    athletes = get_athletes(db)
+    user = require_current_user(request, db)
+    athletes = get_athletes(db) if user.role == ROLE_ADMIN else list_accessible_athletes(db, user)
     if _wants_html(request):
         settings = get_settings()
         return templates.TemplateResponse(
@@ -60,6 +67,7 @@ def list_athletes(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/create", response_class=HTMLResponse)
 def create_athlete_page(request: Request) -> HTMLResponse:
+    # Auth is enforced in middleware; page is limited to coach/admin below if submitted.
     return templates.TemplateResponse(
         request=request,
         name="athletes/create.html",
@@ -69,11 +77,12 @@ def create_athlete_page(request: Request) -> HTMLResponse:
 
 @router.get("/select", response_class=HTMLResponse)
 def select_athlete_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
     return templates.TemplateResponse(
         request=request,
         name="athletes/select.html",
         context={
-            "active_athletes": get_active_athletes(db),
+            "active_athletes": list_accessible_athletes(db, user, only_active=True),
             "status_message": request.query_params.get("status_message"),
             "error_message": request.query_params.get("error"),
         },
@@ -86,6 +95,8 @@ def select_athlete_endpoint(
     athlete_id: int = Form(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id)
     athlete = get_athlete(db, athlete_id)
     if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
         clear_current_athlete(request)
@@ -101,6 +112,8 @@ def select_athlete_endpoint(
 
 @router.get("/{athlete_id}/plans")
 def athlete_plans_alias(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id)
     athlete = get_athlete(db, athlete_id)
     if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -110,6 +123,8 @@ def athlete_plans_alias(request: Request, athlete_id: int, db: Session = Depends
 
 @router.get("/{athlete_id}/activities")
 def athlete_activities_alias(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id)
     athlete = get_athlete(db, athlete_id)
     if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -119,6 +134,8 @@ def athlete_activities_alias(request: Request, athlete_id: int, db: Session = De
 
 @router.get("/{athlete_id}/health")
 def athlete_health_alias(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id)
     athlete = get_athlete(db, athlete_id)
     if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -133,6 +150,8 @@ def athlete_calendar_alias(
     training_plan_id: int,
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id)
     athlete = get_athlete(db, athlete_id)
     if athlete is None or athlete.status != ATHLETE_STATUS_ACTIVE:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -148,6 +167,8 @@ def athlete_calendar_alias(
 
 @router.get("/{athlete_id}", response_model=AthleteRead)
 def read_athlete(request: Request, athlete_id: int, db: Session = Depends(get_db)):
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -176,6 +197,8 @@ def read_athlete(request: Request, athlete_id: int, db: Session = Depends(get_db
 
 @router.get("/{athlete_id}/edit", response_class=HTMLResponse)
 def edit_athlete_page(athlete_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -189,6 +212,8 @@ def edit_athlete_page(athlete_id: int, request: Request, db: Session = Depends(g
 
 @router.get("/{athlete_id}/zones/edit", response_class=HTMLResponse)
 def edit_athlete_zones_page(athlete_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -211,6 +236,8 @@ def edit_athlete_zones_page(athlete_id: int, request: Request, db: Session = Dep
 
 @router.post("/{athlete_id}/zones/edit")
 async def edit_athlete_zones_endpoint(athlete_id: int, request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -229,16 +256,20 @@ async def edit_athlete_zones_endpoint(athlete_id: int, request: Request, db: Ses
 
 
 @router.post("", response_model=AthleteRead, status_code=status.HTTP_201_CREATED)
-def create_athlete_endpoint(athlete_in: AthleteCreate, db: Session = Depends(get_db)) -> AthleteRead:
+def create_athlete_endpoint(request: Request, athlete_in: AthleteCreate, db: Session = Depends(get_db)) -> AthleteRead:
+    require_role(require_current_user(request, db), ROLE_ADMIN, ROLE_COACH)
     return create_athlete(db, athlete_in)
 
 
 @router.put("/{athlete_id}", response_model=AthleteRead)
 def update_athlete_endpoint(
+    request: Request,
     athlete_id: int,
     athlete_in: AthleteUpdate,
     db: Session = Depends(get_db),
 ) -> AthleteRead:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -246,7 +277,8 @@ def update_athlete_endpoint(
 
 
 @router.delete("/{athlete_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-def delete_athlete_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> Response:
+def delete_athlete_endpoint(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> Response:
+    require_role(require_current_user(request, db), ROLE_ADMIN)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -255,7 +287,9 @@ def delete_athlete_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> R
 
 
 @router.post("/{athlete_id}/compare-garmin")
-def compare_athlete_garmin_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def compare_athlete_garmin_endpoint(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_sync_garmin=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -273,10 +307,13 @@ def compare_athlete_garmin_endpoint(athlete_id: int, db: Session = Depends(get_d
 
 @router.post("/{athlete_id}/apply-garmin")
 def apply_athlete_garmin_endpoint(
+    request: Request,
     athlete_id: int,
     scope: str = Form(default="all"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_sync_garmin=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -290,7 +327,9 @@ def apply_athlete_garmin_endpoint(
 
 
 @router.post("/{athlete_id}/zones/use-garmin")
-def use_athlete_garmin_zones_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def use_athlete_garmin_zones_endpoint(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
@@ -304,7 +343,9 @@ def use_athlete_garmin_zones_endpoint(athlete_id: int, db: Session = Depends(get
 
 
 @router.post("/{athlete_id}/zones/recalculate")
-def recalculate_athlete_zones_endpoint(athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+def recalculate_athlete_zones_endpoint(request: Request, athlete_id: int, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, athlete_id, can_edit=True)
     athlete = get_athlete(db, athlete_id)
     if athlete is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")

@@ -9,8 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.db.models.athlete import Athlete
 from app.db.models.training_plan import TrainingPlan
-from app.services.athlete_service import ATHLETE_STATUS_ACTIVE, get_active_athletes, get_athlete
+from app.services.auth_context import require_current_user
+from app.services.athlete_service import ATHLETE_STATUS_ACTIVE, get_athlete
 from app.services.training_plan_service import get_training_plan, select_default_training_plan
+from app.services.user_permission_service import list_accessible_athletes, require_permission_for_athlete
+from app.utils.datetime_utils import today_local
 
 
 CURRENT_ATHLETE_SESSION_KEY = "current_athlete_id"
@@ -50,10 +53,25 @@ def resolve_athlete_context(
     *,
     athlete_id: int | None = None,
 ) -> AthleteContext:
-    active_athletes = get_active_athletes(db)
-    selected_id = athlete_id or _query_int(request, "athlete_id") or _session_int(request, CURRENT_ATHLETE_SESSION_KEY)
+    user = require_current_user(request, db)
+    active_athletes = list_accessible_athletes(db, user, only_active=True)
+    explicit_selected_id = athlete_id or _query_int(request, "athlete_id")
+    session_selected_id = _session_int(request, CURRENT_ATHLETE_SESSION_KEY)
+    selected_id = explicit_selected_id or session_selected_id
 
     if selected_id is not None:
+        try:
+            require_permission_for_athlete(db, user, selected_id)
+        except HTTPException:
+            if explicit_selected_id is not None:
+                raise
+            clear_current_athlete(request)
+            return AthleteContext(
+                athlete=None,
+                active_athletes=active_athletes,
+                needs_selection=True,
+                message="Tu atleta seleccionado ya no está disponible para este usuario.",
+            )
         athlete = get_athlete(db, selected_id)
         if athlete is not None and athlete.status == ATHLETE_STATUS_ACTIVE:
             return AthleteContext(athlete=athlete, active_athletes=active_athletes)
@@ -130,7 +148,7 @@ def get_current_training_plan(
             return plan
         request.session.pop(CURRENT_TRAINING_PLAN_SESSION_KEY, None)
 
-    plan = select_default_training_plan(db, athlete_id=athlete.id, today=date.today())
+    plan = select_default_training_plan(db, athlete_id=athlete.id, today=today_local(athlete=athlete))
     if plan is not None:
         set_current_training_plan(request, plan.id)
         return plan

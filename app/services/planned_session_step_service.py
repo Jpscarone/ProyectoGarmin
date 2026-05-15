@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
@@ -19,7 +19,11 @@ def get_steps_for_session(db: Session, planned_session_id: int) -> list[PlannedS
 
 
 def get_step(db: Session, step_id: int) -> PlannedSessionStep | None:
-    return db.get(PlannedSessionStep, step_id)
+    return db.scalar(
+        select(PlannedSessionStep)
+        .where(PlannedSessionStep.id == step_id)
+        .options(selectinload(PlannedSessionStep.planned_session))
+    )
 
 
 def create_step(db: Session, step_in: PlannedSessionStepCreate) -> PlannedSessionStep:

@@ -14,10 +14,17 @@ from app.config import Settings
 from app.db.models.athlete import Athlete
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
+from app.services.garmin_credential_service import (
+    GarminCredentialConfigurationError,
+    GarminCredentialDecryptError,
+    get_or_create_garmin_account,
+    resolve_garmin_credentials,
+)
 from app.services.garmin.auth import GarminServiceError, get_garmin_auth_context
 from app.services.garmin.client import GarminClient
 from app.services.modality import garmin_canonical_sport_type, garmin_modality
 from app.services.weather.weather_service import find_weather_keys, upsert_weather_from_garmin_activity
+from app.utils.datetime_utils import today_local
 
 
 logger = logging.getLogger(__name__)
@@ -46,12 +53,13 @@ def sync_recent_activities(
     mfa_code: str | None = None,
     athlete_id: int | None = None,
 ) -> GarminSyncResult:
-    recent_days_start = date.today() - timedelta(days=30)
+    local_today = today_local()
+    recent_days_start = local_today - timedelta(days=30)
     return sync_activities_by_date(
         db,
         settings,
         start_date=recent_days_start,
-        end_date=date.today(),
+        end_date=local_today,
         mfa_code=mfa_code,
         athlete_id=athlete_id,
         limit=limit,
@@ -69,8 +77,20 @@ def sync_activities_by_date(
     limit: int | None = None,
 ) -> GarminSyncResult:
     athlete = _get_sync_athlete(db, athlete_id=athlete_id)
-    auth_context = get_garmin_auth_context(settings, mfa_code=mfa_code)
+    account = get_or_create_garmin_account(db, athlete)
+    try:
+        credentials = resolve_garmin_credentials(settings, athlete, account)
+    except (GarminCredentialConfigurationError, GarminCredentialDecryptError) as exc:
+        raise GarminServiceError(str(exc)) from exc
+    if credentials is None:
+        raise GarminServiceError("Este atleta no tiene cuenta Garmin configurada.")
+    account.token_dir = credentials.token_dir
+    account.garmin_email = account.garmin_email or credentials.email
+    db.add(account)
+    db.commit()
+    auth_context = get_garmin_auth_context(settings, credentials, mfa_code=mfa_code)
     client = GarminClient(auth_context.client)
+    logger.info("Running Garmin activity sync for athlete_id=%s using source=%s", athlete.id, credentials.source)
 
     if start_date > end_date:
         start_date, end_date = end_date, start_date

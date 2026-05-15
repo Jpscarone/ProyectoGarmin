@@ -14,12 +14,16 @@ from app.db.models.planned_session import PlannedSession
 from app.db.models.planned_session_step import PlannedSessionStep
 from app.db.models.health_ai_analysis import HealthAiAnalysis
 from app.db.models.health_sync_state import HealthSyncState
+from app.db.models.pending_training_item import PendingTrainingItem
 from app.db.models.session_group import SessionGroup
 from app.db.models.session_analysis import SessionAnalysis
+from app.db.models.scheduled_sync_job_log import ScheduledSyncJobLog
 from app.db.models.session_template import SessionTemplate
 from app.db.models.session_template_step import SessionTemplateStep
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
+from app.db.models.user import User
+from app.db.models.user_athlete_permission import UserAthletePermission
 from app.db.models.weekly_analysis import WeeklyAnalysis
 
 __all__ = [
@@ -35,10 +39,14 @@ __all__ = [
     "Goal",
     "HealthAiAnalysis",
     "HealthSyncState",
+    "PendingTrainingItem",
+    "ScheduledSyncJobLog",
     "TrainingPlan",
     "TrainingDay",
     "PlannedSession",
     "PlannedSessionStep",
+    "User",
+    "UserAthletePermission",
     "SessionGroup",
     "SessionAnalysis",
     "SessionTemplate",

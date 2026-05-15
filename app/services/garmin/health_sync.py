@@ -12,8 +12,15 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
+from app.services.garmin_credential_service import (
+    GarminCredentialConfigurationError,
+    GarminCredentialDecryptError,
+    get_or_create_garmin_account,
+    resolve_garmin_credentials,
+)
 from app.services.garmin.auth import GarminServiceError, get_garmin_auth_context
 from app.services.garmin.client import GarminClient
+from app.utils.datetime_utils import today_local
 
 
 logger = logging.getLogger(__name__)
@@ -36,10 +43,23 @@ def sync_recent_health(
     athlete_id: int | None = None,
 ) -> GarminHealthSyncResult:
     athlete = _get_sync_athlete(db, athlete_id=athlete_id)
-    auth_context = get_garmin_auth_context(settings, mfa_code=mfa_code)
+    account = get_or_create_garmin_account(db, athlete)
+    try:
+        credentials = resolve_garmin_credentials(settings, athlete, account)
+    except (GarminCredentialConfigurationError, GarminCredentialDecryptError) as exc:
+        raise GarminServiceError(str(exc)) from exc
+    if credentials is None:
+        raise GarminServiceError("Este atleta no tiene cuenta Garmin configurada.")
+    account.token_dir = credentials.token_dir
+    account.garmin_email = account.garmin_email or credentials.email
+    db.add(account)
+    db.commit()
+    auth_context = get_garmin_auth_context(settings, credentials, mfa_code=mfa_code)
     client = GarminClient(auth_context.client)
+    logger.info("Running Garmin health sync for athlete_id=%s using source=%s", athlete.id, credentials.source)
 
-    metric_dates = [date.today() - timedelta(days=offset) for offset in range(max(days, 1))]
+    local_today = today_local(athlete=athlete)
+    metric_dates = [local_today - timedelta(days=offset) for offset in range(max(days, 1))]
     existing_by_date = {
         metric.metric_date: metric
         for metric in db.scalars(

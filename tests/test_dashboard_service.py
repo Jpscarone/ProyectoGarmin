@@ -15,6 +15,7 @@ from app.db.models import garmin_activity  # noqa: F401
 from app.db.models import health_ai_analysis  # noqa: F401
 from app.db.models import health_sync_state  # noqa: F401
 from app.db.models import planned_session  # noqa: F401
+from app.db.models import scheduled_sync_job_log  # noqa: F401
 from app.db.models import session_analysis  # noqa: F401
 from app.db.models import training_day  # noqa: F401
 from app.db.models import training_plan  # noqa: F401
@@ -25,6 +26,7 @@ from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.health_ai_analysis import HealthAiAnalysis
 from app.db.models.planned_session import PlannedSession
+from app.db.models.scheduled_sync_job_log import ScheduledSyncJobLog
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
@@ -94,6 +96,32 @@ class DashboardServiceTests(unittest.TestCase):
 
         self.assertIsNotNone(context["health"]["readiness_score"])
         self.assertIsNotNone(context["today_status"]["score"])
+
+    def test_dashboard_includes_scheduled_sync_overview(self) -> None:
+        plan = self._plan()
+        self.db.add(
+            ScheduledSyncJobLog(
+                athlete_id=None,
+                job_type="morning_health",
+                started_at=datetime(2026, 5, 2, 10, 0, tzinfo=timezone.utc),
+                finished_at=datetime(2026, 5, 2, 10, 2, tzinfo=timezone.utc),
+                status="success",
+                message="Morning OK",
+                health_days_synced=2,
+            )
+        )
+        self.db.commit()
+
+        context = build_dashboard_context(
+            self.db,
+            self.athlete,
+            plan,
+            selected_date=date(2026, 5, 2),
+        )
+
+        self.assertIn("scheduled_syncs", context)
+        self.assertEqual(context["scheduled_syncs"]["morning_health"]["status"], "success")
+        self.assertEqual(context["scheduled_syncs"]["morning_health"]["health_days_synced"], 2)
 
     def test_dashboard_shows_activity_of_today(self) -> None:
         plan = self._plan()

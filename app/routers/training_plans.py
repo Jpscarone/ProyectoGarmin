@@ -14,6 +14,7 @@ from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
 from app.schemas.training_day import TrainingDayCreate
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanRead, TrainingPlanUpdate
+from app.services.auth_context import require_current_user
 from app.services.analysis_v2.weekly_analysis_service import ANALYSIS_VERSION as WEEKLY_ANALYSIS_VERSION
 from app.services.athlete_service import get_athletes
 from app.services.athlete_context import get_current_athlete, get_current_training_plan, set_current_training_plan
@@ -37,6 +38,8 @@ from app.services.training_plan_service import (
     normalize_training_plan_status,
     update_training_plan,
 )
+from app.services.user_permission_service import ROLE_ADMIN, ROLE_COACH, list_accessible_athletes, require_permission_for_athlete
+from app.utils.datetime_utils import today_local
 from app.web.templates import build_templates
 
 
@@ -80,8 +83,9 @@ def list_training_plans(
     athlete_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    auto_complete_expired_training_plans(db, date.today())
+    user = require_current_user(request, db)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
+    auto_complete_expired_training_plans(db, today_local(athlete=current_athlete))
     if current_athlete is None and _wants_html(request):
         return RedirectResponse(url="/athletes/select", status_code=303)
     training_plans = get_training_plans_for_athlete(db, current_athlete.id) if current_athlete is not None else get_training_plans(db)
@@ -103,22 +107,27 @@ def list_training_plans(
 
 @router.get("/create", response_class=HTMLResponse)
 def create_training_plan_page(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
+    if user.role not in {ROLE_ADMIN, ROLE_COACH}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos para crear planes.")
     return templates.TemplateResponse(
         request=request,
         name="training_plans/create.html",
         context={
             "training_plan": None,
-            "athletes": get_athletes(db),
+            "athletes": get_athletes(db) if user.role == ROLE_ADMIN else list_accessible_athletes(db, user),
         },
     )
 
 
 @router.get("/{training_plan_id}", response_model=TrainingPlanRead)
 def read_training_plan(training_plan_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_current_user(request, db)
     if _wants_html(request):
         training_plan = get_training_plan_detail(db, training_plan_id)
         if training_plan is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+        require_permission_for_athlete(db, user, training_plan.athlete_id)
         current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
         if current_athlete is None or training_plan.athlete_id != current_athlete.id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
@@ -132,6 +141,7 @@ def read_training_plan(training_plan_id: int, request: Request, db: Session = De
     training_plan = get_training_plan(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id)
     return training_plan
 
 
@@ -143,18 +153,20 @@ def read_training_plan_calendar(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    auto_complete_expired_training_plans(db, date.today())
+    user = require_current_user(request, db)
     training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id)
     current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
     if current_athlete is None or training_plan.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
+    auto_complete_expired_training_plans(db, today_local(athlete=current_athlete))
     set_current_training_plan(request, training_plan.id)
 
-    visible_month = _resolve_visible_month(training_plan, month)
-    selected_day_date = _resolve_selected_date(selected_date, visible_month, training_plan)
-    calendar_context = _build_calendar_context(training_plan, visible_month, selected_day_date)
+    visible_month = _resolve_visible_month(training_plan, month, athlete=current_athlete)
+    selected_day_date = _resolve_selected_date(selected_date, visible_month, training_plan, athlete=current_athlete)
+    calendar_context = _build_calendar_context(training_plan, visible_month, selected_day_date, athlete=current_athlete)
     selected_week_analysis = _build_selected_week_analysis_context(db, training_plan, selected_day_date, visible_month)
     weekly_analysis_lookup = _build_weekly_analysis_lookup(db, training_plan, calendar_context["weeks"], visible_month)
     plan_options = get_training_plans_for_athlete(db, training_plan.athlete_id)
@@ -167,7 +179,7 @@ def read_training_plan_calendar(
             "calendar_weeks": calendar_context["weeks"],
             "calendar_month_label": calendar_context["month_label"],
             "visible_month": visible_month.strftime("%Y-%m"),
-            "today_iso": date.today().isoformat(),
+            "today_iso": today_local(athlete=current_athlete).isoformat(),
             "selected_day_date": selected_day_date,
             "selected_day": calendar_context["selected_day"],
             "selected_day_cell": calendar_context["selected_day_cell"],
@@ -189,9 +201,11 @@ def create_training_day_from_calendar(
     next_action: str = Form(default="calendar"),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    user = require_current_user(request, db)
     training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id, can_edit=True)
     current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
     if current_athlete is None or training_plan.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
@@ -222,9 +236,11 @@ def create_training_day_from_calendar(
 
 @router.get("/{training_plan_id}/edit", response_class=HTMLResponse)
 def edit_training_plan_page(training_plan_id: int, request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+    user = require_current_user(request, db)
     training_plan = get_training_plan_detail(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id, can_edit=True)
     current_athlete = get_current_athlete(request, db, athlete_id=training_plan.athlete_id, require_selected=True)
     if current_athlete is None or training_plan.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="El plan no pertenece al atleta seleccionado.")
@@ -241,7 +257,9 @@ def edit_training_plan_page(training_plan_id: int, request: Request, db: Session
 
 
 @router.post("", response_model=TrainingPlanRead, status_code=status.HTTP_201_CREATED)
-def create_training_plan_endpoint(training_plan_in: TrainingPlanCreate, db: Session = Depends(get_db)) -> TrainingPlanRead:
+def create_training_plan_endpoint(request: Request, training_plan_in: TrainingPlanCreate, db: Session = Depends(get_db)) -> TrainingPlanRead:
+    user = require_current_user(request, db)
+    require_permission_for_athlete(db, user, training_plan_in.athlete_id, can_edit=True)
     try:
         return create_training_plan(db, training_plan_in)
     except ValueError as exc:
@@ -250,13 +268,16 @@ def create_training_plan_endpoint(training_plan_in: TrainingPlanCreate, db: Sess
 
 @router.put("/{training_plan_id}", response_model=TrainingPlanRead)
 def update_training_plan_endpoint(
+    request: Request,
     training_plan_id: int,
     training_plan_in: TrainingPlanUpdate,
     db: Session = Depends(get_db),
 ) -> TrainingPlanRead:
+    user = require_current_user(request, db)
     training_plan = get_training_plan(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id, can_edit=True)
     try:
         return update_training_plan(db, training_plan, training_plan_in)
     except ValueError as exc:
@@ -264,15 +285,17 @@ def update_training_plan_endpoint(
 
 
 @router.delete("/{training_plan_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
-def delete_training_plan_endpoint(training_plan_id: int, db: Session = Depends(get_db)) -> Response:
+def delete_training_plan_endpoint(request: Request, training_plan_id: int, db: Session = Depends(get_db)) -> Response:
+    user = require_current_user(request, db)
     training_plan = get_training_plan(db, training_plan_id)
     if training_plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_permission_for_athlete(db, user, training_plan.athlete_id, can_edit=True)
     delete_training_plan(db, training_plan)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-def _resolve_visible_month(training_plan, month_param: str | None) -> date:
+def _resolve_visible_month(training_plan, month_param: str | None, *, athlete=None) -> date:
     if month_param:
         try:
             return datetime.strptime(month_param, "%Y-%m").date().replace(day=1)
@@ -285,18 +308,18 @@ def _resolve_visible_month(training_plan, month_param: str | None) -> date:
     if training_plan.training_days:
         return min(day.day_date for day in training_plan.training_days).replace(day=1)
 
-    today = date.today()
+    today = today_local(athlete=athlete)
     return today.replace(day=1)
 
 
-def _resolve_selected_date(selected_date_param: str | None, visible_month: date, training_plan) -> date:
+def _resolve_selected_date(selected_date_param: str | None, visible_month: date, training_plan, *, athlete=None) -> date:
     if selected_date_param:
         try:
             return date.fromisoformat(selected_date_param)
         except ValueError:
             pass
 
-    today = date.today()
+    today = today_local(athlete=athlete)
     if today.year == visible_month.year and today.month == visible_month.month:
         return today
 
@@ -420,11 +443,12 @@ def _weekly_calendar_badge_view(analysis: WeeklyAnalysis | None) -> dict[str, st
     return {"label": "Semana irregular", "class": "calendar-state-badge-failed"}
 
 
-def _build_calendar_context(training_plan, visible_month: date, selected_day_date: date) -> dict[str, object]:
+def _build_calendar_context(training_plan, visible_month: date, selected_day_date: date, *, athlete=None) -> dict[str, object]:
     calendar_weeks = calendar.Calendar(firstweekday=0).monthdatescalendar(visible_month.year, visible_month.month)
     day_map = {training_day.day_date: training_day for training_day in training_plan.training_days}
     first_day = visible_month
     last_day = date(visible_month.year, visible_month.month, calendar.monthrange(visible_month.year, visible_month.month)[1])
+    local_today = today_local(athlete=athlete)
 
     weeks: list[list[dict[str, object]]] = []
     selected_day = day_map.get(selected_day_date)
@@ -515,7 +539,7 @@ def _build_calendar_context(training_plan, visible_month: date, selected_day_dat
             cell = {
                 "date": current_day,
                 "is_current_month": current_day.month == visible_month.month,
-                "is_today": current_day == date.today(),
+                "is_today": current_day == local_today,
                 "is_selected": current_day == selected_day_date,
                 "training_day": training_day,
                 "session_count": session_count,

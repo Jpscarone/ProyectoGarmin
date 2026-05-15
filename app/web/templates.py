@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi.templating import Jinja2Templates
 
+from app.config import get_settings
 from app.services.planning.presentation import (
     build_session_display_blocks,
     build_session_display_blocks_for_session,
@@ -16,6 +17,13 @@ from app.services.planning.presentation import (
 from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 from app.services.athlete_zone_service import DEFAULT_RPE_LABELS, ZONE_NAMES
 from app.services.garmin.profile_sync import load_zone_payload
+from app.utils.datetime_utils import (
+    format_local_datetime,
+    get_app_timezone,
+    get_athlete_timezone_name,
+    to_local_date,
+    to_local_datetime,
+)
 from app.ui.catalogs import (
     ANALYSIS_STATUS_LABELS,
     DAY_TYPE_LABELS,
@@ -215,7 +223,13 @@ def _session_group_summary(session_group: object) -> dict[str, object]:
 
 def build_templates(base_path: Path) -> Jinja2Templates:
     templates = Jinja2Templates(directory=str(base_path / "templates"))
+    settings = get_settings()
     templates.env.globals.update(
+        app_timezone_name=getattr(get_app_timezone(), "key", settings.app_timezone),
+        athlete_timezone_name=get_athlete_timezone_name,
+        local_datetime=to_local_datetime,
+        local_date=to_local_date,
+        format_local_datetime=format_local_datetime,
         sport_options=SPORT_OPTIONS,
         strength_focus_options=STRENGTH_FOCUS_OPTIONS,
         variant_options=VARIANT_OPTIONS,

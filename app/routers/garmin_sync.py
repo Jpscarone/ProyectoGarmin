@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -16,6 +16,7 @@ from app.db.models.health_sync_state import HealthSyncState
 from app.db.session import get_db
 from app.services.activity_matching_service import match_recent_activities
 from app.services.activity_auto_sync_service import run_activity_auto_sync
+from app.services.auth_context import require_current_user
 from app.services.athlete_context import get_current_athlete
 from app.services.garmin.activity_sync import GarminSyncResult, sync_recent_activities
 from app.services.garmin.auth import (
@@ -24,8 +25,17 @@ from app.services.garmin.auth import (
     get_garmin_auth_diagnostics,
     has_pending_mfa,
 )
+from app.services.garmin_credential_service import (
+    GarminCredentialConfigurationError,
+    GarminCredentialDecryptError,
+    resolve_garmin_credentials,
+)
 from app.services.garmin.health_sync import GarminHealthSyncResult, sync_recent_health
+from app.services.pending_training_service import resolve_pending_items_for_athlete
+from app.services.scheduled_sync_service import get_latest_scheduled_sync_overview, get_scheduled_sync_history
+from app.services.user_permission_service import require_can_sync_garmin, require_permission_for_athlete
 from app.services.weather.weather_service import BatchWeatherSyncResult, sync_weather_for_recent_activities
+from app.utils.datetime_utils import format_local_datetime, get_athlete_timezone_name
 from app.web.templates import build_templates
 
 
@@ -63,7 +73,9 @@ def _sync_activities_and_redirect(*, request: Request, success_url: str, error_u
     settings = get_settings()
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         payload = run_activity_auto_sync(
             db,
             athlete=athlete,
@@ -84,10 +96,7 @@ def _sync_activities_and_redirect(*, request: Request, success_url: str, error_u
 
 
 def _format_datetime_label(value: datetime | None) -> str:
-    if value is None:
-        return "-"
-    current = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    return current.astimezone().strftime("%d/%m/%Y %H:%M")
+    return format_local_datetime(value)
 
 
 def _garmin_account_for_athlete(db: Session, athlete_id: int | None) -> GarminAccount | None:
@@ -201,9 +210,15 @@ def _build_page_context(
     selected_athlete,
 ) -> dict[str, object]:
     settings = get_settings()
-    diagnostics = get_garmin_auth_diagnostics(settings)
     athlete_id = selected_athlete.id if selected_athlete is not None else None
     account = _garmin_account_for_athlete(db, athlete_id)
+    credential_error = None
+    try:
+        credentials = resolve_garmin_credentials(settings, selected_athlete, account) if selected_athlete is not None else None
+    except (GarminCredentialConfigurationError, GarminCredentialDecryptError) as exc:
+        credentials = None
+        credential_error = str(exc)
+    diagnostics = get_garmin_auth_diagnostics(settings, credentials)
     health_state = _health_sync_state_for_athlete(db, athlete_id)
     sync_overview = _build_sync_overview(
         account=account,
@@ -214,19 +229,25 @@ def _build_page_context(
         "garmin_enabled": garmin_enabled,
         "result": result,
         "sync_all_result": sync_all_result,
-        "error": error,
+        "error": error or credential_error,
         "status_message": status_message,
-        "needs_mfa": has_pending_mfa(settings),
+        "needs_mfa": has_pending_mfa(settings, credentials),
         "garmin_auth_diagnostics": diagnostics,
         "selected_athlete": selected_athlete,
+        "selected_timezone_name": get_athlete_timezone_name(selected_athlete),
         "sync_overview": sync_overview,
+        "scheduled_sync_overview": get_latest_scheduled_sync_overview(db),
+        "scheduled_sync_history": get_scheduled_sync_history(db, limit=20),
     }
 
 
 @router.get("/activities", response_class=HTMLResponse)
 def sync_garmin_activities_page(request: Request, athlete_id: int | None = None, db: Session = Depends(get_db)) -> HTMLResponse:
     settings = get_settings()
+    user = require_current_user(request, db)
     athlete = get_current_athlete(request, db, athlete_id=athlete_id)
+    if athlete is not None:
+        require_permission_for_athlete(db, user, athlete.id)
     return templates.TemplateResponse(
         request=request,
         name="sync/garmin_activities.html",
@@ -250,7 +271,9 @@ def sync_garmin_activities(request: Request, db: Session = Depends(get_db)) -> H
     error: str | None = None
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         payload = run_activity_auto_sync(
             db,
             athlete=athlete,
@@ -295,7 +318,9 @@ def sync_garmin_activities_mfa(
     error: str | None = None
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         payload = run_activity_auto_sync(
             db,
             athlete=athlete,
@@ -337,7 +362,9 @@ def sync_everything(request: Request, db: Session = Depends(get_db)) -> HTMLResp
     error: str | None = None
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         activity_result = sync_recent_activities(db, settings, athlete_id=athlete.id if athlete else None)
         health_result = sync_recent_health(db, settings, athlete_id=athlete.id if athlete else None)
         weather_result = sync_weather_for_recent_activities(db, limit=20, only_missing=True)
@@ -383,3 +410,18 @@ def sync_garmin_activities_from_list(request: Request, db: Session = Depends(get
         error_url="/activities?ui_status=",
         db=db,
     )
+
+
+@router.post("/resolve-pending")
+def resolve_pending_from_garmin(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
+    user = require_current_user(request, db)
+    athlete = get_current_athlete(request, db, require_selected=True)
+    require_can_sync_garmin(db, user, athlete.id)
+    result = resolve_pending_items_for_athlete(db, athlete.id)
+    message = (
+        f"Pendientes detectados: {result.detected}. "
+        f"Resueltos: {result.resolved}. "
+        f"Siguen pendientes: {result.still_pending}. "
+        f"Fallidos: {result.failed}."
+    )
+    return RedirectResponse(url=f"/sync/garmin/activities?status={quote(message)}&athlete_id={athlete.id}", status_code=303)

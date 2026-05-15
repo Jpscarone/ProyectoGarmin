@@ -1,0 +1,11 @@
+[Unit]
+Description=Training App Evening Full Sync
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/pablo/ProyectoGarmin
+EnvironmentFile=/home/pablo/ProyectoGarmin/.env
+ExecStart=/home/pablo/ProyectoGarmin/.venv/bin/python -m app.jobs.sync_evening_full
+StandardOutput=journal
+StandardError=journal

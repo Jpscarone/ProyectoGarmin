@@ -11,10 +11,11 @@ from app.config import Settings
 from app.db.models.athlete import Athlete
 from app.db.models.garmin_account import GarminAccount
 from app.db.models.garmin_activity import GarminActivity
+from app.services.garmin_credential_service import default_token_dir_for_athlete
 from app.services.garmin.activity_sync import GarminSyncResult, sync_activities_by_date
+from app.utils.datetime_utils import now_utc, to_local_date
 
 
-APP_LOCAL_TIMEZONE = timezone(timedelta(hours=-3), name="America/Buenos_Aires")
 AUTO_ACTIVITY_SYNC_DAYS = 30
 AUTO_ACTIVITY_SYNC_COOLDOWN_MINUTES = 60
 
@@ -28,7 +29,7 @@ class ActivityAutoSyncDecision:
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return now_utc()
 
 
 def get_latest_activity_for_athlete(db: Session, athlete_id: int) -> GarminActivity | None:
@@ -52,8 +53,18 @@ def get_garmin_account_for_athlete(db: Session, athlete_id: int) -> GarminAccoun
 def get_or_create_garmin_account_for_athlete(db: Session, athlete: Athlete) -> GarminAccount:
     existing = get_garmin_account_for_athlete(db, athlete.id)
     if existing is not None:
+        if not existing.token_dir:
+            existing.token_dir = default_token_dir_for_athlete(athlete.id)
+            db.add(existing)
+            db.commit()
+            db.refresh(existing)
         return existing
-    account = GarminAccount(athlete_id=athlete.id, status="active")
+    account = GarminAccount(
+        athlete_id=athlete.id,
+        status="active",
+        is_active=True,
+        token_dir=default_token_dir_for_athlete(athlete.id),
+    )
     db.add(account)
     db.commit()
     db.refresh(account)
@@ -68,7 +79,7 @@ def should_auto_sync_activities(
     force: bool = False,
     cooldown_minutes: int = AUTO_ACTIVITY_SYNC_COOLDOWN_MINUTES,
 ) -> ActivityAutoSyncDecision:
-    local_today = _local_datetime(now).date()
+    local_today = to_local_date(now)
     start_date = (
         activity_local_date(latest_activity.start_time)
         if latest_activity is not None and latest_activity.start_time is not None
@@ -121,6 +132,7 @@ def run_activity_auto_sync(
         }
 
     account.last_activity_sync_at = current_time
+    account.last_sync_at = current_time
     account.last_activity_sync_status = "running"
     account.last_activity_sync_message = None
     account.last_activity_sync_start_date = decision.start_date
@@ -141,6 +153,7 @@ def run_activity_auto_sync(
     except Exception as exc:
         account.last_activity_sync_status = "error"
         account.last_activity_sync_message = f"Error al sincronizar: {_controlled_error_message(exc)}"
+        account.last_sync_at = current_time
         db.add(account)
         db.commit()
         db.refresh(account)
@@ -157,6 +170,7 @@ def run_activity_auto_sync(
         message = f"{message} Errores: {'; '.join(result.errors[:3])}"
     account.last_activity_sync_status = "success"
     account.last_activity_sync_message = message
+    account.last_sync_at = current_time
     account.last_activity_sync_start_date = decision.start_date
     account.last_activity_sync_end_date = decision.end_date
     db.add(account)
@@ -188,7 +202,7 @@ def serialize_activity_sync_state(account: GarminAccount | None) -> dict[str, An
 def activity_local_date(value: datetime | None) -> date | None:
     if value is None:
         return None
-    return _local_datetime(value).date()
+    return to_local_date(value)
 
 
 def _success_message(result: GarminSyncResult) -> str:
@@ -217,7 +231,3 @@ def _ensure_aware(value: datetime) -> datetime:
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value
-
-
-def _local_datetime(value: datetime) -> datetime:
-    return _ensure_aware(value).astimezone(APP_LOCAL_TIMEZONE)

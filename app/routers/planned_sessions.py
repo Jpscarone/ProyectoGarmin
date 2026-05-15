@@ -17,6 +17,7 @@ from app.db.models.session_analysis import SessionAnalysis
 from app.db.session import get_db
 from app.schemas.planned_session import PlannedSessionCreate, PlannedSessionRead, PlannedSessionUpdate
 from app.schemas.planned_session_step import PlannedSessionStepCreate
+from app.services.auth_context import require_current_user
 from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION, re_run_session_analysis
 from app.services.intensity_target_service import normalize_step_target_fields
 from app.services.planning.presentation import (
@@ -40,6 +41,7 @@ from app.services.planned_session_service import (
     get_planned_sessions,
     update_planned_session,
 )
+from app.utils.datetime_utils import format_local_datetime
 from app.services.planned_session_step_service import replace_steps_for_session
 from app.services.analysis_v2.weekly_analysis_service import re_run_weekly_analysis
 from app.services.session_group_service import create_inline_group
@@ -53,6 +55,7 @@ from app.services.session_completion_service import (
 )
 from app.services.training_day_service import create_training_day, get_training_day, get_training_day_by_plan_and_date
 from app.services.training_plan_service import get_training_plan
+from app.services.user_permission_service import require_can_edit_athlete, require_can_view_athlete
 from app.services.session_import_service import preview_session_import, create_session_import
 from app.schemas.training_day import TrainingDayCreate
 from app.ui.catalogs import INTENSITY_TARGET_LABELS, MATCH_METHOD_LABELS, MODALITY_LABELS, SPORT_LABELS, STEP_TYPE_LABELS, label_for
@@ -68,19 +71,73 @@ def _wants_html(request: Request) -> bool:
     return "text/html" in accept and "application/json" not in accept
 
 
+def _require_view_training_day(request: Request, db: Session, training_day_id: int):
+    user = require_current_user(request, db)
+    training_day = get_training_day(db, training_day_id)
+    if training_day is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    require_can_view_athlete(db, user, training_day.athlete_id)
+    return training_day
+
+
+def _require_edit_training_day(request: Request, db: Session, training_day_id: int):
+    user = require_current_user(request, db)
+    training_day = get_training_day(db, training_day_id)
+    if training_day is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    require_can_edit_athlete(db, user, training_day.athlete_id)
+    return training_day
+
+
+def _require_view_training_plan(request: Request, db: Session, training_plan_id: int):
+    user = require_current_user(request, db)
+    training_plan = get_training_plan(db, training_plan_id)
+    if training_plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_can_view_athlete(db, user, training_plan.athlete_id)
+    return training_plan
+
+
+def _require_edit_training_plan(request: Request, db: Session, training_plan_id: int):
+    user = require_current_user(request, db)
+    training_plan = get_training_plan(db, training_plan_id)
+    if training_plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+    require_can_edit_athlete(db, user, training_plan.athlete_id)
+    return training_plan
+
+
+def _require_view_planned_session(request: Request, db: Session, planned_session_id: int):
+    user = require_current_user(request, db)
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    require_can_view_athlete(db, user, planned_session.athlete_id)
+    return planned_session
+
+
+def _require_edit_planned_session(request: Request, db: Session, planned_session_id: int):
+    user = require_current_user(request, db)
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    require_can_edit_athlete(db, user, planned_session.athlete_id)
+    return planned_session
+
+
 @router.get("", response_model=list[PlannedSessionRead])
-def list_planned_sessions(db: Session = Depends(get_db)) -> list[PlannedSessionRead]:
+def list_planned_sessions(request: Request, db: Session = Depends(get_db)) -> list[PlannedSessionRead]:
+    require_current_user(request, db)
     return get_planned_sessions(db)
 
 
 @router.get("/create", response_class=HTMLResponse)
 def create_planned_session_page(
+    request: Request,
     training_day_id: int = Query(...),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    training_day = get_training_day(db, training_day_id)
-    if training_day is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training day not found")
+    training_day = _require_edit_training_day(request, db, training_day_id)
     return RedirectResponse(url=f"/planned_sessions/quick?training_day_id={training_day.id}&mode=builder#builder", status_code=303)
 
 
@@ -98,13 +155,10 @@ def create_quick_session_page(
     selected_date: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    editing_session = get_planned_session(db, planned_session_id) if planned_session_id is not None else None
-    if planned_session_id is not None and editing_session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesion no encontrada")
+    require_current_user(request, db)
+    editing_session = _require_edit_planned_session(request, db, planned_session_id) if planned_session_id is not None else None
 
-    training_day = editing_session.training_day if editing_session else (get_training_day(db, training_day_id) if training_day_id is not None else None)
-    if training_day_id is not None and training_day is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dia no encontrado")
+    training_day = editing_session.training_day if editing_session else (_require_edit_training_day(request, db, training_day_id) if training_day_id is not None else None)
 
     training_plan = training_day.training_plan if training_day else None
     selected_day_date: date | None = training_day.day_date if training_day else None
@@ -112,9 +166,7 @@ def create_quick_session_page(
     if training_day is None:
         if training_plan_id is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Falta training_plan_id")
-        training_plan = get_training_plan(db, training_plan_id)
-        if training_plan is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan no encontrado")
+        training_plan = _require_edit_training_plan(request, db, training_plan_id)
         if day_date:
             try:
                 selected_day_date = date.fromisoformat(day_date)
@@ -154,9 +206,7 @@ def create_quick_session_page(
 
 @router.get("/{planned_session_id}", response_model=PlannedSessionRead)
 def read_planned_session(planned_session_id: int, request: Request, db: Session = Depends(get_db)):
-    planned_session = get_planned_session(db, planned_session_id)
-    if planned_session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    planned_session = _require_view_planned_session(request, db, planned_session_id)
     if _wants_html(request):
         linked_activity = (
             planned_session.activity_match.garmin_activity
@@ -188,9 +238,7 @@ def read_planned_session_analysis_v2(
     request: Request,
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    planned_session = get_planned_session(db, planned_session_id)
-    if planned_session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    planned_session = _require_view_planned_session(request, db, planned_session_id)
 
     linked_activity = (
         planned_session.activity_match.garmin_activity
@@ -217,11 +265,10 @@ def read_planned_session_analysis_v2(
 @router.post("/{planned_session_id}/analysis/re-run")
 def rerun_planned_session_analysis_v2(
     planned_session_id: int,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    planned_session = get_planned_session(db, planned_session_id)
-    if planned_session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    planned_session = _require_edit_planned_session(request, db, planned_session_id)
 
     linked_activity = (
         planned_session.activity_match.garmin_activity
@@ -259,9 +306,7 @@ def mark_strength_session_complete_endpoint(
     selected_date: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    planned_session = get_planned_session(db, planned_session_id)
-    if planned_session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    planned_session = _require_edit_planned_session(request, db, planned_session_id)
 
     duration_min = _parse_optional_int(manual_duration_min)
     strength_rpe = _parse_optional_int(manual_strength_rpe)
@@ -324,9 +369,7 @@ def clear_strength_session_completion_endpoint(
     selected_date: str | None = Form(default=None),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    planned_session = get_planned_session(db, planned_session_id)
-    if planned_session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    planned_session = _require_edit_planned_session(request, db, planned_session_id)
 
     clear_strength_session_manual_completion(db, planned_session)
     _refresh_weekly_summary_for_session(db, planned_session)
@@ -762,7 +805,7 @@ def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalys
         {"label": "Duracion", "value": _duration_seconds_compact(completion_duration_sec) if completion_duration_sec is not None else "-"},
         {"label": "Distancia", "value": _distance_meters_compact(linked_activity.distance_m) if linked_activity else "-"},
         {"label": "FC promedio", "value": str(linked_activity.avg_hr) if linked_activity and linked_activity.avg_hr is not None else "-"},
-        {"label": "Inicio", "value": linked_activity.start_time.strftime("%H:%M") if linked_activity and linked_activity.start_time else "-"},
+        {"label": "Inicio", "value": format_local_datetime(linked_activity.start_time, fmt="%H:%M", empty="-") if linked_activity else "-"},
     ]
     activity_meta = [
         {"label": "Vinculo", "value": label_for(MATCH_METHOD_LABELS, activity_match.match_method) if activity_match else "Registro manual" if manual_completion else "Sin vinculacion"},

@@ -8,7 +8,7 @@
         <div>
             <p class="eyebrow">Actividad</p>
             <h1>{{ activity.activity_name or 'Actividad Garmin' }}</h1>
-            <p class="text-muted">{{ sport_label(activity.sport_type) }}{% if activity.modality %} {{ modality_label(activity.modality).lower() }}{% endif %} | {{ activity.start_time.strftime('%Y-%m-%d %H:%M') if activity.start_time else '-' }}</p>
+            <p class="text-muted">{{ sport_label(activity.sport_type) }}{% if activity.modality %} {{ modality_label(activity.modality).lower() }}{% endif %} | {{ format_local_datetime(activity.start_time, empty='-') }}</p>
         </div>
         <div class="actions-inline">
             <a class="button button-nav" href="/activities">Volver a actividades</a>
@@ -123,8 +123,8 @@
     <div class="detail-grid">
         <div class="detail-item"><strong>Garmin ID:</strong> {{ activity.garmin_activity_id }}</div>
         <div class="detail-item"><strong>Atleta:</strong> {{ activity.athlete.name if activity.athlete else activity.athlete_id }}</div>
-        <div class="detail-item"><strong>Inicio:</strong> {{ activity.start_time.strftime('%Y-%m-%d %H:%M:%S') if activity.start_time else '-' }}</div>
-        <div class="detail-item"><strong>Fin:</strong> {{ activity.end_time.strftime('%Y-%m-%d %H:%M:%S') if activity.end_time else '-' }}</div>
+        <div class="detail-item"><strong>Inicio:</strong> {{ format_local_datetime(activity.start_time, fmt='%Y-%m-%d %H:%M:%S', empty='-') }}</div>
+        <div class="detail-item"><strong>Fin:</strong> {{ format_local_datetime(activity.end_time, fmt='%Y-%m-%d %H:%M:%S', empty='-') }}</div>
         <div class="detail-item"><strong>Duracion:</strong> {{ duration_seconds_hhmm(activity.duration_sec) or '-' }}</div>
         <div class="detail-item"><strong>Tiempo en movimiento:</strong> {{ duration_seconds_hhmm(activity.moving_duration_sec) or '-' }}</div>
         <div class="detail-item"><strong>Modalidad:</strong> {{ modality_label(activity.modality) }}</div>
@@ -245,7 +245,7 @@
         <div class="detail-item"><strong>Fuente:</strong> {% if activity.weather.weather_source == 'garmin_activity' %}Garmin Activity{% elif activity.weather.weather_source == 'open_meteo' %}Open-Meteo estimado{% else %}{{ activity.weather.provider_name }}{% endif %}</div>
         <div class="detail-item"><strong>Proveedor:</strong> {{ activity.weather.provider_name }}</div>
         <div class="detail-item"><strong>Condicion:</strong> {{ activity.weather.condition_summary or '-' }}</div>
-        <div class="detail-item"><strong>Sincronizado:</strong> {{ activity.weather.synced_at.strftime('%Y-%m-%d %H:%M:%S') if activity.weather.synced_at else '-' }}</div>
+        <div class="detail-item"><strong>Sincronizado:</strong> {{ format_local_datetime(activity.weather.synced_at, fmt='%Y-%m-%d %H:%M:%S', empty='-') }}</div>
         <div class="detail-item"><strong>Temp inicio:</strong> {{ activity.weather.temperature_start_c or '-' }} C</div>
         <div class="detail-item"><strong>Sensacion termica:</strong> {{ activity.weather.apparent_temperature_start_c or '-' }} C</div>
         <div class="detail-item"><strong>Humedad:</strong> {{ activity.weather.humidity_start_pct or '-' }} %</div>
@@ -295,7 +295,7 @@
                 <tr>
                     <td>{{ lap.lap_number }}</td>
                     <td>{{ lap.lap_type or '-' }}</td>
-                    <td>{{ lap.start_time.strftime('%H:%M:%S') if lap.start_time else '-' }}</td>
+                    <td>{{ format_local_datetime(lap.start_time, fmt='%H:%M:%S', empty='-') }}</td>
                     <td>{{ duration_seconds_hhmm(lap.duration_sec) or '-' }}</td>
                     <td>{{ distance_label_meters(lap.distance_m) }}</td>
                     <td>{{ lap.avg_hr or '-' }}/{{ lap.max_hr or '-' }}</td>

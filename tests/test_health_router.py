@@ -6,9 +6,10 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.main as app_main
 from app.db.base import Base
 from app.db.models import athlete  # noqa: F401
 from app.db.models import daily_health_metric  # noqa: F401
@@ -16,9 +17,11 @@ from app.db.models import garmin_activity  # noqa: F401
 from app.db.models import goal  # noqa: F401
 from app.db.models import health_ai_analysis  # noqa: F401
 from app.db.models import health_sync_state  # noqa: F401
+from app.db.models import user  # noqa: F401
 from app.db.models.athlete import Athlete
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.goal import Goal
+from app.db.models.user import User
 from app.db.session import get_db
 from app.main import app
 from app.schemas.daily_health_metric import HealthDailyMetricCreate
@@ -30,6 +33,7 @@ from app.services.health_ai_analysis_service import (
 )
 from app.services.openai_client import OpenAIIntegrationError
 from app.db.models.health_sync_state import HealthSyncState
+from app.services.security import hash_password
 
 
 class HealthRouterTests(unittest.TestCase):
@@ -42,6 +46,9 @@ class HealthRouterTests(unittest.TestCase):
         )
         Base.metadata.create_all(self.engine)
         self.db = Session(self.engine)
+        self.middleware_session_local = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.original_session_local = app_main.SessionLocal
+        app_main.SessionLocal = self.middleware_session_local
 
         athlete_row = Athlete(name="Atleta Router Salud")
         self.db.add(athlete_row)
@@ -57,9 +64,21 @@ class HealthRouterTests(unittest.TestCase):
 
         app.dependency_overrides[get_db] = override_get_db
         self.client = TestClient(app)
+        admin = User(
+            email="admin@example.com",
+            name="Admin",
+            password_hash=hash_password("secret123"),
+            role="admin",
+            is_active=True,
+        )
+        self.db.add(admin)
+        self.db.commit()
+        self.db.refresh(admin)
+        self.client.cookies.set("training_app_context", f"current_user_id:{admin.id}")
 
     def tearDown(self) -> None:
         app.dependency_overrides.clear()
+        app_main.SessionLocal = self.original_session_local
         self.db.close()
         self.engine.dispose()
 

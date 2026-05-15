@@ -9,13 +9,11 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.db.models.health_sync_state import HealthSyncState
 from app.services.garmin.health_sync import sync_recent_health
-
-
-APP_LOCAL_TIMEZONE = timezone(timedelta(hours=-3), name="America/Buenos_Aires")
+from app.utils.datetime_utils import format_local_datetime, now_utc, today_local, to_local_date, to_local_datetime
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return now_utc()
 
 
 def get_health_sync_state(db: Session, athlete_id: int, source: str = "garmin") -> HealthSyncState | None:
@@ -57,7 +55,7 @@ def should_auto_sync_health(
     elapsed = _ensure_aware(now) - last_success_at
     if elapsed < timedelta(hours=min_hours_between_syncs):
         return False
-    return reference_date == _local_datetime(now).date()
+    return reference_date == to_local_date(now)
 
 
 def run_health_auto_sync(
@@ -175,16 +173,14 @@ def _ensure_aware(value: datetime) -> datetime:
     return value
 
 
-def _local_datetime(value: datetime) -> datetime:
-    return _ensure_aware(value).astimezone(APP_LOCAL_TIMEZONE)
-
-
 def _time_label(value: datetime) -> str:
-    local_value = _local_datetime(value)
-    local_today = datetime.now(APP_LOCAL_TIMEZONE).date()
-    if local_value.date() == local_today:
+    local_value = to_local_datetime(value)
+    local_today_value = today_local()
+    if local_value is None:
+        return "-"
+    if local_value.date() == local_today_value:
         return local_value.strftime("hoy a las %H:%M")
-    return local_value.strftime("%d/%m/%Y %H:%M")
+    return format_local_datetime(value)
 
 
 def _controlled_error_message(exc: Exception) -> str:

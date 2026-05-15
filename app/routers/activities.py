@@ -17,9 +17,11 @@ from app.schemas.garmin_activity import GarminActivityDetailRead, GarminActivity
 from app.services.activity_matching_service import run_downstream_analyses_for_match_decision
 from app.services.activity_auto_sync_service import run_activity_auto_sync
 from app.services.analysis_v2.session_analysis_service import ANALYSIS_VERSION
+from app.services.auth_context import require_current_user
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
 from app.config import get_settings
 from app.services.garmin_activity_service import get_activities, get_activity
+from app.services.planned_session_service import get_planned_session
 from app.services.weather.weather_service import find_weather_keys
 from app.services.session_match_service import (
     auto_match_activity,
@@ -31,6 +33,8 @@ from app.services.session_match_service import (
 )
 from app.services.training_plan_service import get_training_plan, get_training_plans_for_athlete
 from app.services.weather.weather_service import ActivityWeatherSyncError, sync_weather_for_activity
+from app.services.user_permission_service import require_can_edit_athlete, require_can_view_athlete
+from app.routers._athlete_access import assert_same_athlete
 from app.web.templates import build_templates
 
 
@@ -53,6 +57,7 @@ def list_activities(
     link_filter: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     parsed_athlete_id = _parse_optional_int_query(athlete_id, "athlete_id")
     parsed_training_plan_id = _parse_optional_int_query(training_plan_id, "training_plan_id")
     current_athlete = get_current_athlete(request, db, athlete_id=parsed_athlete_id)
@@ -60,6 +65,7 @@ def list_activities(
         return RedirectResponse(url="/athletes/select", status_code=303)
     if current_athlete is not None:
         parsed_athlete_id = current_athlete.id
+        require_can_view_athlete(db, user, parsed_athlete_id)
     auto_sync_status: dict[str, object] | None = None
     if current_athlete is not None and _wants_html(request):
         auto_sync_status = run_activity_auto_sync(
@@ -68,6 +74,13 @@ def list_activities(
             settings=get_settings(),
         )
     selected_plan = get_training_plan(db, parsed_training_plan_id) if parsed_training_plan_id is not None else None
+    if selected_plan is not None:
+        require_can_view_athlete(db, user, selected_plan.athlete_id)
+        assert_same_athlete(
+            parsed_athlete_id,
+            selected_plan.athlete_id,
+            detail="El plan no pertenece al atleta seleccionado.",
+        )
     if selected_plan is None and current_athlete is not None:
         selected_plan = get_current_training_plan(request, db, current_athlete, training_plan_id=parsed_training_plan_id)
         parsed_training_plan_id = selected_plan.id if selected_plan is not None else parsed_training_plan_id
@@ -127,9 +140,11 @@ def list_activities(
 
 @router.get("/{activity_id}", response_model=GarminActivityDetailRead)
 def read_activity(activity_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_current_user(request, db)
     activity = get_activity(db, activity_id)
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    require_can_view_athlete(db, user, activity.athlete_id)
     current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id)
     if current_athlete is not None and activity.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La actividad no pertenece al atleta seleccionado.")
@@ -153,9 +168,11 @@ def read_activity(activity_id: int, request: Request, db: Session = Depends(get_
 
 @router.get("/{activity_id}/debug/raw-garmin-json")
 def read_activity_raw_garmin_json(activity_id: int, request: Request, db: Session = Depends(get_db)):
+    user = require_current_user(request, db)
     activity = get_activity(db, activity_id)
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    require_can_view_athlete(db, user, activity.athlete_id)
     current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id)
     if current_athlete is not None and activity.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La actividad no pertenece al atleta seleccionado.")
@@ -197,9 +214,21 @@ def auto_match_activity_endpoint(
     training_plan_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     activity = get_activity(db, activity_id)
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    require_can_edit_athlete(db, user, activity.athlete_id)
+    if training_plan_id is not None:
+        selected_plan = get_training_plan(db, training_plan_id)
+        if selected_plan is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+        require_can_edit_athlete(db, user, selected_plan.athlete_id)
+        assert_same_athlete(
+            activity.athlete_id,
+            selected_plan.athlete_id,
+            detail="No puedes usar un plan de otro atleta para vincular esta actividad.",
+        )
     current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id, require_selected=True)
     if current_athlete is not None and activity.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La actividad no pertenece al atleta seleccionado.")
@@ -236,16 +265,27 @@ def auto_match_pending_endpoint(
     training_plan_id: int | None = None,
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
+        require_can_edit_athlete(db, user, athlete_id)
     selected_plan = get_training_plan(db, training_plan_id) if training_plan_id is not None else None
+    if selected_plan is not None:
+        require_can_edit_athlete(db, user, selected_plan.athlete_id)
+        athlete_id = athlete_id or selected_plan.athlete_id
+        assert_same_athlete(
+            athlete_id,
+            selected_plan.athlete_id,
+            detail="El plan no pertenece al atleta seleccionado.",
+        )
     parsed_date_from = _parse_optional_date(date_from, "date_from")
     parsed_date_to = _parse_optional_date(date_to, "date_to")
     if selected_plan is not None:
-        athlete_id = athlete_id or selected_plan.athlete_id
         parsed_date_from = parsed_date_from or selected_plan.start_date
         parsed_date_to = parsed_date_to or selected_plan.end_date
+    if athlete_id is None and user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Selecciona un atleta antes de ejecutar el matching pendiente.")
     batch = auto_match_unlinked_activities(
         db,
         athlete_id=athlete_id,
@@ -274,10 +314,21 @@ def manual_match_activity_endpoint(
     planned_session_id: int = Form(...),
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     activity = get_activity(db, activity_id)
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    require_can_edit_athlete(db, user, activity.athlete_id)
     current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id, require_selected=True)
+    planned_session = get_planned_session(db, planned_session_id)
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    require_can_edit_athlete(db, user, planned_session.athlete_id)
+    assert_same_athlete(
+        activity.athlete_id,
+        planned_session.athlete_id,
+        detail="No puedes vincular actividades y sesiones de atletas distintos.",
+    )
     try:
         decision = manual_match_activity(db, activity_id, planned_session_id)
     except ValueError as exc:
@@ -305,12 +356,24 @@ def activity_match_candidates_endpoint(
     training_plan_id: int | None = None,
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     activity = get_activity(db, activity_id)
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    require_can_view_athlete(db, user, activity.athlete_id)
     current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id, require_selected=True)
     if current_athlete is not None and activity.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La actividad no pertenece al atleta seleccionado.")
+    if training_plan_id is not None:
+        selected_plan = get_training_plan(db, training_plan_id)
+        if selected_plan is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Training plan not found")
+        require_can_view_athlete(db, user, selected_plan.athlete_id)
+        assert_same_athlete(
+            activity.athlete_id,
+            selected_plan.athlete_id,
+            detail="No puedes buscar candidatas en un plan de otro atleta.",
+        )
     parsed_date_from = _parse_optional_date(date_from, "date_from") if date_from else None
     parsed_date_to = _parse_optional_date(date_to, "date_to") if date_to else None
     try:
@@ -363,9 +426,11 @@ async def link_activity_to_session_endpoint(
     request: Request,
     db: Session = Depends(get_db),
 ):
+    user = require_current_user(request, db)
     activity = get_activity(db, activity_id)
     if activity is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+    require_can_edit_athlete(db, user, activity.athlete_id)
     current_athlete = get_current_athlete(request, db, athlete_id=activity.athlete_id, require_selected=True)
     if current_athlete is not None and activity.athlete_id != current_athlete.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="La actividad no pertenece al atleta seleccionado.")
@@ -378,6 +443,15 @@ async def link_activity_to_session_endpoint(
     planned_session_id = payload.get("planned_session_id")
     if not planned_session_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Falta planned_session_id")
+    planned_session = get_planned_session(db, int(planned_session_id))
+    if planned_session is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Planned session not found")
+    require_can_edit_athlete(db, user, planned_session.athlete_id)
+    assert_same_athlete(
+        activity.athlete_id,
+        planned_session.athlete_id,
+        detail="No puedes vincular actividades y sesiones de atletas distintos.",
+    )
 
     try:
         decision = manual_match_activity(db, activity_id, int(planned_session_id))

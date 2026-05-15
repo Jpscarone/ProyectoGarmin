@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -15,17 +15,23 @@ from app.db.models import athlete  # noqa: F401
 from app.db.models import daily_health_metric  # noqa: F401
 from app.db.models import garmin_activity  # noqa: F401
 from app.db.models import planned_session  # noqa: F401
+from app.db.models import scheduled_sync_job_log  # noqa: F401
 from app.db.models import session_analysis  # noqa: F401
 from app.db.models import training_day  # noqa: F401
 from app.db.models import training_plan  # noqa: F401
+from app.db.models import user  # noqa: F401
+from app.db.models import user_athlete_permission  # noqa: F401
 from app.db.models.activity_session_match import ActivitySessionMatch
 from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.planned_session import PlannedSession
+from app.db.models.scheduled_sync_job_log import ScheduledSyncJobLog
 from app.db.models.session_analysis import SessionAnalysis
 from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
+from app.db.models.user import User  # noqa: F401
+from app.db.models.user_athlete_permission import UserAthletePermission  # noqa: F401
 from app.db.session import get_db
 from app.main import app
 
@@ -48,9 +54,27 @@ class DashboardRouteTests(unittest.TestCase):
                 pass
 
         app.dependency_overrides[get_db] = override_get_db
+        self.auth_bootstrap_patcher = patch("app.main.auth_is_bootstrapped", return_value=False)
+        self.auth_gate_patcher = patch("app.main._should_authenticate", return_value=False)
+        self.require_user_patcher = patch("app.services.athlete_context.require_current_user", side_effect=lambda request, db: object())
+        self.list_athletes_patcher = patch(
+            "app.services.athlete_context.list_accessible_athletes",
+            side_effect=lambda db, user, only_active=True: list(db.query(Athlete).filter(Athlete.status != "archived").all()),
+        )
+        self.permission_patcher = patch("app.services.athlete_context.require_permission_for_athlete", return_value=None)
+        self.auth_bootstrap_patcher.start()
+        self.auth_gate_patcher.start()
+        self.require_user_patcher.start()
+        self.list_athletes_patcher.start()
+        self.permission_patcher.start()
         self.client = TestClient(app)
 
     def tearDown(self) -> None:
+        self.auth_bootstrap_patcher.stop()
+        self.auth_gate_patcher.stop()
+        self.require_user_patcher.stop()
+        self.list_athletes_patcher.stop()
+        self.permission_patcher.stop()
         app.dependency_overrides.clear()
         self.db.close()
         self.engine.dispose()
@@ -121,6 +145,47 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         refresh_mock.assert_not_called()
         self.assertIn("Actualizando datos del atleta", response.text)
+
+    def test_dashboard_shows_latest_scheduled_sync_summary(self) -> None:
+        athlete = Athlete(name="Atleta Jobs")
+        self.db.add(athlete)
+        self.db.commit()
+        self.db.refresh(athlete)
+        self.db.add(
+            ScheduledSyncJobLog(
+                athlete_id=None,
+                job_type="morning_health",
+                started_at=datetime(2026, 5, 2, 10, 0, tzinfo=timezone.utc),
+                finished_at=datetime(2026, 5, 2, 10, 2, tzinfo=timezone.utc),
+                status="success",
+                message="1/1 atletas ok | salud 2 dias | health AI 1",
+                health_days_synced=2,
+                health_ai_analyses_created=1,
+            )
+        )
+        self.db.add(
+            ScheduledSyncJobLog(
+                athlete_id=None,
+                job_type="evening_full",
+                started_at=datetime(2026, 5, 2, 22, 0, tzinfo=timezone.utc),
+                finished_at=datetime(2026, 5, 2, 22, 5, tzinfo=timezone.utc),
+                status="partial_success",
+                message="1/1 atletas ok | salud 2 dias | actividades +1",
+                health_days_synced=2,
+                activities_created=1,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/dashboard?athlete_id={athlete.id}&selected_date=2026-05-02",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Jobs automaticos", response.text)
+        self.assertIn("Morning health", response.text)
+        self.assertIn("Evening full", response.text)
 
     def test_dashboard_renders_critical_alert_and_decision_block(self) -> None:
         athlete = Athlete(name="Atleta Critico")

@@ -45,6 +45,38 @@
     <article class="panel dashboard-card">
         <div class="section-heading">
             <div>
+                <p class="eyebrow">{{ dashboard.day_state.title }}</p>
+                <h2>{{ dashboard.day_state.messages[0] }}</h2>
+            </div>
+        </div>
+        <div class="detail-grid">
+            <div class="detail-item"><strong>Entrenamiento planificado:</strong> {{ dashboard.day_state.training_planned }}</div>
+            <div class="detail-item"><strong>Actividad Garmin encontrada:</strong> {{ dashboard.day_state.activity_found }}</div>
+            <div class="detail-item"><strong>Vinculacion:</strong> {{ dashboard.day_state.link_status }}</div>
+            <div class="detail-item"><strong>Analisis de sesion:</strong> {{ dashboard.day_state.analysis_status }}</div>
+            <div class="detail-item"><strong>Salud actualizada:</strong> {{ dashboard.day_state.health_updated }}</div>
+            <div class="detail-item"><strong>Readiness:</strong> {{ dashboard.day_state.readiness_status }}</div>
+            <div class="detail-item"><strong>Ultima sync salud:</strong> {{ dashboard.day_state.last_health_sync_label }}</div>
+            <div class="detail-item"><strong>Ultima sync actividades:</strong> {{ dashboard.day_state.last_activity_sync_label }}</div>
+            <div class="detail-item"><strong>Pendientes activos:</strong> {{ dashboard.day_state.pending_active_count }}</div>
+            <div class="detail-item"><strong>Zona horaria:</strong> {{ dashboard.day_state.timezone_name }}</div>
+            <div class="detail-item detail-item-full">
+                <strong>Estado:</strong>
+                {% for message in dashboard.day_state.messages %}
+                    <div>{{ message }}</div>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="dashboard-action-row">
+            <form method="post" action="{{ dashboard.day_state.resolve_pending_url }}">
+                <button class="button button-utility" type="submit">Resolver pendientes ahora</button>
+            </form>
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
                 <p class="eyebrow">Entrenamiento de hoy</p>
                 <h2>{{ dashboard.today_session.title }}</h2>
                 {% if dashboard.today_session.status_line %}
@@ -139,6 +171,42 @@
         </div>
         <div class="dashboard-action-row">
             <a class="button" href="{{ dashboard.health.url }}">Ver salud</a>
+        </div>
+    </article>
+
+    <article class="panel dashboard-card">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Sync programada</p>
+                <h2>Jobs automaticos</h2>
+            </div>
+        </div>
+        <div class="detail-grid">
+            {% set morning_job = dashboard.scheduled_syncs.morning_health %}
+            <div class="detail-item detail-item-full">
+                <strong>Morning health:</strong>
+                {% if morning_job %}
+                    {{ morning_job.status }} | {{ morning_job.finished_at_label or morning_job.started_at_label }}<br>
+                    {{ morning_job.message }}<br>
+                    {{ morning_job.counts_label }}
+                {% else %}
+                    Sin corridas registradas.
+                {% endif %}
+            </div>
+            {% set evening_job = dashboard.scheduled_syncs.evening_full %}
+            <div class="detail-item detail-item-full">
+                <strong>Evening full:</strong>
+                {% if evening_job %}
+                    {{ evening_job.status }} | {{ evening_job.finished_at_label or evening_job.started_at_label }}<br>
+                    {{ evening_job.message }}<br>
+                    {{ evening_job.counts_label }}
+                {% else %}
+                    Sin corridas registradas.
+                {% endif %}
+            </div>
+        </div>
+        <div class="dashboard-action-row">
+            <a class="button button-utility" href="/sync/garmin/activities">Ver diagnostico Garmin</a>
         </div>
     </article>
 

@@ -8,7 +8,7 @@
         <div>
             <p class="eyebrow">Reporte detallado</p>
             <h1>{{ report.title }}</h1>
-            <p class="text-muted">Tipo: {{ report.report_type }} | Estado: {{ analysis_status_label(report.overall_status) }} | Generado: {{ report.generated_at.strftime('%Y-%m-%d %H:%M') if report.generated_at else '-' }}</p>
+            <p class="text-muted">Tipo: {{ report.report_type }} | Estado: {{ analysis_status_label(report.overall_status) }} | Generado: {{ format_local_datetime(report.generated_at, fmt='%Y-%m-%d %H:%M', empty='-') }}</p>
             <p class="text-muted">Esta vista conserva el detalle tecnico del reporte clasico. La lectura principal de la sesion ahora vive en el analisis V2.</p>
         </div>
         <div class="actions-inline">

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Training App Resolve Pending Items every 3 hours
+
+[Timer]
+OnCalendar=*-*-* 08,11,14,17,20,23:00:00
+Persistent=true
+Unit=training_resolve_pending.service
+
+[Install]
+WantedBy=timers.target

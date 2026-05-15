@@ -1,0 +1,10 @@
+[Unit]
+Description=Run Training App Morning Health Sync daily at 10:00
+
+[Timer]
+OnCalendar=*-*-* 10:00:00
+Persistent=true
+Unit=training_sync_morning.service
+
+[Install]
+WantedBy=timers.target

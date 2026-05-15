@@ -12,6 +12,7 @@ from app.db.models.training_day import TrainingDay
 from app.db.models.training_plan import TrainingPlan
 from app.db.models.session_group import SessionGroup
 from app.schemas.training_plan import TrainingPlanCreate, TrainingPlanUpdate
+from app.utils.datetime_utils import today_local
 
 
 TRAINING_PLAN_STATUS_DRAFT = "draft"
@@ -37,7 +38,7 @@ def normalize_training_plan_status(value: str | None) -> str:
 
 
 def auto_complete_expired_training_plans(db: Session, today: date | None = None) -> int:
-    reference_date = today or date.today()
+    reference_date = today or today_local()
     expired_plans = list(
         db.scalars(
             select(TrainingPlan).where(
@@ -79,7 +80,7 @@ def get_training_plans_for_athlete(db: Session, athlete_id: int) -> list[Trainin
 
 
 def select_default_training_plan(db: Session, athlete_id: int | None = None, today: date | None = None) -> TrainingPlan | None:
-    reference_date = today or date.today()
+    reference_date = today or today_local()
     statement = select(TrainingPlan).options(selectinload(TrainingPlan.athlete), selectinload(TrainingPlan.goal))
     if athlete_id is not None:
         statement = statement.where(TrainingPlan.athlete_id == athlete_id)

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db.session import get_db
+from app.services.auth_context import require_current_user
 from app.services.athlete_context import get_current_athlete
 from app.services.garmin.auth import (
     GarminMFARequired,
@@ -18,6 +19,7 @@ from app.services.garmin.auth import (
     has_pending_mfa,
 )
 from app.services.garmin.health_sync import GarminHealthSyncResult, sync_recent_health
+from app.services.user_permission_service import require_permission_for_athlete
 from app.web.templates import build_templates
 
 
@@ -29,7 +31,9 @@ def _sync_health_and_redirect(*, request: Request, success_url: str, error_url: 
     settings = get_settings()
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         result = sync_recent_health(db, settings, athlete_id=athlete.id if athlete else None)
         message = (
             f"Salud sincronizada. Dias revisados: {result.days_reviewed}, "
@@ -70,7 +74,9 @@ def sync_garmin_health(request: Request, db: Session = Depends(get_db)) -> HTMLR
     error: str | None = None
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         result = sync_recent_health(db, settings, athlete_id=athlete.id if athlete else None)
     except GarminMFARequired as exc:
         error = str(exc)
@@ -103,7 +109,9 @@ def sync_garmin_health_mfa(
     error: str | None = None
 
     try:
+        user = require_current_user(request, db)
         athlete = get_current_athlete(request, db, require_selected=True)
+        require_permission_for_athlete(db, user, athlete.id, can_sync_garmin=True)
         result = sync_recent_health(db, settings, mfa_code=mfa_code, athlete_id=athlete.id if athlete else None)
     except GarminMFARequired as exc:
         error = str(exc)

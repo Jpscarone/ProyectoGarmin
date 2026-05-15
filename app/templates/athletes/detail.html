@@ -160,7 +160,7 @@
             <div class="detail-grid">
                 <div class="detail-pill">
                     <strong>Ultima comparacion:</strong>
-                    {{ athlete.garmin_profile_last_synced_at.strftime("%d/%m/%Y %H:%M") if athlete.garmin_profile_last_synced_at else "-" }}
+                    {{ format_local_datetime(athlete.garmin_profile_last_synced_at) }}
                 </div>
                 <div class="detail-pill">
                     <strong>Estado general:</strong>

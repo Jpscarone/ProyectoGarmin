@@ -12,21 +12,32 @@
             <a class="brand" href="/">training_app</a>
             <nav class="site-nav">
                 <a href="/">Panel</a>
+                {% if request.state.current_user %}
                 <a href="/athletes">Atletas</a>
                 <a href="/training_plans{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Planes</a>
                 <a href="/calendar">Calendario</a>
                 <a href="/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% if request.state.current_training_plan %}&training_plan_id={{ request.state.current_training_plan.id }}{% endif %}{% endif %}">Actividades</a>
                 <a href="/health{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Salud</a>
-                <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Garmin</a>
+                <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Sync Garmin</a>
+                <a href="/garmin/account">Cuenta Garmin</a>
+                {% endif %}
             </nav>
             <div class="top-context">
-                {% if request.state.current_athlete %}
-                <a class="top-context-link" href="/athletes/select">
-                    {{ request.state.current_athlete.name }}
-                    {% if request.state.current_training_plan %} · {{ request.state.current_training_plan.name }}{% endif %}
-                </a>
+                {% if request.state.current_user %}
+                <div class="top-context-link">
+                    {{ request.state.current_user.name }} · {{ request.state.current_user.role }}
+                    {% if request.state.current_athlete %}
+                    · <a href="/athletes/select">{{ request.state.current_athlete.name }}</a>
+                    {% endif %}
+                    {% if request.state.current_training_plan %}
+                    · {{ request.state.current_training_plan.name }}
+                    {% endif %}
+                </div>
+                <form method="post" action="/logout">
+                    <button type="submit">Cerrar sesión</button>
+                </form>
                 {% else %}
-                <a class="top-context-link top-context-missing" href="/athletes/select">Seleccionar atleta</a>
+                <a class="top-context-link top-context-missing" href="/login">Iniciar sesión</a>
                 {% endif %}
             </div>
         </header>

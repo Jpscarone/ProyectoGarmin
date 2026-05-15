@@ -16,6 +16,8 @@ from garminconnect import (
 )
 
 from app.config import Settings
+from app.services.security import GarminCredentialBundle
+from app.utils.datetime_utils import format_local_datetime
 
 
 logger = logging.getLogger(__name__)
@@ -41,47 +43,50 @@ _RATE_LIMIT_STATE: dict[str, datetime] = {}
 _LAST_AUTH_ERROR: dict[str, str] = {}
 
 
-def _pending_mfa_key(settings: Settings) -> str:
-    return f"{settings.garmin_email or ''}|{Path(settings.garmin_token_dir).expanduser().resolve()}"
+def _pending_mfa_key(settings: Settings, credentials: GarminCredentialBundle | None = None) -> str:
+    email = credentials.email if credentials is not None else settings.garmin_email or ""
+    token_dir = credentials.token_dir if credentials is not None else settings.garmin_token_dir
+    return f"{email}|{Path(token_dir).expanduser().resolve()}"
 
 
-def _rate_limit_key(settings: Settings) -> str:
-    return _pending_mfa_key(settings)
+def _rate_limit_key(settings: Settings, credentials: GarminCredentialBundle | None = None) -> str:
+    return _pending_mfa_key(settings, credentials)
 
 
-def _token_dir(settings: Settings) -> Path:
-    return Path(settings.garmin_token_dir).expanduser().resolve()
+def _token_dir(settings: Settings, credentials: GarminCredentialBundle | None = None) -> Path:
+    token_dir = credentials.token_dir if credentials is not None else settings.garmin_token_dir
+    return Path(token_dir).expanduser().resolve()
 
 
-def _token_file_path(settings: Settings) -> Path:
-    return _token_dir(settings) / "garmin_tokens.json"
+def _token_file_path(settings: Settings, credentials: GarminCredentialBundle | None = None) -> Path:
+    return _token_dir(settings, credentials) / "garmin_tokens.json"
 
 
-def _rate_limit_state_path(settings: Settings) -> Path:
-    return _token_dir(settings) / "rate_limit_state.json"
+def _rate_limit_state_path(settings: Settings, credentials: GarminCredentialBundle | None = None) -> Path:
+    return _token_dir(settings, credentials) / "rate_limit_state.json"
 
 
-def has_pending_mfa(settings: Settings) -> bool:
-    return _pending_mfa_key(settings) in _PENDING_MFA_STATE
+def has_pending_mfa(settings: Settings, credentials: GarminCredentialBundle | None = None) -> bool:
+    return _pending_mfa_key(settings, credentials) in _PENDING_MFA_STATE
 
 
-def clear_pending_mfa(settings: Settings) -> None:
-    _PENDING_MFA_STATE.pop(_pending_mfa_key(settings), None)
+def clear_pending_mfa(settings: Settings, credentials: GarminCredentialBundle | None = None) -> None:
+    _PENDING_MFA_STATE.pop(_pending_mfa_key(settings, credentials), None)
 
 
-def _mark_rate_limited(settings: Settings, minutes: int = 15) -> None:
+def _mark_rate_limited(settings: Settings, credentials: GarminCredentialBundle | None = None, minutes: int = 15) -> None:
     until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-    _RATE_LIMIT_STATE[_rate_limit_key(settings)] = until
-    _persist_rate_limit(settings, until)
+    _RATE_LIMIT_STATE[_rate_limit_key(settings, credentials)] = until
+    _persist_rate_limit(settings, until, credentials)
 
 
-def _clear_rate_limit(settings: Settings) -> None:
-    _RATE_LIMIT_STATE.pop(_rate_limit_key(settings), None)
-    _clear_persisted_rate_limit(settings)
+def _clear_rate_limit(settings: Settings, credentials: GarminCredentialBundle | None = None) -> None:
+    _RATE_LIMIT_STATE.pop(_rate_limit_key(settings, credentials), None)
+    _clear_persisted_rate_limit(settings, credentials)
 
 
-def _persist_rate_limit(settings: Settings, until: datetime) -> None:
-    path = _rate_limit_state_path(settings)
+def _persist_rate_limit(settings: Settings, until: datetime, credentials: GarminCredentialBundle | None = None) -> None:
+    path = _rate_limit_state_path(settings, credentials)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"until": until.isoformat()}), encoding="utf-8")
@@ -89,8 +94,8 @@ def _persist_rate_limit(settings: Settings, until: datetime) -> None:
         logger.warning("Could not persist Garmin rate-limit state in %s", path, exc_info=True)
 
 
-def _load_persisted_rate_limit(settings: Settings) -> datetime | None:
-    path = _rate_limit_state_path(settings)
+def _load_persisted_rate_limit(settings: Settings, credentials: GarminCredentialBundle | None = None) -> datetime | None:
+    path = _rate_limit_state_path(settings, credentials)
     if not path.exists():
         return None
     try:
@@ -107,8 +112,8 @@ def _load_persisted_rate_limit(settings: Settings) -> datetime | None:
         return None
 
 
-def _clear_persisted_rate_limit(settings: Settings) -> None:
-    path = _rate_limit_state_path(settings)
+def _clear_persisted_rate_limit(settings: Settings, credentials: GarminCredentialBundle | None = None) -> None:
+    path = _rate_limit_state_path(settings, credentials)
     try:
         if path.exists():
             path.unlink()
@@ -116,17 +121,17 @@ def _clear_persisted_rate_limit(settings: Settings) -> None:
         logger.warning("Could not remove Garmin rate-limit state file %s", path, exc_info=True)
 
 
-def _remaining_rate_limit_seconds(settings: Settings) -> int | None:
-    until = _RATE_LIMIT_STATE.get(_rate_limit_key(settings))
+def _remaining_rate_limit_seconds(settings: Settings, credentials: GarminCredentialBundle | None = None) -> int | None:
+    until = _RATE_LIMIT_STATE.get(_rate_limit_key(settings, credentials))
     if until is None:
-        until = _load_persisted_rate_limit(settings)
+        until = _load_persisted_rate_limit(settings, credentials)
         if until is not None:
-            _RATE_LIMIT_STATE[_rate_limit_key(settings)] = until
+            _RATE_LIMIT_STATE[_rate_limit_key(settings, credentials)] = until
     if until is None:
         return None
     remaining = int((until - datetime.now(timezone.utc)).total_seconds())
     if remaining <= 0:
-        _clear_rate_limit(settings)
+        _clear_rate_limit(settings, credentials)
         return None
     return remaining
 
@@ -158,30 +163,26 @@ def _delete_token_file(path: Path) -> None:
         logger.warning("Could not remove Garmin token file %s", path, exc_info=True)
 
 
-def get_garmin_auth_diagnostics(settings: Settings) -> dict[str, object]:
-    token_dir = _token_dir(settings)
-    token_file = _token_file_path(settings)
+def get_garmin_auth_diagnostics(settings: Settings, credentials: GarminCredentialBundle | None = None) -> dict[str, object]:
+    token_dir = _token_dir(settings, credentials)
+    token_file = _token_file_path(settings, credentials)
     token_file_exists = token_file.exists()
     tokens_usable = _token_file_looks_usable(token_file)
-    remaining_rate_limit = _remaining_rate_limit_seconds(settings)
-    rate_limit_until = _RATE_LIMIT_STATE.get(_rate_limit_key(settings))
-    rate_limit_until_local = (
-        rate_limit_until.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-        if rate_limit_until is not None
-        else None
-    )
+    remaining_rate_limit = _remaining_rate_limit_seconds(settings, credentials)
+    rate_limit_until = _RATE_LIMIT_STATE.get(_rate_limit_key(settings, credentials))
+    rate_limit_until_local = format_local_datetime(rate_limit_until, fmt="%Y-%m-%d %H:%M:%S", empty="-") if rate_limit_until is not None else None
 
     return {
         "token_dir": str(token_dir),
         "token_file": str(token_file),
         "token_file_exists": token_file_exists,
         "tokens_usable": tokens_usable,
-        "needs_mfa": has_pending_mfa(settings),
+        "needs_mfa": has_pending_mfa(settings, credentials),
         "rate_limit_active": remaining_rate_limit is not None,
         "rate_limit_remaining_seconds": remaining_rate_limit,
         "rate_limit_until_local": rate_limit_until_local,
         "garmin_enabled": settings.garmin_enabled,
-        "last_auth_error": _LAST_AUTH_ERROR.get(_rate_limit_key(settings)),
+        "last_auth_error": _LAST_AUTH_ERROR.get(_rate_limit_key(settings, credentials)),
         # Compatibilidad temporal con templates viejos
         "oauth1_exists": False,
         "oauth2_exists": token_file_exists,
@@ -233,26 +234,26 @@ def _save_tokens(client: Garmin, token_dir: Path) -> None:
         logger.warning("Could not determine Garmin token persistence capabilities for %s", token_dir, exc_info=True)
 
 
-def _clear_last_auth_error(settings: Settings) -> None:
-    _LAST_AUTH_ERROR.pop(_rate_limit_key(settings), None)
+def _clear_last_auth_error(settings: Settings, credentials: GarminCredentialBundle | None = None) -> None:
+    _LAST_AUTH_ERROR.pop(_rate_limit_key(settings, credentials), None)
 
 
-def _remember_auth_error(settings: Settings, message: str) -> None:
-    _LAST_AUTH_ERROR[_rate_limit_key(settings)] = message
+def _remember_auth_error(settings: Settings, message: str, credentials: GarminCredentialBundle | None = None) -> None:
+    _LAST_AUTH_ERROR[_rate_limit_key(settings, credentials)] = message
 
 
-def _new_garmin_client(settings: Settings) -> Garmin:
+def _new_garmin_client(settings: Settings, credentials: GarminCredentialBundle) -> Garmin:
     return Garmin(
-        settings.garmin_email,
-        settings.garmin_password,
+        credentials.email,
+        credentials.password,
         prompt_mfa=None,
         return_on_mfa=True,
     )
 
 
-def _raise_rate_limit(settings: Settings, exc: Exception) -> None:
-    _mark_rate_limited(settings)
-    _remember_auth_error(settings, str(exc))
+def _raise_rate_limit(settings: Settings, exc: Exception, credentials: GarminCredentialBundle) -> None:
+    _mark_rate_limited(settings, credentials)
+    _remember_auth_error(settings, str(exc), credentials)
     raise GarminServiceError(
         "Garmin rechazo temporalmente el inicio de sesion por demasiados intentos (429 Too Many Requests). "
         "Espera unos minutos antes de volver a comparar o sincronizar."
@@ -267,6 +268,7 @@ def _is_rate_limit_error(exc: Exception) -> bool:
 
 def _complete_login_or_raise_mfa(
     settings: Settings,
+    credentials: GarminCredentialBundle,
     client: Garmin,
     token_dir: Path,
     login_callable,
@@ -274,47 +276,51 @@ def _complete_login_or_raise_mfa(
     try:
         login_result = login_callable()
     except GarminConnectTooManyRequestsError as exc:
-        _raise_rate_limit(settings, exc)
+        _raise_rate_limit(settings, exc, credentials)
     except GarminConnectAuthenticationError as exc:
         if _is_rate_limit_error(exc):
-            _raise_rate_limit(settings, exc)
-        _remember_auth_error(settings, str(exc))
+            _raise_rate_limit(settings, exc, credentials)
+        _remember_auth_error(settings, str(exc), credentials)
         raise GarminServiceError(f"Garmin authentication failed: {exc}") from exc
     except GarminConnectConnectionError as exc:
         if _is_rate_limit_error(exc):
-            _raise_rate_limit(settings, exc)
-        _remember_auth_error(settings, str(exc))
+            _raise_rate_limit(settings, exc, credentials)
+        _remember_auth_error(settings, str(exc), credentials)
         raise GarminServiceError(f"Garmin connection failed: {exc}") from exc
     except Exception as exc:
         if _is_rate_limit_error(exc):
-            _raise_rate_limit(settings, exc)
-        _remember_auth_error(settings, str(exc))
+            _raise_rate_limit(settings, exc, credentials)
+        _remember_auth_error(settings, str(exc), credentials)
         raise GarminServiceError(f"Unexpected Garmin authentication error: {exc}") from exc
 
     if isinstance(login_result, tuple) and login_result and login_result[0] == "needs_mfa":
-        _PENDING_MFA_STATE[_pending_mfa_key(settings)] = {"client": client, "token_dir": str(token_dir)}
+        _PENDING_MFA_STATE[_pending_mfa_key(settings, credentials)] = {"client": client, "token_dir": str(token_dir)}
         raise GarminMFARequired(
             "Garmin requiere un codigo MFA para continuar. Ingresalo y volve a intentar."
         )
 
-    clear_pending_mfa(settings)
-    _clear_rate_limit(settings)
-    _clear_last_auth_error(settings)
+    clear_pending_mfa(settings, credentials)
+    _clear_rate_limit(settings, credentials)
+    _clear_last_auth_error(settings, credentials)
     _save_tokens(client, token_dir)
 
 
-def get_garmin_auth_context(settings: Settings, mfa_code: str | None = None) -> GarminAuthContext:
+def get_garmin_auth_context(
+    settings: Settings,
+    credentials: GarminCredentialBundle,
+    mfa_code: str | None = None,
+) -> GarminAuthContext:
     if not settings.garmin_enabled:
         raise GarminServiceError("Garmin sync is disabled. Set GARMIN_ENABLED=true to use it.")
 
-    if not settings.garmin_email or not settings.garmin_password:
-        raise GarminServiceError("Garmin credentials are missing. Complete GARMIN_EMAIL and GARMIN_PASSWORD in .env.")
+    if not credentials.email or not credentials.password:
+        raise GarminServiceError("Garmin credentials are missing for the selected athlete.")
 
-    token_dir = _token_dir(settings)
+    token_dir = _token_dir(settings, credentials)
     token_dir.mkdir(parents=True, exist_ok=True)
-    token_file = _token_file_path(settings)
+    token_file = _token_file_path(settings, credentials)
 
-    remaining_rate_limit = _remaining_rate_limit_seconds(settings)
+    remaining_rate_limit = _remaining_rate_limit_seconds(settings, credentials)
     if remaining_rate_limit is not None:
         wait_minutes = max(1, math.ceil(remaining_rate_limit / 60))
         raise GarminServiceError(
@@ -323,19 +329,20 @@ def get_garmin_auth_context(settings: Settings, mfa_code: str | None = None) -> 
         )
 
     if mfa_code:
-        pending_state = _PENDING_MFA_STATE.get(_pending_mfa_key(settings))
+        pending_state = _PENDING_MFA_STATE.get(_pending_mfa_key(settings, credentials))
         pending_client = pending_state.get("client") if pending_state else None
         if not isinstance(pending_client, Garmin):
             raise GarminServiceError("No hay un login MFA pendiente para continuar.")
         _complete_login_or_raise_mfa(
             settings,
+            credentials,
             pending_client,
             token_dir,
             lambda: pending_client.resume_login({}, mfa_code.strip()),
         )
         return GarminAuthContext(client=pending_client, token_dir=token_dir, token_file=token_file)
 
-    client = _new_garmin_client(settings)
+    client = _new_garmin_client(settings, credentials)
 
     if token_file.exists() and not _token_file_looks_usable(token_file):
         logger.warning("Garmin token file %s looks invalid. Removing it before login.", token_file)
@@ -346,6 +353,5 @@ def get_garmin_auth_context(settings: Settings, mfa_code: str | None = None) -> 
             return client.login(str(token_dir))
         return client.login()
 
-    _complete_login_or_raise_mfa(settings, client, token_dir, _login)
-
+    _complete_login_or_raise_mfa(settings, credentials, client, token_dir, _login)
     return GarminAuthContext(client=client, token_dir=token_dir, token_file=token_file)

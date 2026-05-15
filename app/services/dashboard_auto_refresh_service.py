@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -25,11 +25,11 @@ from app.services.analysis_v2.session_analysis_service import run_session_analys
 from app.services.garmin.activity_sync import sync_activities_by_date
 from app.services.health_auto_sync_service import get_health_sync_state, run_health_auto_sync
 from app.services.session_match_service import auto_match_activity, preview_activity_match
+from app.utils.datetime_utils import local_date_range_utc_bounds, now_utc, today_local, to_local_date
 
 
 logger = logging.getLogger(__name__)
 
-APP_LOCAL_TIMEZONE = timezone(timedelta(hours=-3), name="America/Buenos_Aires")
 ACTIVITY_REFRESH_COOLDOWN_MINUTES = 15
 HEALTH_REFRESH_COOLDOWN_HOURS = 6
 AUTO_LINK_SAFE_SCORE = 85.0
@@ -42,7 +42,7 @@ def run_dashboard_auto_refresh(
     selected_date: date,
 ) -> dict[str, Any]:
     settings = get_settings()
-    now = datetime.now(timezone.utc)
+    now = now_utc()
     target_date = min(selected_date, _local_date(now))
 
     steps: list[dict[str, str]] = []
@@ -296,7 +296,7 @@ def _run_linking_step(
     selected_date: date,
     target_date: date,
 ) -> dict[str, Any]:
-    if selected_date > datetime.now(APP_LOCAL_TIMEZONE).date():
+    if selected_date > today_local():
         return {"step": _build_step("activity_linking", "skipped", "Vinculación: fecha futura, sin acción."), "updated": False, "errors": []}
 
     session = _get_first_session_for_date(db, athlete_id, training_plan, target_date)
@@ -345,7 +345,7 @@ def _run_session_analysis_step(
     selected_date: date,
     target_date: date,
 ) -> dict[str, Any]:
-    if selected_date > datetime.now(APP_LOCAL_TIMEZONE).date():
+    if selected_date > today_local():
         return {"step": _build_step("session_analysis", "skipped", "Análisis: fecha futura, sin acción."), "updated": False, "errors": []}
 
     activities = _get_activities_for_date(db, athlete_id, target_date)
@@ -494,8 +494,14 @@ def _get_first_session_for_date(
 
 
 def _get_activities_for_date(db: Session, athlete_id: int, reference_date: date) -> list[GarminActivity]:
-    start_dt = datetime.combine(reference_date - timedelta(days=1), datetime.min.time())
-    end_dt = datetime.combine(reference_date + timedelta(days=2), datetime.min.time())
+    athlete = db.get(Athlete, athlete_id)
+    start_dt, end_dt = local_date_range_utc_bounds(
+        reference_date,
+        reference_date,
+        athlete=athlete,
+        days_before=1,
+        days_after=1,
+    )
     statement = (
         select(GarminActivity)
         .options(
@@ -531,8 +537,10 @@ def _elapsed_since(earlier: datetime, now: datetime) -> timedelta:
 
 
 def _local_date(value: datetime) -> date:
-    current = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    return current.astimezone(APP_LOCAL_TIMEZONE).date()
+    local_value = to_local_date(value)
+    if local_value is None:
+        return today_local()
+    return local_value
 
 
 def _controlled_error_message(exc: Exception) -> str:

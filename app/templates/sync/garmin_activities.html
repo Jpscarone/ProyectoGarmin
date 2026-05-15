@@ -13,6 +13,7 @@
             {% if selected_athlete %}
             <p class="text-muted"><strong>Atleta seleccionado:</strong> {{ selected_athlete.name }}</p>
             {% endif %}
+            <p class="text-muted"><strong>Zona horaria:</strong> {{ selected_timezone_name }}</p>
         </div>
     </div>
 
@@ -115,6 +116,85 @@
     <section class="panel panel-subtle">
         <div class="section-heading">
             <div>
+                <p class="eyebrow">Jobs programados</p>
+                <h2>Ultimas corridas</h2>
+            </div>
+        </div>
+        <div class="detail-grid sync-summary">
+            {% set morning_job = scheduled_sync_overview.morning_health %}
+            <div class="detail-item detail-item-full">
+                <strong>Morning health:</strong>
+                {% if morning_job %}
+                    {{ morning_job.status }} | {{ morning_job.finished_at_label or morning_job.started_at_label }}<br>
+                    {{ morning_job.message }}<br>
+                    {{ morning_job.counts_label }}
+                {% else %}
+                    Sin corridas registradas.
+                {% endif %}
+            </div>
+            {% set evening_job = scheduled_sync_overview.evening_full %}
+            <div class="detail-item detail-item-full">
+                <strong>Evening full:</strong>
+                {% if evening_job %}
+                    {{ evening_job.status }} | {{ evening_job.finished_at_label or evening_job.started_at_label }}<br>
+                    {{ evening_job.message }}<br>
+                    {{ evening_job.counts_label }}
+                {% else %}
+                    Sin corridas registradas.
+                {% endif %}
+            </div>
+            {% set resolve_job = scheduled_sync_overview.resolve_pending %}
+            <div class="detail-item detail-item-full">
+                <strong>Resolve pending:</strong>
+                {% if resolve_job %}
+                    {{ resolve_job.status }} | {{ resolve_job.finished_at_label or resolve_job.started_at_label }}<br>
+                    {{ resolve_job.message }}<br>
+                    {{ resolve_job.counts_label }}
+                {% else %}
+                    Sin corridas registradas.
+                {% endif %}
+            </div>
+        </div>
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Historial</p>
+                <h2>Jobs recientes</h2>
+            </div>
+        </div>
+        {% if scheduled_sync_history %}
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Fecha/hora local</th>
+                    <th>Job</th>
+                    <th>Estado</th>
+                    <th>Resultado</th>
+                    <th>Contadores</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in scheduled_sync_history %}
+                <tr>
+                    <td>{{ item.finished_at_label or item.started_at_label }}</td>
+                    <td>{{ item.job_type }}</td>
+                    <td>{{ item.status }}</td>
+                    <td>{{ item.message }}</td>
+                    <td>{{ item.counts_label }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty-state">Todavia no hay historial de jobs programados.</p>
+        {% endif %}
+    </section>
+
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
                 <p class="eyebrow">Acciones manuales</p>
                 <h2>Forzar sincronizacion</h2>
                 <p class="text-muted">Estas acciones son de emergencia o mantenimiento. El flujo principal vive en Actividades y Salud.</p>
@@ -134,6 +214,11 @@
             <form method="post" action="/sync/garmin/all">
                 <div class="form-actions">
                     <button class="button button-secondary" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Forzar todo</button>
+                </div>
+            </form>
+            <form method="post" action="/sync/garmin/resolve-pending">
+                <div class="form-actions">
+                    <button class="button button-utility" type="submit">Resolver pendientes ahora</button>
                 </div>
             </form>
         </div>

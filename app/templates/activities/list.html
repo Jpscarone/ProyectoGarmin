@@ -106,8 +106,8 @@
                 {% set plan_context = activity_plan_context.get(activity.id) if activity_plan_context else none %}
                 <tr>
                     <td class="activity-table-date">
-                        <strong>{{ activity.start_time.strftime('%d/%m/%Y') if activity.start_time else '-' }}</strong>
-                        <span>{{ activity.start_time.strftime('%H:%M') if activity.start_time else '' }}</span>
+                        <strong>{{ format_local_datetime(activity.start_time, fmt='%d/%m/%Y', empty='-') }}</strong>
+                        <span>{{ format_local_datetime(activity.start_time, fmt='%H:%M', empty='') }}</span>
                     </td>
                     <td class="activity-table-main">
                         <strong>{{ activity.activity_name or '-' }}</strong>

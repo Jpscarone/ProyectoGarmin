@@ -21,11 +21,10 @@ from app.services.planning.presentation import (
     build_session_display_blocks_for_session,
     derive_session_metrics,
 )
+from app.utils.datetime_utils import to_local_date, to_local_datetime
 
 
 logger = logging.getLogger(__name__)
-
-APP_LOCAL_TIMEZONE = timezone(timedelta(hours=-3), name="America/Buenos_Aires")
 
 AUTO_MATCH_DIRECT_SCORE = 80.0
 AUTO_MATCH_REVIEW_SCORE = 65.0
@@ -1190,12 +1189,14 @@ def _get_planned_session_with_context(db: Session, planned_session_id: int) -> P
 def _activity_local_date(activity: GarminActivity) -> date | None:
     if activity.start_time is None:
         return None
-    return _activity_local_datetime(activity.start_time).date()
+    return to_local_date(activity.start_time, athlete=activity.athlete)
 
 
 def _activity_local_datetime(value: datetime) -> datetime:
-    current = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-    return current.astimezone(APP_LOCAL_TIMEZONE)
+    local_value = to_local_datetime(value)
+    if local_value is None:
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    return local_value
 
 
 def _normalize_sport(value: str | None) -> str | None:
