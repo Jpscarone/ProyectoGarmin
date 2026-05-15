@@ -28,7 +28,7 @@ def upgrade() -> None:
     sa.Column('activity_name', sa.String(length=255), nullable=True),
     sa.Column('sport_type', sa.String(length=100), nullable=True),
     sa.Column('discipline_variant', sa.String(length=100), nullable=True),
-    sa.Column('is_multisport', sa.Boolean(), server_default='0', nullable=False),
+    sa.Column('is_multisport', sa.Boolean(), server_default=sa.false(), nullable=False),
     sa.Column('start_time', sa.DateTime(timezone=True), nullable=True),
     sa.Column('end_time', sa.DateTime(timezone=True), nullable=True),
     sa.Column('duration_sec', sa.Integer(), nullable=True),

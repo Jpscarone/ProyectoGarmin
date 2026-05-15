@@ -7,3 +7,6 @@ __pycache__/
 *$py.class
 *.pyo
 *.pyd
+training_app.db
+temp_migration_test.db
+alembic_postgres_preview.sql

@@ -253,6 +253,31 @@ class DashboardRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("Seleccioná un atleta para actualizar el dashboard.", response.text)
 
+    def test_dashboard_auto_refresh_with_selected_athlete_does_not_raise_name_error(self) -> None:
+        athlete = Athlete(name="Atleta Refresh")
+        self.db.add(athlete)
+        self.db.commit()
+        self.db.refresh(athlete)
+        plan = TrainingPlan(
+            athlete_id=athlete.id,
+            name="Plan Refresh",
+            sport_type="running",
+            start_date=date(2026, 4, 20),
+            end_date=date(2026, 5, 20),
+            status="active",
+        )
+        self.db.add(plan)
+        self.db.commit()
+        self.db.refresh(plan)
+
+        response = self.client.post(
+            f"/dashboard/auto-refresh?athlete_id={athlete.id}&training_plan_id={plan.id}&selected_date=2026-05-02",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("name 'Athlete' is not defined", response.text)
+
     @patch("app.main.run_dashboard_auto_refresh")
     def test_dashboard_auto_refresh_failure_still_returns_dashboard_partial(self, refresh_mock) -> None:
         athlete = Athlete(name="Atleta Auto")

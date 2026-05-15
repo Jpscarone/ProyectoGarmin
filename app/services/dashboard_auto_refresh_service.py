@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.db.models.activity_session_match import ActivitySessionMatch
+from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.planned_session import PlannedSession
