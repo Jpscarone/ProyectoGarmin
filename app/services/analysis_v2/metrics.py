@@ -4,7 +4,13 @@ from statistics import mean, pstdev
 from typing import Any
 
 from app.services.analysis_v2 import rules
-from app.services.analysis_v2.scoring import average_scores, closeness_score_from_delta_pct, range_target_score, stability_score_from_cv
+from app.services.analysis_v2.scoring import (
+    average_scores,
+    closeness_score_from_delta_pct,
+    enrich_hr_target_evaluation,
+    range_target_score,
+    stability_score_from_cv,
+)
 from app.services.modality import normalize_modality, preferred_modality
 from app.services.analysis_v2.structured import (
     _step_label,
@@ -159,7 +165,15 @@ def _build_planned_vs_actual(context: Any, modality_info: dict[str, Any]) -> dic
                 note=note,
             )
 
+    planned_date = context.planned_session.session_date
+    executed_date = context.activity.local_date
+    days_offset = (executed_date - planned_date).days if planned_date and executed_date else None
+
     return {
+        "planned_date": planned_date.isoformat() if planned_date else None,
+        "executed_date": executed_date.isoformat() if executed_date else None,
+        "days_offset": days_offset,
+        "executed_on_different_day": bool(days_offset) if days_offset is not None else False,
         "duration": _comparison_metric(context.planned_session.expected_duration_min, actual_duration_min),
         "distance": distance_metric,
         "elevation": elevation_metric,
@@ -342,6 +356,19 @@ def _build_lap_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[st
 
     matched_count = structured_match["matched_count"]
     alignment_score = structured_match.get("alignment_score")
+    extra_lap_classifications = _classify_extra_laps(structured_match.get("unmatched_laps", []), laps)
+    residual_lap_indexes = {
+        item["lap_index"]
+        for item in extra_lap_classifications
+        if item["classification"] == "residual_garmin_close"
+    }
+    has_only_residual_extra_laps = bool(
+        not structured_match.get("unmatched_steps")
+        and alignment_score is not None
+        and alignment_score > 95
+        and structured_match.get("unmatched_laps")
+        and all(index in residual_lap_indexes for index in structured_match.get("unmatched_laps", []))
+    )
 
     pairings: list[dict[str, Any]] = []
     for pairing in structured_match.get("matched_pairs", []):
@@ -381,6 +408,9 @@ def _build_lap_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[st
         "matched_count": matched_count,
         "missing_planned_steps": max(0, len(expanded_steps) - matched_count),
         "extra_laps": max(0, len(laps) - matched_count),
+        "effective_extra_laps": 0 if has_only_residual_extra_laps else max(0, len(laps) - matched_count),
+        "extra_lap_classifications": extra_lap_classifications,
+        "has_only_residual_extra_laps": has_only_residual_extra_laps,
         "alignment_score": alignment_score,
         "pairs": pairings,
         "structured_match": structured_match,
@@ -563,7 +593,7 @@ def _build_flags(
         (context.activity.duration_sec or 0) >= rules.HYDRATION_RISK_DURATION_SEC
         and (context.activity.avg_temperature_c or 0) >= rules.HYDRATION_RISK_TEMP_C
     )
-    lap_total = laps["matched_count"] + laps["missing_planned_steps"] + laps["extra_laps"]
+    lap_total = laps["matched_count"] + laps["missing_planned_steps"] + laps.get("effective_extra_laps", laps["extra_laps"])
     lap_coverage = (laps["matched_count"] / lap_total) if lap_total else 1.0
     manual_review_needed = bool(
         _normalized(context.activity.sport_type) != _normalized(context.planned_session.sport_type)
@@ -579,6 +609,7 @@ def _build_flags(
         "possible_heat_impact_flag": possible_heat_impact_flag,
         "heat_impact_flag": possible_heat_impact_flag,
         "cardiac_drift_flag": cardiac_drift_flag,
+        "cardiac_drift_severity": _cardiac_drift_severity(heart_rate.get("cardiac_drift_ratio") if heart_rate else None),
         "hydration_risk_flag": hydration_risk_flag,
         "manual_review_needed": manual_review_needed,
         **structured_flags,
@@ -718,12 +749,27 @@ def _modality_analysis_notes(context: Any, modality_info: dict[str, Any], planne
         and _has_planned_incline(context)
     ):
         notes.append("Sesion en cinta con inclinacion planificada: se prioriza duracion e intensidad sobre ritmo/distancia.")
+    if planned_vs_actual.get("executed_on_different_day"):
+        notes.append(
+            f"Sesion planificada para {planned_vs_actual.get('planned_date')}, ejecutada el {planned_vs_actual.get('executed_date')}."
+        )
+    if _has_custom_hr_targets(context):
+        notes.append(
+            "Garmin puede clasificar el estimulo con sus zonas internas, pero la adherencia principal se evalua contra los rangos HR personalizados del plan."
+        )
     return notes
 
 
 def _has_planned_incline(context: Any) -> bool:
     for step in list(getattr(context.planned_session, "steps", []) or []):
         if getattr(step, "incline_pct", None) is not None:
+            return True
+    return False
+
+
+def _has_custom_hr_targets(context: Any) -> bool:
+    for step in list(getattr(context.planned_session, "steps", []) or []):
+        if getattr(step, "target_type", None) == "hr" and getattr(step, "target_hr_min", None) is not None and getattr(step, "target_hr_max", None) is not None:
             return True
     return False
 
@@ -816,7 +862,15 @@ def _first_last_third_delta(values: list[float]) -> dict[str, float | None]:
 def _evaluate_step_target(step: Any, lap: Any) -> dict[str, Any] | None:
     target_type = step["target_type"] if isinstance(step, dict) else step.target_type
     if target_type == "hr":
-        return range_target_score(_get_lap_value(lap, "avg_hr"), _get_step_value(step, "target_hr_min"), _get_step_value(step, "target_hr_max"), rules.TARGET_MARGIN_HR)
+        actual = _get_lap_value(lap, "avg_hr")
+        minimum = _get_step_value(step, "target_hr_min")
+        maximum = _get_step_value(step, "target_hr_max")
+        return enrich_hr_target_evaluation(
+            range_target_score(actual, minimum, maximum, rules.TARGET_MARGIN_HR),
+            actual,
+            minimum,
+            maximum,
+        )
     if target_type == "pace":
         return range_target_score(
             _get_lap_value(lap, "avg_pace_sec_km"),
@@ -842,6 +896,37 @@ def _get_lap_value(lap: Any, field: str) -> Any:
     if isinstance(lap, dict):
         return lap.get(field)
     return getattr(lap, field, None)
+
+
+def _cardiac_drift_severity(drift_ratio: float | None) -> str | None:
+    if drift_ratio is None or drift_ratio <= 0.05:
+        return None
+    if drift_ratio > 0.12:
+        return "high"
+    if drift_ratio > 0.08:
+        return "relevant"
+    return "mild_moderate"
+
+
+def _classify_extra_laps(unmatched_lap_indexes: list[int], laps: list[Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for lap_index in unmatched_lap_indexes:
+        if lap_index < 0 or lap_index >= len(laps):
+            continue
+        lap = laps[lap_index]
+        duration_sec = _get_lap_value(lap, "duration_sec") or 0
+        distance_m = _get_lap_value(lap, "distance_m") or 0
+        is_residual = duration_sec <= 90 or distance_m <= 250
+        rows.append(
+            {
+                "lap_index": lap_index,
+                "duration_sec": duration_sec,
+                "distance_m": distance_m,
+                "classification": "residual_garmin_close" if is_residual else "extra_structural_lap",
+                "label": "lap residual / cierre Garmin no relevante" if is_residual else "lap extra estructural",
+            }
+        )
+    return rows
 
 
 def _session_target_zone_name(context: Any) -> str | None:

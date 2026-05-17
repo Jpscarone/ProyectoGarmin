@@ -4,6 +4,7 @@ from datetime import date
 from unicodedata import normalize
 
 from app.services.analysis_v2.metrics import compute_session_metrics
+from app.services.analysis_v2.narrative import _build_fallback_output
 from app.services.analysis_v2.structured import detect_session_intent, expand_planned_steps, match_steps_to_laps
 from app.services.analysis_v2.session_analysis_service import (
     ActivityContext,
@@ -354,14 +355,14 @@ def test_pace_direction_fast_vs_slow():
     assert any("debajo" in (note or "") for note in notes)
 
 
-def test_hr_work_above_target_uses_correct_short_note():
+def test_hr_work_above_target_uses_fine_grained_short_note():
     steps = [_make_step(1, target_type="hr", target_hr_min=125, target_hr_max=140, duration_sec=600)]
     laps = [_make_lap(1, duration_sec=600, distance_m=2000, avg_hr=147, avg_pace_sec_km=330)]
     context = _make_context(steps, laps)
 
     metrics = compute_session_metrics(context)
 
-    assert metrics["block_analysis"][0]["short_note"] == "intensidad por encima del objetivo"
+    assert metrics["block_analysis"][0]["short_note"] == "claramente por encima del objetivo"
 
 
 def test_infer_zone_from_target_notes():
@@ -434,6 +435,51 @@ def test_custom_explicit_targets_flow_to_analysis_v2():
     assert block_analysis[0]["planned_target_max"] == 155
     assert block_analysis[1]["planned_target_min"] == 300
     assert block_analysis[1]["planned_target_max"] == 310
+
+
+def test_custom_hr_blocks_keep_minor_upper_deviation_contextual():
+    steps = [
+        _make_step(1, target_type="hr", target_hr_min=126, target_hr_max=140, duration_sec=1200),
+        _make_step(2, target_type="hr", target_hr_min=135, target_hr_max=148, duration_sec=3000),
+        _make_step(3, target_type="hr", target_hr_min=135, target_hr_max=150, duration_sec=1200),
+    ]
+    laps = [
+        _make_lap(1, duration_sec=1200, distance_m=3500, avg_hr=140, avg_pace_sec_km=343),
+        _make_lap(2, duration_sec=3000, distance_m=9000, avg_hr=148, avg_pace_sec_km=333),
+        _make_lap(3, duration_sec=1200, distance_m=3500, avg_hr=151, avg_pace_sec_km=343),
+        _make_lap(4, duration_sec=15, distance_m=20, avg_hr=145, avg_pace_sec_km=None),
+    ]
+    context = _make_context(steps, laps)
+    context.planned_session.session_date = date(2026, 5, 16)
+    context.activity.local_date = date(2026, 5, 17)
+    context.planned_session.expected_duration_min = 90
+    context.activity.duration_sec = 5415
+
+    metrics = compute_session_metrics(context)
+    # Use the reported drift value from the real scenario to validate the narrative branch.
+    metrics["heart_rate"]["cardiac_drift_ratio"] = 0.093
+    metrics["derived_flags"]["cardiac_drift_flag"] = True
+    metrics["derived_flags"]["cardiac_drift_severity"] = "relevant"
+    narrative = _build_fallback_output(context, metrics)
+
+    blocks = metrics["block_analysis"]
+    assert blocks[0]["status_detail"] == "within_range_upper_edge"
+    assert blocks[1]["status_detail"] == "within_range_upper_edge"
+    assert blocks[2]["status_detail"] == "slightly_above_range"
+    assert blocks[2]["delta_to_upper"] == 1.0
+    assert blocks[2]["short_note"] == "apenas por encima del objetivo"
+    assert metrics["derived_flags"]["minor_hr_upper_deviation_only_flag"] is True
+    assert metrics["derived_flags"]["work_block_over_target_flag"] is False
+    assert metrics["planned_vs_actual"]["planned_date"] == "2026-05-16"
+    assert metrics["planned_vs_actual"]["executed_date"] == "2026-05-17"
+    assert metrics["planned_vs_actual"]["days_offset"] == 1
+    assert metrics["planned_vs_actual"]["executed_on_different_day"] is True
+    assert metrics["laps"]["has_only_residual_extra_laps"] is True
+    assert metrics["laps"]["effective_extra_laps"] == 0
+    assert "intensidad global quedo controlada" in " ".join(narrative.key_positive_points).lower()
+    assert "deriva cardiaca relevante" in " ".join(narrative.key_risk_points).lower()
+    assert "recuperacion" in narrative.next_recommendation.lower()
+    assert "Los bloques de trabajo quedaron por encima" not in narrative.key_risk_points
 
 
 def test_indoor_cycling_distance_zero_does_not_penalize_compliance():

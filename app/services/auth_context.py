@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models.user import User
-from app.services.user_permission_service import normalize_user_role
+from app.services.user_permission_service import ROLE_ADMIN, normalize_user_role
 
 
 CURRENT_USER_SESSION_KEY = "current_user_id"
@@ -48,6 +48,10 @@ def require_role(user: User, *roles: str) -> User:
     if user.role not in roles:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No tienes permisos para esta acción.")
     return user
+
+
+def require_admin_user(request: Request, db: Session) -> User:
+    return require_role(require_current_user(request, db), ROLE_ADMIN)
 
 
 def login_user(request: Request, user: User) -> None:

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Mantenimiento | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Administracion</p>
+            <h1>Mantenimiento</h1>
+            <p class="text-muted">Herramientas seguras para soporte operativo, backups y tareas administrativas.</p>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+    {% if sync_result_message %}
+    <div class="alert alert-info">
+        {{ sync_result_message }}
+        {% if sync_remote_backup_filename %}<br>Backup remoto descargado: <code>{{ sync_remote_backup_filename }}</code>{% endif %}
+        {% if sync_local_backup_filename %}<br>Backup local preventivo: <code>{{ sync_local_backup_filename }}</code>{% endif %}
+    </div>
+    {% endif %}
+
+    <div class="maintenance-grid">
+        <article class="panel panel-subtle maintenance-card">
+            <div class="maintenance-card-header">
+                <div>
+                    <p class="eyebrow">Backup de base de datos</p>
+                    <h2>Crear backup manual</h2>
+                </div>
+                <span class="status-badge status-badge-manual">Protegido para admin</span>
+            </div>
+            <p class="text-muted">
+                Genera un backup PostgreSQL usando la configuracion actual del sistema y lo guarda en <code>var/backups/</code>.
+            </p>
+            <form method="post" action="/maintenance/database-backup" class="maintenance-action-form">
+                <button
+                    class="button"
+                    type="submit"
+                    onclick="return window.confirm('Se generara un nuevo backup de la base actual. Queres continuar?');"
+                >
+                    Crear backup de BD
+                </button>
+            </form>
+
+            <div class="maintenance-list-block">
+                <div class="inline-title-with-help">
+                    <h3>Backups recientes</h3>
+                </div>
+                {% if backups %}
+                <div class="table-wrap">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Archivo</th>
+                                <th>Tamano</th>
+                                <th>Fecha</th>
+                                <th>Accion</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for backup in backups %}
+                            <tr>
+                                <td><code>{{ backup.filename }}</code></td>
+                                <td>{{ backup.size_label }}</td>
+                                <td>{{ format_local_datetime(backup.created_at) }}</td>
+                                <td>
+                                    <a class="button button-secondary" href="/maintenance/database-backup/download/{{ backup.filename }}">Descargar</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="empty-state">Todavia no hay backups generados desde esta seccion.</p>
+                {% endif %}
+            </div>
+        </article>
+
+        <article class="panel panel-subtle maintenance-card">
+            <div class="maintenance-card-header">
+                <div>
+                    <p class="eyebrow">Emparejar BD VPS -> Local</p>
+                    <h2>{{ "Traer BD desde VPS" if local_db_sync_enabled else "Uso informativo" }}</h2>
+                </div>
+                <span class="status-badge status-badge-estimated">No se ejecuta desde produccion</span>
+            </div>
+            <div class="maintenance-copy">
+                <p>Esta accion reemplaza la base local por una copia de la base del VPS.</p>
+                <p>No modifica la base del VPS.</p>
+                <p>Antes de reemplazar la base local se creara un backup preventivo.</p>
+            </div>
+            <div class="alert alert-warning">
+                Reemplaza la base local completa. Confirma siempre el entorno antes de ejecutarlo.
+            </div>
+
+            {% if local_db_sync_enabled %}
+            <form method="post" action="/maintenance/sync-db-from-vps" class="maintenance-action-form">
+                <button
+                    class="button button-danger"
+                    type="submit"
+                    onclick="if (!window.confirm('Esto va a borrar y reemplazar la base local. Continuar?')) { return false; } this.disabled = true; this.textContent = 'Sincronizando...'; return true;"
+                >
+                    Traer BD desde VPS
+                </button>
+            </form>
+            <p class="text-muted">La ejecucion corre solo si APP_ENV=local, ENABLE_LOCAL_DB_SYNC=true y la base local apunta a localhost o 127.0.0.1.</p>
+            {% else %}
+            <p class="text-muted">{{ local_db_sync_hint }}</p>
+            <div class="maintenance-command-block">
+                <span class="maintenance-command-label">Comando sugerido</span>
+                <code>{{ sync_script_command }}</code>
+            </div>
+            {% if sync_script_exists %}
+            <p class="text-muted">El script <code>scripts/sync_db_from_vps.ps1</code> existe y puede ejecutarse localmente.</p>
+            {% else %}
+            <p class="text-muted">El script <code>scripts/sync_db_from_vps.ps1</code> todavia no existe. Queda documentado como siguiente paso seguro para el flujo local.</p>
+            {% endif %}
+            {% endif %}
+        </article>
+    </div>
+</section>
+{% endblock %}

@@ -20,6 +20,10 @@
                 <a href="/health{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Salud</a>
                 <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Sync Garmin</a>
                 <a href="/garmin/account">Cuenta Garmin</a>
+                {% if request.state.current_user.role == "admin" %}
+                <a href="/maintenance">Mantenimiento</a>
+                <a href="/admin/users">Usuarios</a>
+                {% endif %}
                 {% endif %}
             </nav>
             <div class="top-context">

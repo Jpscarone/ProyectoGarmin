@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, time
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, Time, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, Time, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -45,7 +45,7 @@ class PlannedSession(Base):
     target_power_zone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     target_rpe_zone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     target_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    is_key_session: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_key_session: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completion_source: Mapped[str | None] = mapped_column(String(20), nullable=True)
     manual_duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)

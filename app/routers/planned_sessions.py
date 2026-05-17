@@ -543,6 +543,7 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
     charts = _build_analysis_chart_data(metrics, context_payload)
     recent_comparison = _build_recent_comparison_view(metrics, context_payload, linked_activity)
     technical = _build_technical_view(metrics_payload, context_payload, analysis)
+    execution_context = _build_analysis_execution_context(metrics)
 
     return {
         "state": {
@@ -560,6 +561,7 @@ def _build_session_analysis_v2_view_model(planned_session, linked_activity, anal
         "positives": structured_output.get("key_positive_points") or [],
         "risks": structured_output.get("key_risk_points") or [],
         "analysis_notes": ((metrics.get("compliance") or {}).get("notes") or []) if isinstance(metrics, dict) else [],
+        "execution_context": execution_context,
         "recommendation": analysis.next_recommendation if analysis and analysis.next_recommendation else _empty_recommendation_copy(status_value, linked_activity is not None),
         "recommendation_is_ai_generated": is_ai_generated,
         "session_type_detected": structured_output.get("session_type_detected") or "-",
@@ -767,6 +769,46 @@ def _build_technical_view(metrics_payload: dict[str, Any], context_payload: dict
         "matching_rows": matching_rows,
         "error_message": analysis.error_message if analysis else None,
     }
+
+
+def _build_analysis_execution_context(metrics: dict[str, Any]) -> dict[str, Any]:
+    planned_vs_actual = metrics.get("planned_vs_actual") or {}
+    laps = metrics.get("laps") or {}
+    flags = metrics.get("derived_flags") or {}
+    cards: list[dict[str, str]] = []
+    if planned_vs_actual.get("executed_on_different_day"):
+        cards.append(
+            {
+                "label": "Fecha",
+                "value": f"Planificada {planned_vs_actual.get('planned_date')} | ejecutada {planned_vs_actual.get('executed_date')}",
+                "class": "status-badge-manual",
+            }
+        )
+    if flags.get("minor_hr_upper_deviation_only_flag"):
+        cards.append(
+            {
+                "label": "FC personalizada",
+                "value": "Intensidad global controlada con superacion puntual leve",
+                "class": "status-badge-garmin",
+            }
+        )
+    if flags.get("cardiac_drift_severity") in {"relevant", "high"}:
+        cards.append(
+            {
+                "label": "Deriva cardiaca",
+                "value": "Relevante" if flags.get("cardiac_drift_severity") == "relevant" else "Alta",
+                "class": "status-badge-active",
+            }
+        )
+    if laps.get("has_only_residual_extra_laps"):
+        cards.append(
+            {
+                "label": "Laps extra",
+                "value": "Cierre Garmin residual no relevante",
+                "class": "status-badge-empty",
+            }
+        )
+    return {"cards": cards}
 
 
 def _build_session_detail_view_model(planned_session, analysis_v2: SessionAnalysis | None) -> dict[str, Any]:
@@ -1196,6 +1238,17 @@ def _normalized_sport(value: str | None) -> str:
 
 
 def _v2_step_status_display(pair: dict[str, Any], target_evaluation: dict[str, Any] | None) -> tuple[str, str, str]:
+    status_detail = target_evaluation.get("status_detail") if target_evaluation else None
+    if status_detail == "within_range_upper_edge":
+        return ("correct", "Limite superior", "status-badge-manual")
+    if status_detail == "slightly_above_range":
+        return ("partial", "Apenas alto", "status-badge-estimated")
+    if status_detail == "above_range":
+        return ("partial", "Por encima", "status-badge-active")
+    if status_detail == "clearly_above_range":
+        return ("partial", "Claramente alto", "status-badge-active")
+    if status_detail == "below_range":
+        return ("partial", "Por debajo", "status-badge-active")
     if target_evaluation and target_evaluation.get("within_range") is True:
         return ("correct", "Correcto", "status-badge-garmin")
     if target_evaluation and target_evaluation.get("status") in {"above_range", "below_range"}:
@@ -1253,6 +1306,15 @@ def _technical_matching_actual_label(pair: dict[str, Any]) -> str:
 
 def _technical_matching_status_label(pair: dict[str, Any]) -> str:
     target_evaluation = pair.get("target_evaluation") or {}
+    detail_label = {
+        "within_range_upper_edge": "Limite superior",
+        "slightly_above_range": "Apenas alto",
+        "above_range": "Por encima",
+        "clearly_above_range": "Claramente alto",
+        "below_range": "Por debajo",
+    }.get(target_evaluation.get("status_detail"))
+    if detail_label:
+        return detail_label
     if target_evaluation.get("within_range") is True:
         return "Correcto"
     if target_evaluation.get("status") == "above_range":
@@ -1264,6 +1326,13 @@ def _technical_matching_status_label(pair: dict[str, Any]) -> str:
 
 def _technical_matching_status_class(pair: dict[str, Any]) -> str:
     target_evaluation = pair.get("target_evaluation") or {}
+    status_detail = target_evaluation.get("status_detail")
+    if status_detail == "within_range_upper_edge":
+        return "status-badge-manual"
+    if status_detail == "slightly_above_range":
+        return "status-badge-estimated"
+    if status_detail in {"above_range", "clearly_above_range", "below_range"}:
+        return "status-badge-active"
     if target_evaluation.get("within_range") is True:
         return "status-badge-garmin"
     if target_evaluation.get("status") in {"above_range", "below_range"}:
@@ -1313,6 +1382,19 @@ def _technical_matching_rejected_label(candidates: Any) -> str:
 def _v2_pair_comment(pair: dict[str, Any], target_evaluation: dict[str, Any] | None) -> str | None:
     target_zone = pair.get("target_zone")
     target_source = pair.get("target_source")
+    status_detail = target_evaluation.get("status_detail") if target_evaluation else None
+    if status_detail == "within_range_upper_edge":
+        return "Quedo dentro del rango, en el limite superior."
+    if status_detail == "slightly_above_range":
+        delta = target_evaluation.get("delta_to_upper")
+        suffix = f" por {delta:g} bpm" if isinstance(delta, (int, float)) else ""
+        return f"Quedo apenas por encima del objetivo{suffix}."
+    if status_detail == "above_range":
+        return "La intensidad real quedo por encima del objetivo del bloque."
+    if status_detail == "clearly_above_range":
+        return "La intensidad real quedo claramente por encima del objetivo del bloque."
+    if status_detail == "below_range":
+        return "La intensidad real quedo por debajo del objetivo del bloque."
     if target_zone and target_source == "inferred":
         return f"Target {target_zone} (inferido)."
     if target_evaluation and target_evaluation.get("status") == "above_range":

@@ -62,6 +62,25 @@
 </section>
 {% endif %}
 
+{% if view_model.execution_context.cards %}
+<section class="panel analysis-v2-context-panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Matices de ejecucion</p>
+            <h2>Contexto que cambia la lectura</h2>
+        </div>
+    </div>
+    <div class="analysis-v2-context-row">
+        {% for item in view_model.execution_context.cards %}
+        <div class="analysis-v2-context-pill {{ item.class }}">
+            <span>{{ item.label }}</span>
+            <strong>{{ item.value }}</strong>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
 <section class="panel analysis-v2-hero">
     <div class="analysis-v2-conclusion-card">
         <p class="eyebrow">Conclusion principal</p>

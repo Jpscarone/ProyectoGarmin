@@ -7,7 +7,7 @@ Create Date: 2026-03-22
 
 from __future__ import annotations
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -45,6 +45,51 @@ def _is_sqlite() -> bool:
 
 
 def upgrade() -> None:
+    if context.is_offline_mode():
+        op.add_column("training_plans", sa.Column("sport_type", sa.String(length=100), nullable=True))
+        op.add_column("goals", sa.Column("training_plan_id", sa.Integer(), nullable=True))
+        op.add_column("goals", sa.Column("goal_role", sa.String(length=20), nullable=True))
+        op.create_index(op.f("ix_goals_training_plan_id"), "goals", ["training_plan_id"], unique=False)
+        op.create_foreign_key(
+            "fk_goals_training_plan_id_training_plans",
+            "goals",
+            "training_plans",
+            ["training_plan_id"],
+            ["id"],
+        )
+        op.execute(
+            """
+            UPDATE goals
+            SET training_plan_id = (
+                SELECT training_plans.id
+                FROM training_plans
+                WHERE training_plans.goal_id = goals.id
+                LIMIT 1
+            )
+            WHERE id IN (SELECT goal_id FROM training_plans WHERE goal_id IS NOT NULL)
+            """
+        )
+        op.execute(
+            """
+            UPDATE goals
+            SET goal_role = 'primary'
+            WHERE id IN (SELECT goal_id FROM training_plans WHERE goal_id IS NOT NULL)
+            """
+        )
+        op.execute(
+            """
+            UPDATE training_plans
+            SET sport_type = (
+                SELECT goals.sport_type
+                FROM goals
+                WHERE goals.id = training_plans.goal_id
+                LIMIT 1
+            )
+            WHERE goal_id IS NOT NULL
+            """
+        )
+        return
+
     training_plan_columns = _column_names("training_plans")
     if "sport_type" not in training_plan_columns:
         op.add_column("training_plans", sa.Column("sport_type", sa.String(length=100), nullable=True))
@@ -126,6 +171,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if context.is_offline_mode():
+        op.drop_constraint("fk_goals_training_plan_id_training_plans", "goals", type_="foreignkey")
+        op.drop_index(op.f("ix_goals_training_plan_id"), table_name="goals")
+        op.drop_column("goals", "goal_role")
+        op.drop_column("goals", "training_plan_id")
+        op.drop_column("training_plans", "sport_type")
+        return
+
     goal_columns = _column_names("goals")
     goal_foreign_keys = _foreign_key_names("goals")
     goal_indexes = _index_names("goals")

@@ -12,6 +12,7 @@ from app.db.session import SessionLocal, get_db
 from app.routes.mcp_api import router as api_mcp_router
 from app.routers.activities import router as activities_router
 from app.routers.activity_matching import router as activity_matching_router
+from app.routers.admin_users import router as admin_users_router
 from app.routers.analysis import router as analysis_router
 from app.routers.auth import router as auth_router
 from app.routers.athletes import router as athletes_router
@@ -20,6 +21,7 @@ from app.routers.garmin_health_sync import router as garmin_health_sync_router
 from app.routers.garmin_sync import router as garmin_sync_router
 from app.routers.goals import router as goals_router
 from app.routers.health import router as health_router
+from app.routers.maintenance import router as maintenance_router
 from app.routers.planned_sessions import router as planned_sessions_router
 from app.routers.planned_session_steps import router as planned_session_steps_router
 from app.routers.session_groups import router as session_groups_router
@@ -165,6 +167,7 @@ def _dump_context_session(session: dict) -> str:
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(auth_router)
+app.include_router(admin_users_router)
 app.include_router(activities_router)
 app.include_router(activity_matching_router)
 app.include_router(api_mcp_router)
@@ -172,6 +175,7 @@ app.include_router(analysis_router)
 app.include_router(athletes_router)
 app.include_router(garmin_account_router)
 app.include_router(health_router)
+app.include_router(maintenance_router)
 app.include_router(garmin_health_sync_router)
 app.include_router(garmin_sync_router)
 app.include_router(goals_router)

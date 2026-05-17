@@ -66,6 +66,11 @@ Uso del contexto:
 Reglas de interpretacion de pace:
 - Si el ritmo real es mas rapido que el rango objetivo, la intensidad fue mas exigente (no "por debajo").
 - Si el ritmo real es mas lento que el rango objetivo, la intensidad fue menor (por debajo del objetivo).
+
+Reglas para HR personalizada:
+- Si hay rangos HR_MIN/HR_MAX del plan, usalos como referencia principal; las zonas Garmin son solo contexto secundario.
+- No conviertas una superacion aislada de hasta 2 bpm en una conclusion global de intensidad excesiva.
+- Si hay deriva cardiaca relevante, podes usarla para matizar un ultimo bloque apenas por encima del rango.
 """.strip()
 
 
@@ -627,7 +632,13 @@ def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> Narrativ
         risks.insert(0, "Los bloques de trabajo quedaron por debajo del objetivo planificado.")
         recommendations.insert(0, "Buscar sostener el ritmo objetivo en los bloques de trabajo.")
         tags.append("trabajo_bajo")
-    if flags.get("work_block_over_target_flag"):
+    if flags.get("minor_hr_upper_deviation_only_flag"):
+        positives.append("La intensidad global quedo controlada, con una ligera superacion puntual del objetivo.")
+        if flags.get("cardiac_drift_flag"):
+            risks.append("Se detecto deriva cardiaca relevante, lo que puede explicar que el ultimo bloque se haya ido apenas por encima del rango.")
+            recommendations.append("Priorizar recuperacion y observar si la deriva se repite en sesiones similares.")
+        tags.append("hr_custom_controlada")
+    elif flags.get("work_block_over_target_flag"):
         risks.insert(0, "Los bloques de trabajo quedaron por encima del objetivo planificado.")
         recommendations.insert(0, "Controlar el ritmo para no exceder la zona objetivo en los bloques clave.")
         tags.append("trabajo_alto")
@@ -644,6 +655,8 @@ def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> Narrativ
         tags.append("hidratacion")
     if flags.get("cardiac_drift_flag"):
         risks.append("Aparecen indicios de deriva cardiaca con estabilidad de ritmo razonable.")
+        if not recommendations:
+            recommendations.append("Priorizar recuperacion y observar la respuesta cardiaca en la proxima sesion.")
         tags.append("drift_cardiaco")
 
     if recent:
@@ -746,6 +759,10 @@ def _build_summary_short(context: Any, planned_vs_actual: Mapping[str, Any], ove
         bits.append(f"distancia al {round(distance_ratio)}%")
     elif (planned_vs_actual.get("distance") or {}).get("note"):
         bits.append(str((planned_vs_actual.get("distance") or {}).get("note")))
+    if planned_vs_actual.get("executed_on_different_day"):
+        bits.append(
+            f"planificada para {planned_vs_actual.get('planned_date')} y ejecutada el {planned_vs_actual.get('executed_date')}"
+        )
     return ", ".join(bits) + "."
 
 
@@ -799,6 +816,10 @@ def _build_analysis_natural(
         contextual_notes.append("aparecen signos de deriva cardiaca")
     if contextual_notes:
         fragments.append("En la interpretacion del esfuerzo, " + ", ".join(contextual_notes) + ".")
+    if planned_vs_actual.get("executed_on_different_day"):
+        fragments.append(
+            f"Sesion planificada para {planned_vs_actual.get('planned_date')}, ejecutada el {planned_vs_actual.get('executed_date')}."
+        )
 
     activity_count = weekly_context.get("activity_count")
     total_duration_sec = weekly_context.get("total_duration_sec")
@@ -962,6 +983,8 @@ def _quick_takeaway_opener(
         return f"La estructura real quedo algo desordenada{weekly_context_note} y eso complica la lectura fina."
     if dominant_issue == "controlled_without_extra_fatigue":
         return f"La sesion quedo controlada{weekly_context_note} y, mas importante, no parece haber dejado un costo extra innecesario."
+    if dominant_issue == "controlled_minor_hr_deviation":
+        return f"La intensidad global quedo controlada{weekly_context_note}, con una ligera superacion puntual del objetivo."
 
     if is_pre_race and fatigue is not None and fatigue < 65:
         return f"Para el momento del plan, la sesion deja una sensacion de afinacion bastante limpia{weekly_context_note}."
@@ -1044,6 +1067,10 @@ def _quick_takeaway_caution(
         if severity == "moderate":
             return "La estructura real se mezclo lo suficiente como para que la lectura por bloques pierda bastante claridad."
         return "El problema no fue solo la intensidad: la estructura real quedo demasiado mezclada y eso baja la confianza de la lectura."
+    if dominant_issue == "controlled_minor_hr_deviation":
+        if flags.get("cardiac_drift_flag"):
+            return "Se detecto deriva cardiaca relevante, lo que puede explicar que el ultimo bloque se haya ido apenas por encima del rango."
+        return "El unico matiz fue un bloque apenas por encima del rango, sin cambiar la lectura global."
     if flags.get("heart_rate_high_flag") and not flags.get("heat_impact_flag"):
         if is_pre_race:
             return "La intensidad se fue un poco arriba para una sesion de afinacion, aunque sin señales de descontrol fuerte."
@@ -1085,6 +1112,8 @@ def _quick_takeaway_learning(
         return "La principal correccion para la proxima es entrar antes en el ritmo objetivo para que el bloque deje exactamente el estimulo buscado."
     if dominant_issue == "structure_low_confidence":
         return "La principal enseñanza es ordenar mejor la ejecucion para que cada bloque se pueda leer y comparar con mas claridad."
+    if dominant_issue == "controlled_minor_hr_deviation":
+        return "La recomendacion practica es recuperar bien y mirar si esa deriva vuelve a aparecer antes de endurecer la lectura."
 
     session_intent = metrics.get("session_intent")
     if is_pre_race and days_to_goal is not None:
@@ -1106,6 +1135,8 @@ def _quick_takeaway_dominant_issue(
     scores: Mapping[str, Any],
     block_analysis: list[dict[str, Any]],
 ) -> str | None:
+    if flags.get("minor_hr_upper_deviation_only_flag"):
+        return "controlled_minor_hr_deviation"
     if flags.get("recovery_block_not_effective_flag"):
         return "recovery_not_effective"
     if flags.get("work_block_over_target_flag"):

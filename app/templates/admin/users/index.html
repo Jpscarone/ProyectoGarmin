@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Usuarios | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Administracion</p>
+            <h1>Usuarios</h1>
+            <p class="text-muted">Gestiona accesos, roles y atletas asignados sin exponer contraseñas.</p>
+        </div>
+        <a class="button" href="/admin/users/new">Nuevo usuario</a>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Email</th>
+                    <th>Rol</th>
+                    <th>Estado</th>
+                    <th>Atletas</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for managed_user in users %}
+                <tr>
+                    <td>{{ managed_user.id }}</td>
+                    <td>{{ managed_user.name }}</td>
+                    <td>{{ managed_user.email }}</td>
+                    <td>{{ managed_user.role }}</td>
+                    <td>
+                        <span class="status-badge {{ 'status-badge-garmin' if managed_user.is_active else 'status-badge-empty' }}">
+                            {{ 'Activo' if managed_user.is_active else 'Inactivo' }}
+                        </span>
+                    </td>
+                    <td>
+                        <strong>{{ managed_user.athlete_permissions | length }}</strong>
+                        {% if managed_user.athlete_permissions %}
+                        <div class="text-muted">
+                            {% for permission in managed_user.athlete_permissions %}
+                            {{ permission.athlete.name }}{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-muted">Sin asignaciones</div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="table-actions-inline">
+                            <a class="button button-secondary" href="/admin/users/{{ managed_user.id }}/edit">Editar</a>
+                            <a class="button button-utility" href="/admin/users/{{ managed_user.id }}/reset-password">Resetear contraseña</a>
+                            {% if managed_user.is_active %}
+                            <form method="post" action="/admin/users/{{ managed_user.id }}/deactivate">
+                                <button class="button button-danger" type="submit">Desactivar</button>
+                            </form>
+                            {% else %}
+                            <form method="post" action="/admin/users/{{ managed_user.id }}/activate">
+                                <button class="button" type="submit">Activar</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Vista por atleta</p>
+            <h2>Asignaciones</h2>
+            <p class="text-muted">Resumen de usuarios asignados y capacidades por atleta.</p>
+        </div>
+    </div>
+
+    {% if athletes %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Atleta</th>
+                    <th>Usuarios asignados</th>
+                    <th>Permisos</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for athlete in athletes %}
+                <tr>
+                    <td>{{ athlete.name }}</td>
+                    <td>
+                        {% if athlete.user_permissions %}
+                            {% for permission in athlete.user_permissions %}
+                            <div>{{ permission.user.name }} · {{ permission.user.email }}</div>
+                            {% endfor %}
+                        {% else %}
+                        <span class="text-muted">Sin usuarios asignados</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if athlete.user_permissions %}
+                            {% for permission in athlete.user_permissions %}
+                            <div>
+                                {{ permission.permission_role }}
+                                · ver {{ "si" if permission.can_view else "no" }}
+                                · editar {{ "si" if permission.can_edit else "no" }}
+                                · Garmin {{ "si" if permission.can_sync_garmin else "no" }}
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                        <span class="text-muted">Sin permisos configurados</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Todavia no hay atletas cargados.</p>
+    {% endif %}
+</section>
+{% endblock %}

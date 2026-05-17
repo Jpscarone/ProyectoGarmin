@@ -168,6 +168,61 @@ a {
     box-shadow: none;
 }
 
+.maintenance-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+.maintenance-card {
+    margin-top: 0;
+    display: grid;
+    gap: 1rem;
+    align-content: start;
+}
+
+.maintenance-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.maintenance-action-form {
+    display: inline-flex;
+}
+
+.maintenance-list-block {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.maintenance-copy {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.maintenance-command-block {
+    display: grid;
+    gap: 0.4rem;
+    padding: 1rem;
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    background: #fff;
+}
+
+.maintenance-command-block code {
+    font-size: 0.98rem;
+}
+
+.maintenance-command-label {
+    color: var(--muted);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 .section-heading {
     display: flex;
     align-items: start;
@@ -365,6 +420,30 @@ p {
 .status-badge-empty {
     background: rgba(148, 163, 184, 0.15);
     color: #475569;
+}
+
+.analysis-v2-context-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+}
+
+.analysis-v2-context-pill {
+    display: grid;
+    gap: 0.2rem;
+    min-width: 190px;
+    padding: 0.75rem 0.9rem;
+    border: 1px solid var(--surface-border);
+    border-radius: var(--radius-md);
+    background: rgba(248, 250, 252, 0.92);
+}
+
+.analysis-v2-context-pill span {
+    color: var(--muted);
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .status-badge-plan-active {

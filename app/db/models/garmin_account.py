@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, true, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -20,7 +20,7 @@ class GarminAccount(Base):
     garmin_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     garmin_password_encrypted: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     token_dir: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="1")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     status: Mapped[str] = mapped_column(String(32), nullable=False, server_default="active", default="active", index=True)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_activity_sync_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -1,6 +1,6 @@
 # training_app
 
-Base tecnica inicial de una aplicacion web en Python con FastAPI, SQLAlchemy, Alembic, Jinja2 y SQLite.
+Aplicacion web en Python con FastAPI, SQLAlchemy, Alembic, Jinja2 y PostgreSQL.
 
 ## Requisitos
 
@@ -34,6 +34,12 @@ pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
+Configurar `DATABASE_URL` para PostgreSQL local:
+
+```dotenv
+DATABASE_URL=postgresql://training_user:TU_PASSWORD@localhost/training_app
+```
+
 Variables Garmin minimas:
 
 - `GARMIN_ENABLED=true` para habilitar la sincronizacion manual
@@ -43,7 +49,13 @@ Variables Garmin minimas:
 
 ## Correr migraciones
 
-Aplicar la migracion base:
+Verificar la conexion a PostgreSQL:
+
+```powershell
+python scripts/check_db_connection.py
+```
+
+Aplicar migraciones:
 
 ```powershell
 alembic upgrade head
@@ -78,6 +90,26 @@ Flujo recomendado:
 5. lanzar la sincronizacion manual
 
 Si el login inicial requiere renovar la sesion, la libreria intentara guardar tokens en `GARMIN_TOKEN_DIR` para reutilizarlos en los siguientes syncs.
+
+## PostgreSQL local en Windows
+
+La guia completa para dejar tu entorno local alineado con el VPS esta en `docs/local-postgres-windows.md`.
+
+Resumen del flujo recomendado:
+
+```powershell
+pip install -r requirements.txt
+python scripts/check_db_connection.py
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+Si necesitas reiniciar la base local de desarrollo, usa:
+
+```powershell
+python scripts/reset_local_postgres_db.py
+alembic upgrade head
+```
 
 ## Estructura
 

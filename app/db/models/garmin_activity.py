@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, false, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -30,7 +30,7 @@ class GarminActivity(Base):
     sport_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
     discipline_variant: Mapped[str | None] = mapped_column(String(100), nullable=True)
     modality: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    is_multisport: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
+    is_multisport: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=false())
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_sec: Mapped[int | None] = mapped_column(Integer, nullable=True)

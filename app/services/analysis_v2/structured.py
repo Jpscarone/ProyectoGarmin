@@ -3,7 +3,13 @@ from __future__ import annotations
 from statistics import mean, pstdev
 from typing import Any
 
-from app.services.analysis_v2.scoring import average_scores, closeness_score_from_delta_pct, range_target_score, stability_score_from_cv
+from app.services.analysis_v2.scoring import (
+    average_scores,
+    closeness_score_from_delta_pct,
+    enrich_hr_target_evaluation,
+    range_target_score,
+    stability_score_from_cv,
+)
 
 
 STRUCTURED_INTENT_INTERVALS = {"interval_training", "mixed_structured"}
@@ -502,6 +508,8 @@ def build_block_analysis(match_result: dict[str, Any]) -> list[dict[str, Any]]:
         evaluation = None
         if target_type and actual_value is not None and (target_min is not None or target_max is not None):
             evaluation = range_target_score(actual_value, target_min, target_max, _target_margin(target_type))
+            if target_type == "hr":
+                evaluation = enrich_hr_target_evaluation(evaluation, actual_value, target_min, target_max)
         within_range = evaluation["within_range"] if evaluation else None
         score = evaluation["score"] if evaluation else None
         duration_delta_pct = _delta_pct(step.get("duration_sec"), lap.get("duration_sec"))
@@ -528,6 +536,11 @@ def build_block_analysis(match_result: dict[str, Any]) -> list[dict[str, Any]]:
                 "actual_value": actual_value,
                 "activity_lap_index": lap.get("index"),
                 "within_range": within_range,
+                "target_evaluation": evaluation,
+                "status_detail": evaluation.get("status_detail") if evaluation else None,
+                "delta_to_upper": evaluation.get("delta_to_upper") if evaluation else None,
+                "delta_to_lower": evaluation.get("delta_to_lower") if evaluation else None,
+                "range_position_label": evaluation.get("range_position_label") if evaluation else None,
                 "score": score,
                 "short_note": _block_short_note(within_range, target_type),
             }
@@ -583,8 +596,8 @@ def derive_structured_flags(session_intent: str, match_result: dict[str, Any], b
     recovery_blocks = [block for block in block_analysis if block["role"] == "recovery"]
 
     work_under = _count_target_status(work_blocks, "below_range")
-    work_over = _count_target_status(work_blocks, "above_range")
-    recovery_fast = _count_target_status(recovery_blocks, "above_range")
+    work_over = _count_actionable_above_target(work_blocks)
+    recovery_fast = _count_actionable_above_target(recovery_blocks)
 
     work_block_inconsistency_flag = False
     if work_blocks:
@@ -604,6 +617,7 @@ def derive_structured_flags(session_intent: str, match_result: dict[str, Any], b
         "recovery_block_not_effective_flag": recovery_block_not_effective_flag,
         "work_block_under_target_flag": work_under >= max(1, len(work_blocks) // 2) if work_blocks else False,
         "work_block_over_target_flag": work_over >= max(1, len(work_blocks) // 2) if work_blocks else False,
+        "minor_hr_upper_deviation_only_flag": _minor_hr_upper_deviation_only(block_analysis),
         "interval_structure_low_confidence_flag": bool(match_result.get("structural_confidence") is not None and match_result["structural_confidence"] < 55),
     }
 
@@ -720,7 +734,6 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
     within_range = block.get("within_range")
     if within_range is None or target_type is None:
         return block.get("short_note")
-
     direction, delta_value = _target_delta_direction(
         target_type,
         block.get("actual_value"),
@@ -729,7 +742,7 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
     )
 
     if role == "recovery" and target_type == "hr":
-        if within_range:
+        if block.get("status_detail") in {"within_range", "within_range_upper_edge"}:
             return "recuperacion efectiva"
         if recovery_block_not_effective_flag and direction == "above":
             return "recuperacion insuficiente para volver a Z2"
@@ -742,6 +755,20 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
         return "recuperacion fuera de rango"
 
     if role == "work":
+        if target_type == "hr":
+            status_detail = block.get("status_detail")
+            if status_detail == "within_range_upper_edge":
+                return "en el limite superior"
+            if status_detail == "slightly_above_range":
+                return "apenas por encima del objetivo"
+            if status_detail == "above_range":
+                return "por encima del objetivo"
+            if status_detail == "clearly_above_range":
+                return "claramente por encima del objetivo"
+            if status_detail == "below_range":
+                return "intensidad insuficiente"
+            if status_detail == "within_range":
+                return "dentro de rango"
         if within_range:
             return "trabajo dentro de rango"
         if direction == "above":
@@ -923,6 +950,30 @@ def _count_target_status(blocks: list[dict[str, Any]], status: str) -> int:
         if status == evaluation_status:
             count += 1
     return count
+
+
+def _count_actionable_above_target(blocks: list[dict[str, Any]]) -> int:
+    count = 0
+    for block in blocks:
+        if block.get("target_type") == "hr":
+            if block.get("status_detail") in {"above_range", "clearly_above_range"}:
+                count += 1
+            continue
+        if block.get("within_range") is False and block.get("actual_value") is not None and block.get("planned_target_max") is not None:
+            if block["actual_value"] > block["planned_target_max"]:
+                count += 1
+    return count
+
+
+def _minor_hr_upper_deviation_only(blocks: list[dict[str, Any]]) -> bool:
+    evaluable_hr = [block for block in blocks if block.get("target_type") == "hr" and block.get("status_detail")]
+    if not evaluable_hr:
+        return False
+    slight = [block for block in evaluable_hr if block.get("status_detail") == "slightly_above_range"]
+    actionable = [block for block in evaluable_hr if block.get("status_detail") in {"above_range", "clearly_above_range"}]
+    within = [block for block in evaluable_hr if str(block.get("status_detail")).startswith("within_range")]
+    max_delta = max((float(block.get("delta_to_upper") or 0) for block in slight), default=0.0)
+    return bool(len(slight) == 1 and not actionable and len(within) >= len(evaluable_hr) - 1 and max_delta <= 2.0)
 
 
 def _is_non_structural_lap(lap: Any) -> bool:

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Editar usuario | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Administracion</p>
+            <h1>Editar usuario</h1>
+            <p class="text-muted">{{ managed_user.name }} · {{ managed_user.email }}</p>
+        </div>
+        <div class="actions-inline">
+            <a class="button button-utility" href="/admin/users/{{ managed_user.id }}/reset-password">Resetear contraseña</a>
+            <a class="button button-secondary" href="/admin/users">Volver a usuarios</a>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/users/{{ managed_user.id }}/edit" class="form-grid">
+        <label class="field">
+            <span>Email</span>
+            <input name="email" type="email" value="{{ managed_user.email }}" required>
+        </label>
+        <label class="field">
+            <span>Nombre</span>
+            <input name="name" type="text" value="{{ managed_user.name }}" required>
+        </label>
+        <label class="field">
+            <span>Rol</span>
+            <select name="role" required>
+                <option value="admin" {% if managed_user.role == "admin" %}selected{% endif %}>admin</option>
+                <option value="coach" {% if managed_user.role == "coach" %}selected{% endif %}>coach</option>
+                <option value="athlete" {% if managed_user.role == "athlete" %}selected{% endif %}>athlete</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Estado</span>
+            <select name="is_active">
+                <option value="true" {% if managed_user.is_active %}selected{% endif %}>Activo</option>
+                <option value="false" {% if not managed_user.is_active %}selected{% endif %}>Inactivo</option>
+            </select>
+        </label>
+        <div class="form-actions">
+            <button class="button" type="submit">Guardar cambios</button>
+        </div>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Permisos</p>
+            <h2>Atletas asignados</h2>
+            <p class="text-muted">Edita capacidades por atleta sin revelar contraseñas ni hashes.</p>
+        </div>
+    </div>
+
+    {% if managed_user.athlete_permissions %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Atleta</th>
+                    <th>Rol</th>
+                    <th>Ver</th>
+                    <th>Editar</th>
+                    <th>Sync Garmin</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for permission in managed_user.athlete_permissions %}
+                <tr>
+                    <td>{{ permission.athlete.name }}</td>
+                    <td colspan="5">
+                        <form method="post" action="/admin/users/{{ managed_user.id }}/permissions/{{ permission.id }}/edit" class="form-grid form-grid-compact">
+                            <label class="field">
+                                <span>Rol</span>
+                                <select name="permission_role">
+                                    <option value="owner" {% if permission.permission_role == "owner" %}selected{% endif %}>owner</option>
+                                    <option value="coach" {% if permission.permission_role == "coach" %}selected{% endif %}>coach</option>
+                                    <option value="viewer" {% if permission.permission_role == "viewer" %}selected{% endif %}>viewer</option>
+                                </select>
+                            </label>
+                            <div class="field">
+                                <span>Capacidades</span>
+                                <label><input name="can_view" type="checkbox" {% if permission.can_view %}checked{% endif %}> Puede ver</label>
+                                <label><input name="can_edit" type="checkbox" {% if permission.can_edit %}checked{% endif %}> Puede editar</label>
+                                <label><input name="can_sync_garmin" type="checkbox" {% if permission.can_sync_garmin %}checked{% endif %}> Puede sincronizar Garmin</label>
+                            </div>
+                            <div class="form-actions">
+                                <button class="button button-secondary" type="submit">Guardar permiso</button>
+                                <button class="button button-danger" type="submit" formaction="/admin/users/{{ managed_user.id }}/permissions/{{ permission.id }}/delete">Eliminar</button>
+                            </div>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">Este usuario todavia no tiene atletas asignados.</p>
+    {% endif %}
+</section>
+
+<section class="panel panel-subtle">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Nuevo permiso</p>
+            <h2>Asignar atleta</h2>
+        </div>
+    </div>
+
+    <form method="post" action="/admin/users/{{ managed_user.id }}/permissions/add" class="form-grid">
+        <label class="field">
+            <span>Atleta</span>
+            <select name="athlete_id" required>
+                <option value="">Seleccionar atleta</option>
+                {% for athlete in athletes %}
+                <option value="{{ athlete.id }}">{{ athlete.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Rol del permiso</span>
+            <select name="permission_role">
+                <option value="owner">owner</option>
+                <option value="coach">coach</option>
+                <option value="viewer" selected>viewer</option>
+            </select>
+        </label>
+        <div class="field">
+            <span>Capacidades</span>
+            <label><input name="can_view" type="checkbox" checked> Puede ver</label>
+            <label><input name="can_edit" type="checkbox"> Puede editar</label>
+            <label><input name="can_sync_garmin" type="checkbox"> Puede sincronizar Garmin</label>
+        </div>
+        <div class="form-actions">
+            <button class="button" type="submit">Agregar permiso</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

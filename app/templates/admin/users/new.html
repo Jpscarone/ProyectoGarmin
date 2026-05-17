@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block title %}Nuevo usuario | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Administracion</p>
+            <h1>Nuevo usuario</h1>
+            <p class="text-muted">Crea un usuario real del sistema y, si corresponde, asignalo a un atleta.</p>
+        </div>
+        <a class="button button-secondary" href="/admin/users">Volver a usuarios</a>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+
+    <form method="post" action="/admin/users/new" class="form-grid">
+        <label class="field">
+            <span>Email</span>
+            <input name="email" type="email" required>
+        </label>
+        <label class="field">
+            <span>Nombre</span>
+            <input name="name" type="text" required>
+        </label>
+        <label class="field">
+            <span>Contraseña inicial</span>
+            <input name="password" type="password" required>
+        </label>
+        <label class="field">
+            <span>Rol</span>
+            <select name="role" required>
+                <option value="admin">admin</option>
+                <option value="coach">coach</option>
+                <option value="athlete" selected>athlete</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Atleta asignado opcional</span>
+            <select name="athlete_id">
+                <option value="">Sin asignacion inicial</option>
+                {% for athlete in athletes %}
+                <option value="{{ athlete.id }}">{{ athlete.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Rol del permiso</span>
+            <select name="permission_role">
+                <option value="owner" selected>owner</option>
+                <option value="coach">coach</option>
+                <option value="viewer">viewer</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Estado</span>
+            <select name="is_active">
+                <option value="true" selected>Activo</option>
+                <option value="false">Inactivo</option>
+            </select>
+        </label>
+        <div class="field">
+            <span>Capacidades sobre el atleta asignado</span>
+            <label><input name="can_view" type="checkbox" checked> Puede ver</label>
+            <label><input name="can_edit" type="checkbox" checked> Puede editar</label>
+            <label><input name="can_sync_garmin" type="checkbox" checked> Puede sincronizar Garmin</label>
+        </div>
+        <div class="form-actions">
+            <button class="button" type="submit">Crear usuario</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

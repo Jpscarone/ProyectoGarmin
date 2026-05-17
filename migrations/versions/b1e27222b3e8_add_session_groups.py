@@ -7,7 +7,7 @@ Create Date: 2026-03-15 20:20:00.638352
 """
 from __future__ import annotations
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 
 
@@ -20,6 +20,31 @@ depends_on = None
 
 
 def upgrade() -> None:
+    if context.is_offline_mode():
+        op.create_table('session_groups',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('training_day_id', sa.Integer(), nullable=False),
+        sa.Column('name', sa.String(length=255), nullable=False),
+        sa.Column('group_type', sa.String(length=50), nullable=True),
+        sa.Column('group_order', sa.Integer(), nullable=False),
+        sa.Column('notes', sa.Text(), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('(CURRENT_TIMESTAMP)'), nullable=False),
+        sa.ForeignKeyConstraint(['training_day_id'], ['training_days.id'], ),
+        sa.PrimaryKeyConstraint('id')
+        )
+        op.create_index(op.f('ix_session_groups_training_day_id'), 'session_groups', ['training_day_id'], unique=False)
+        with op.batch_alter_table('planned_sessions', schema=None) as batch_op:
+            batch_op.add_column(sa.Column('session_group_id', sa.Integer(), nullable=True))
+            batch_op.create_index(batch_op.f('ix_planned_sessions_session_group_id'), ['session_group_id'], unique=False)
+            batch_op.create_foreign_key(
+                'fk_planned_sessions_session_group_id_session_groups',
+                'session_groups',
+                ['session_group_id'],
+                ['id'],
+            )
+        return
+
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 

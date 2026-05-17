@@ -7,7 +7,7 @@ Create Date: 2026-05-12 00:45:00.000000
 
 from __future__ import annotations
 
-from alembic import op
+from alembic import context, op
 import sqlalchemy as sa
 from sqlalchemy import inspect
 
@@ -28,6 +28,19 @@ def _column_type_name(table_name: str, column_name: str) -> str | None:
 
 def upgrade() -> None:
     dialect = op.get_bind().dialect.name
+
+    if context.is_offline_mode():
+        if dialect == "postgresql":
+            op.alter_column(
+                "garmin_activities",
+                "garmin_activity_id",
+                existing_type=sa.Integer(),
+                type_=sa.BigInteger(),
+                existing_nullable=False,
+                postgresql_using="garmin_activity_id::bigint",
+            )
+        return
+
     current_type = _column_type_name("garmin_activities", "garmin_activity_id")
 
     if current_type is None:
@@ -68,6 +81,19 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     dialect = op.get_bind().dialect.name
+
+    if context.is_offline_mode():
+        if dialect == "postgresql":
+            op.alter_column(
+                "garmin_activities",
+                "garmin_activity_id",
+                existing_type=sa.BigInteger(),
+                type_=sa.Integer(),
+                existing_nullable=False,
+                postgresql_using="garmin_activity_id::integer",
+            )
+        return
+
     current_type = _column_type_name("garmin_activities", "garmin_activity_id")
 
     if current_type is None or "int" not in current_type:
