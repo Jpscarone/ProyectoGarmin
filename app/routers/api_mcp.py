@@ -635,6 +635,7 @@ def get_week_load_summary(
         "week": week_payload,
         "sports_breakdown": sports_breakdown,
         "manual_sessions": manual_sessions,
+        "summary": _build_week_load_summary_payload(week_payload, sports_breakdown, manual_sessions),
         "intensity": intensity_payload,
         "health": health_payload,
         "weekly_analysis": weekly_analysis_payload,
@@ -2301,6 +2302,41 @@ def _count_completed_strength_sessions(activities: list[Any], planned_sessions: 
         and getattr(session, "linked_activity_id", None) is None
     )
     return count
+
+
+def _build_week_load_summary_payload(
+    week_payload: dict[str, Any],
+    sports_breakdown: dict[str, Any],
+    manual_sessions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    garmin_count = int(week_payload.get("garmin_activities_count") or 0)
+    manual_count = int(week_payload.get("completed_manual_sessions_count") or 0)
+    strength_count = int(week_payload.get("completed_strength_sessions_count") or 0)
+    total_count = int(week_payload.get("total_completed_training_count") or 0)
+    running_count = int(((sports_breakdown.get("running") or {}).get("completed_count")) or 0)
+    cycling_count = int(((sports_breakdown.get("cycling") or {}).get("completed_count")) or 0)
+    strength_manual_count = int(((sports_breakdown.get("strength") or {}).get("manual_completed_count")) or 0)
+
+    return {
+        "garmin_activities_text": f"Actividades Garmin: {garmin_count}.",
+        "manual_sessions_text": f"Sesiones manuales/completadas: {manual_count}.",
+        "strength_sessions_text": f"Sesiones de gimnasio/fuerza: {strength_count}.",
+        "total_training_text": f"Entrenamientos totales: {total_count}.",
+        "week_narrative": (
+            f"Esa semana registraste {garmin_count} actividades Garmin y "
+            f"{strength_manual_count} sesiones manuales de gimnasio/fuerza. "
+            f"Total: {total_count} entrenamientos."
+        ),
+        "counts": {
+            "running": running_count,
+            "cycling": cycling_count,
+            "strength": strength_count,
+            "manual_strength": strength_manual_count,
+            "manual_sessions": manual_count,
+            "total_completed_training": total_count,
+        },
+        "manual_sessions_available": bool(manual_sessions),
+    }
 
 
 def _sport_bucket(value: str | None) -> str:

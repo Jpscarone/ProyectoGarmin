@@ -19,15 +19,15 @@ No modifica el estado del sistema.
 - `get_day_overview(athlete_id: int, date: str)`
 - `identify_me(access_code: str)`
 - `get_my_day_overview(access_code: str, date: str)`
-- `get_my_recent_activities(access_code: str, limit: int = 10)`
+- `get_my_recent_activities(access_code: str, limit: int = 10)` solo Garmin
 - `get_my_health_summary(access_code: str)`
 - `get_my_training_status(access_code: str)`
 - `compare_planned_vs_done(athlete_id: int, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `compare_my_planned_vs_done(access_code: str, date: str | None = None)`
 - `get_next_session_recommendation(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
 - `get_my_next_session_recommendation(access_code: str, reference_date: str | None = None)`
-- `get_week_load_summary(athlete_id: int, week_start_date: str | None = None, compare_previous: bool = True)`
-- `get_my_week_load_summary(access_code: str, week_start_date: str | None = None, compare_previous: bool = True)`
+- `get_week_load_summary(athlete_id: int, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
+- `get_my_week_load_summary(access_code: str, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
 - `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 - `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 
@@ -138,11 +138,21 @@ La tool esta pensada para prompts como:
 `get_week_load_summary` consulta `GET /api/mcp/training/week-load-summary` y devuelve un JSON read-only con:
 
 - resumen de la semana actual o indicada
-- actividades realizadas y sesiones planificadas
+- actividades Garmin realizadas y sesiones planificadas
+- sesiones manuales/completadas de gimnasio-fuerza sin actividad Garmin asociada
 - carga total, distancia, duracion e intensidad
 - promedio semanal de salud/readiness cuando haya datos
 - weekly_analysis si existe
 - comparacion con la semana previa
+
+Campos utiles cuando preguntan por gym/fuerza:
+
+- `week.garmin_activities_count`
+- `week.completed_manual_sessions_count`
+- `week.completed_strength_sessions_count`
+- `week.total_completed_training_count`
+- `manual_sessions`
+- `summary.week_narrative`
 
 La tool esta pensada para prompts como:
 
@@ -150,6 +160,7 @@ La tool esta pensada para prompts como:
 - `Comparame esta semana con la anterior`
 - `Estoy acumulando demasiada intensidad`
 - `Dame un resumen de carga semanal del atleta 1`
+- `Cuantas sesiones de gimnasio hice la semana pasada`
 
 ## Nueva tool de payload tecnico
 

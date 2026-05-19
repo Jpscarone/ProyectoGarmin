@@ -71,7 +71,7 @@ async def identify_me(access_code: str) -> dict[str, Any]:
 
 @mcp.tool()
 async def get_my_recent_activities(access_code: str, limit: int = 10) -> dict[str, Any]:
-    """Devuelve las actividades recientes del atleta asociado a la clave privada indicada."""
+    """Devuelve solo actividades Garmin recientes del atleta. No incluye sesiones de gimnasio/fuerza completadas manualmente."""
     return await CLIENT.get_my_recent_activities(access_code=access_code, limit=limit)
 
 
@@ -159,7 +159,7 @@ async def get_week_load_summary(
     week_start_date: str | None = None,
     compare_previous: bool = True,
 ) -> dict[str, Any]:
-    """Devuelve un resumen read-only de carga semanal, opcionalmente comparado con la semana previa."""
+    """Devuelve un resumen semanal read-only que incluye actividades Garmin y sesiones manuales/completadas de gimnasio-fuerza sin duplicar matches. Usar para preguntas tipo cuantas sesiones hice en la semana."""
     return await CLIENT.get_week_load_summary(
         athlete_id=athlete_id,
         week_start_date=week_start_date,
@@ -173,7 +173,7 @@ async def get_my_week_load_summary(
     week_start_date: str | None = None,
     compare_previous: bool = True,
 ) -> dict[str, Any]:
-    """Devuelve un resumen read-only de carga semanal para el atleta resuelto por la clave privada."""
+    """Devuelve un resumen semanal read-only del atleta resuelto por la clave privada. Incluye actividades Garmin y sesiones manuales/completadas de gimnasio-fuerza sin duplicar matches. Esta es la tool correcta para preguntas semanales de gym/fuerza."""
     return await CLIENT.get_my_week_load_summary(
         access_code=access_code,
         week_start_date=week_start_date,

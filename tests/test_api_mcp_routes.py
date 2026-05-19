@@ -984,6 +984,8 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["sports_breakdown"]["strength"]["manual_completed_count"], 2)
         self.assertEqual(payload["sports_breakdown"]["strength"]["total_duration_sec"], 5100)
         self.assertEqual(len(payload["manual_sessions"]), 2)
+        self.assertEqual(payload["summary"]["counts"]["strength"], 2)
+        self.assertIn("2 sesiones manuales de gimnasio/fuerza", payload["summary"]["week_narrative"])
         self.assertTrue(payload["data_quality"]["has_manual_sessions"])
         self.assertTrue(payload["data_quality"]["has_activities"])
         self.assertEqual(payload["recommendation"]["status"], "balanced")
@@ -1039,6 +1041,10 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["week"]["completed_strength_sessions_count"], 1)
         self.assertEqual(payload["sports_breakdown"]["running"]["completed_count"], 1)
         self.assertEqual(payload["sports_breakdown"]["strength"]["completed_count"], 1)
+        self.assertEqual(
+            payload["summary"]["week_narrative"],
+            "Esa semana registraste 1 actividades Garmin y 1 sesiones manuales de gimnasio/fuerza. Total: 2 entrenamientos.",
+        )
 
     def test_week_load_summary_does_not_duplicate_strength_session_with_garmin_match(self) -> None:
         training_day = TrainingDay(
