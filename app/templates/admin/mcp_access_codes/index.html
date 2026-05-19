@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Accesos MCP | training_app{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">MCP atletas</p>
+            <h1>Claves MCP por atleta</h1>
+            <p class="text-muted">Gestiona claves privadas experimentales para acceso read-only desde ChatGPT.</p>
+        </div>
+    </div>
+
+    {% if status_message %}
+    <div class="alert alert-info">{{ status_message }}</div>
+    {% endif %}
+    {% if error_message %}
+    <div class="alert alert-error">{{ error_message }}</div>
+    {% endif %}
+    {% if created_code %}
+    <div class="alert alert-warning">
+        Nueva clave para {{ created_athlete_name or "el atleta" }}: <strong>{{ created_code }}</strong>
+    </div>
+    {% endif %}
+
+    <form method="get" action="/admin/mcp-access-codes" class="form-grid">
+        <label class="field">
+            <span>Filtrar por atleta</span>
+            <select name="athlete_id">
+                <option value="">Todos los atletas disponibles</option>
+                {% for athlete in athletes %}
+                <option value="{{ athlete.id }}" {% if selected_athlete_id == athlete.id %}selected{% endif %}>{{ athlete.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <div class="form-actions">
+            <button class="button button-secondary" type="submit">Aplicar filtro</button>
+            <a class="button button-utility" href="/admin/mcp-access-codes">Limpiar</a>
+        </div>
+    </form>
+</section>
+
+<section class="panel panel-subtle">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Crear clave</p>
+            <h2>Nueva clave MCP</h2>
+        </div>
+    </div>
+
+    <form method="post" action="/admin/mcp-access-codes/create" class="form-grid">
+        <label class="field">
+            <span>Atleta</span>
+            <select name="athlete_id" required>
+                <option value="">Seleccionar atleta</option>
+                {% for athlete in athletes %}
+                <option value="{{ athlete.id }}" {% if selected_athlete_id == athlete.id %}selected{% endif %}>{{ athlete.name }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Prefix opcional</span>
+            <input name="prefix" type="text" placeholder="CARO">
+        </label>
+        <label class="field">
+            <span>Label opcional</span>
+            <input name="label" type="text" placeholder="Carolina ChatGPT">
+        </label>
+        <label class="field">
+            <span>Code manual opcional</span>
+            <input name="code" type="text" placeholder="CARO-TEST-1234">
+        </label>
+        <label class="field field-full">
+            <span>Notes opcional</span>
+            <textarea name="notes" rows="3" placeholder="Uso experimental, acceso personal, etc."></textarea>
+        </label>
+        <div class="form-actions">
+            <button class="button" type="submit">Crear clave MCP</button>
+        </div>
+    </form>
+</section>
+
+<section class="panel">
+    <div class="section-heading">
+        <div>
+            <p class="eyebrow">Listado</p>
+            <h2>Claves existentes</h2>
+        </div>
+    </div>
+
+    {% if codes %}
+    <div class="table-wrap">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Atleta</th>
+                    <th>Label</th>
+                    <th>Access code</th>
+                    <th>Estado</th>
+                    <th>Creada</th>
+                    <th>Ultimo uso</th>
+                    <th>Notes</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for code in codes %}
+                <tr>
+                    <td>
+                        <strong>{{ code.athlete.name }}</strong>
+                        <div class="text-muted">ID {{ code.athlete.id }}</div>
+                    </td>
+                    <td>{{ code.label or "-" }}</td>
+                    <td><code>{{ code.access_code }}</code></td>
+                    <td>
+                        <span class="status-badge {{ 'status-badge-garmin' if code.is_active else 'status-badge-empty' }}">
+                            {{ 'Activa' if code.is_active else 'Inactiva' }}
+                        </span>
+                    </td>
+                    <td>{{ format_local_datetime(code.created_at) }}</td>
+                    <td>{{ format_local_datetime(code.last_used_at, empty='Nunca') }}</td>
+                    <td>{{ code.notes or "-" }}</td>
+                    <td>
+                        <div class="table-actions-inline">
+                            <button class="button button-utility" type="button" onclick='copyToClipboard({{ code.access_code | tojson }}, "Clave copiada")'>Copiar código</button>
+                            <button class="button button-secondary" type="button" onclick='copyToClipboard({{ ("Soy " ~ code.athlete.name ~ ", mi clave de atleta es " ~ code.access_code) | tojson }}, "Instrucción copiada")'>Copiar instrucción</button>
+                            {% if code.is_active %}
+                            <form method="post" action="/admin/mcp-access-codes/{{ code.id }}/deactivate">
+                                <button class="button button-danger" type="submit">Desactivar</button>
+                            </form>
+                            {% else %}
+                            <form method="post" action="/admin/mcp-access-codes/{{ code.id }}/activate">
+                                <button class="button" type="submit">Reactivar</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="empty-state">No hay claves MCP para los atletas disponibles con este filtro.</p>
+    {% endif %}
+</section>
+
+<script>
+async function copyToClipboard(text, successMessage) {
+    try {
+        await navigator.clipboard.writeText(text);
+        window.alert(successMessage);
+    } catch (error) {
+        window.prompt("Copiá este texto manualmente:", text);
+    }
+}
+</script>
+{% endblock %}

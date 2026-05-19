@@ -12,6 +12,7 @@ from app.db.session import SessionLocal, get_db
 from app.routes.mcp_api import router as api_mcp_router
 from app.routers.activities import router as activities_router
 from app.routers.activity_matching import router as activity_matching_router
+from app.routers.admin_mcp_access_codes import router as admin_mcp_access_codes_router
 from app.routers.admin_users import router as admin_users_router
 from app.routers.analysis import router as analysis_router
 from app.routers.auth import router as auth_router
@@ -167,6 +168,7 @@ def _dump_context_session(session: dict) -> str:
 
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 app.include_router(auth_router)
+app.include_router(admin_mcp_access_codes_router)
 app.include_router(admin_users_router)
 app.include_router(activities_router)
 app.include_router(activity_matching_router)

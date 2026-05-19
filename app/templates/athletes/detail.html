@@ -13,6 +13,9 @@
         <div class="actions-inline">
             <a class="button button-nav" href="/athletes">Volver</a>
             <a class="button button-secondary" href="/athletes/{{ athlete.id }}/edit">Editar atleta</a>
+            {% if request.state.current_user and request.state.current_user.role in ["admin", "coach"] %}
+            <a class="button button-utility" href="/admin/mcp-access-codes?athlete_id={{ athlete.id }}">Claves MCP</a>
+            {% endif %}
             <form method="post" action="/athletes/{{ athlete.id }}/compare-garmin">
                 <button class="button button-utility" type="submit" {% if garmin_auth_diagnostics.rate_limit_active %}disabled{% endif %}>Comparar con Garmin</button>
             </form>

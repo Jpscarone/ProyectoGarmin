@@ -365,6 +365,41 @@ Advertencia:
 - No usar este enfoque con usuarios externos o no confiables.
 - Si el alcance crece, migrar a hash, rotacion o un esquema con OAuth.
 
+### Gestion web admin/coach
+
+Ademas del script CLI, ahora existe la pantalla web:
+
+```text
+/admin/mcp-access-codes
+```
+
+Uso:
+
+- Admin ve todas las claves.
+- Coach puede gestionar claves solo de atletas sobre los que tenga permiso de edicion.
+- Desde la pantalla se puede:
+  crear clave
+  ver `access_code`
+  copiar el codigo
+  copiar una instruccion lista para ChatGPT
+  desactivar o reactivar acceso
+
+Tambien hay accesos rapidos desde el listado y el detalle de atleta con el boton `Claves MCP`.
+
+Ejemplo de instruccion para entregar al atleta:
+
+```text
+Soy Carolina, mi clave de atleta es CARO-7K92-XP31
+```
+
+Desactivacion desde web:
+
+- Entrar a `/admin/mcp-access-codes`
+- Buscar la clave del atleta
+- Usar `Desactivar`
+
+Eso corta el acceso del atleta a las tools `my_*` sin borrar el registro historico.
+
 ### MCP local
 
 ```bash

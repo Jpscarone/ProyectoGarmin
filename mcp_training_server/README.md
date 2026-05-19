@@ -59,7 +59,8 @@ python .\scripts\create_athlete_access_code.py --athlete-id 2 --code CARO-TEST-1
 Revocacion o desactivacion:
 
 - Esta V1 no tiene pantalla web todavia.
-- Desactivar manualmente `athlete_access_codes.is_active = false` en base o desde un script/admin futuro.
+- Ahora existe pantalla web para admin/coach en `/admin/mcp-access-codes`.
+- Tambien se puede desactivar manualmente `athlete_access_codes.is_active = false` en base si hace falta soporte rapido.
 
 Advertencias de seguridad:
 
