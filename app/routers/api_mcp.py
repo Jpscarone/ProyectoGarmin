@@ -35,6 +35,7 @@ from app.services.mcp_context_service import (
 from app.services.athlete_access_code_service import resolve_athlete_by_access_code
 from app.services.mcp_security import verify_mcp_bearer_token
 from app.services.training_plan_service import select_default_training_plan
+from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 from app.utils.datetime_utils import today_local
 from app.routers.planned_sessions import _build_technical_view, _get_preferred_session_analysis
 
@@ -116,6 +117,18 @@ def read_my_training_status(
     _reject_forbidden_query_params(request, "athlete_id")
     athlete = resolve_athlete_by_access_code(access_code, db)
     return read_training_status(athlete_id=athlete.id, db=db)
+
+
+@router.get("/me/day-overview")
+def get_my_day_overview(
+    request: Request,
+    access_code: str = Query(...),
+    date_value: str = Query(..., alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_day_overview(athlete_id=athlete.id, date_value=date_value, db=db)
 
 
 @router.get("/me/compare/planned-vs-done")
@@ -317,6 +330,40 @@ def read_training_status(
             "health_ai_analysis": _serialize_health_ai_analysis(latest_ai_analysis),
         },
         "latest_weekly_analysis": _serialize_weekly_analysis(latest_weekly),
+    }
+
+
+@router.get("/training/day-overview")
+def get_day_overview(
+    athlete_id: int = Query(...),
+    date_value: str = Query(..., alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_mcp_date(date_value, "date")
+    training_days = _get_training_days_for_date(db, athlete.id, target_date)
+    planned_sessions = _get_planned_sessions_for_date(db, athlete.id, target_date)
+    activities = _get_activities_for_exact_date(db, athlete.id, target_date)
+    matches = _build_day_matches_payload(db, planned_sessions, activities)
+    manual_sessions = _serialize_day_manual_sessions(planned_sessions)
+    warnings: list[str] = []
+    if len(training_days) > 1:
+        warnings.append("Hay mas de un training_day para la misma fecha; se muestra el primero y se incluyen todas las sesiones.")
+    summary = _build_day_overview_summary(planned_sessions, activities, matches, manual_sessions)
+    if not planned_sessions:
+        warnings.append("No hay sesiones planificadas para esta fecha.")
+    if not activities:
+        warnings.append("No hay actividades Garmin registradas para esta fecha.")
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "date": target_date.isoformat(),
+        "training_day": _serialize_training_day_overview(training_days[0] if training_days else None),
+        "planned_sessions": [_serialize_day_planned_session(item, matches) for item in planned_sessions],
+        "activities": [_serialize_activity_recent(item) for item in activities],
+        "manual_sessions": manual_sessions,
+        "matches": matches,
+        "summary": summary,
+        "data_quality": {"warnings": warnings},
     }
 
 
@@ -560,7 +607,17 @@ def get_week_load_summary(
         previous_payload = previous_summary
 
     health_payload = _build_week_load_health_payload(db, athlete.id, selected_start, week_end)
-    week_payload = _build_week_load_week_payload(context, metrics)
+    sports_breakdown = _sports_breakdown(
+        list(getattr(context, "activities", []) or []),
+        list(getattr(context, "planned_sessions", []) or []),
+    )
+    manual_sessions = _serialize_manual_week_sessions(context)
+    week_payload = _build_week_load_week_payload(
+        context,
+        metrics,
+        sports_breakdown=sports_breakdown,
+        manual_sessions=manual_sessions,
+    )
     intensity_payload = _build_week_load_intensity_payload(context, metrics)
     weekly_analysis_payload = _build_week_load_weekly_analysis_payload(weekly_analysis)
     data_quality = _build_week_load_data_quality(context, weekly_analysis, health_payload)
@@ -576,6 +633,8 @@ def get_week_load_summary(
     return {
         "athlete": _serialize_athlete_min(athlete),
         "week": week_payload,
+        "sports_breakdown": sports_breakdown,
+        "manual_sessions": manual_sessions,
         "intensity": intensity_payload,
         "health": health_payload,
         "weekly_analysis": weekly_analysis_payload,
@@ -666,13 +725,27 @@ def get_session_analysis_payload(
 
 
 def _parse_iso_date(raw_value: str, field_name: str) -> date:
-    try:
-        return date.fromisoformat(raw_value)
-    except ValueError as exc:
+    return _parse_mcp_date(raw_value, field_name)
+
+
+def _parse_mcp_date(raw_value: str, field_name: str) -> date:
+    normalized = (raw_value or "").strip()
+    if not normalized:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"{field_name} debe tener formato YYYY-MM-DD.",
-        ) from exc
+            detail=f"{field_name} es obligatorio.",
+        )
+    try:
+        return date.fromisoformat(normalized)
+    except ValueError as exc:
+        try:
+            day_text, month_text, year_text = normalized.split("-", 2)
+            return date(int(year_text), int(month_text), int(day_text))
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{field_name} debe tener formato YYYY-MM-DD o DD-MM-YYYY.",
+            ) from exc
 
 
 def _reject_forbidden_query_params(request: Request, *names: str) -> None:
@@ -1121,6 +1194,58 @@ def _get_latest_activity_analysis_payload(db: Session, athlete_id: int) -> Garmi
     )
 
 
+def _training_day_loader_options() -> tuple[Any, ...]:
+    return (
+        selectinload(TrainingDay.training_plan),
+        selectinload(TrainingDay.planned_sessions).selectinload(PlannedSession.activity_match).selectinload(ActivitySessionMatch.garmin_activity),
+        selectinload(TrainingDay.planned_sessions).selectinload(PlannedSession.planned_session_steps),
+    )
+
+
+def _get_training_days_for_date(db: Session, athlete_id: int, target_date: date) -> list[TrainingDay]:
+    return list(
+        db.scalars(
+            select(TrainingDay)
+            .where(
+                TrainingDay.athlete_id == athlete_id,
+                TrainingDay.day_date == target_date,
+            )
+            .order_by(TrainingDay.id.asc())
+            .options(*_training_day_loader_options())
+        ).all()
+    )
+
+
+def _get_planned_sessions_for_date(db: Session, athlete_id: int, target_date: date) -> list[PlannedSession]:
+    return list(
+        db.scalars(
+            select(PlannedSession)
+            .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+            .where(
+                PlannedSession.athlete_id == athlete_id,
+                TrainingDay.day_date == target_date,
+            )
+            .order_by(PlannedSession.session_order.asc(), PlannedSession.id.asc())
+            .options(*_planned_compare_loader_options())
+        ).all()
+    )
+
+
+def _get_activities_for_exact_date(db: Session, athlete_id: int, target_date: date) -> list[GarminActivity]:
+    candidates = list(
+        db.scalars(
+            select(GarminActivity)
+            .where(
+                GarminActivity.athlete_id == athlete_id,
+                func.date(GarminActivity.start_time) == target_date.isoformat(),
+            )
+            .order_by(GarminActivity.start_time.asc(), GarminActivity.id.asc())
+            .options(*_compare_loader_options())
+        ).all()
+    )
+    return [item for item in candidates if _activity_local_date(item) == target_date]
+
+
 def _compare_loader_options() -> tuple[Any, ...]:
     return (
         selectinload(GarminActivity.activity_match).selectinload(ActivitySessionMatch.planned_session).selectinload(PlannedSession.training_day),
@@ -1326,6 +1451,8 @@ def _normalize_sport_value(value: str | None) -> str | None:
         "strength_training": "strength",
         "functional_strength_training": "strength",
         "gym": "strength",
+        "gimnasio": "strength",
+        "fuerza": "strength",
         "lap_swimming": "swimming",
         "pool_swim": "swimming",
     }
@@ -1352,6 +1479,158 @@ def _serialize_match_payload(match: ActivitySessionMatch, *, source: str) -> dic
         "match_id": match.id,
         "score": score,
         "confidence": confidence,
+    }
+
+
+def _serialize_training_day_overview(training_day: TrainingDay | None) -> dict[str, Any] | None:
+    if training_day is None:
+        return None
+    return {
+        "id": training_day.id,
+        "date": training_day.day_date.isoformat() if training_day.day_date else None,
+        "day_type": training_day.day_type,
+        "notes": training_day.day_notes,
+    }
+
+
+def _serialize_day_planned_session(session: PlannedSession, matches: list[dict[str, Any]]) -> dict[str, Any]:
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "name": session.name,
+        "sport": session.sport_type,
+        "modality": session.modality,
+        "planned_duration_sec": metrics.duration_sec,
+        "planned_distance_m": metrics.distance_m,
+        "status": _planned_session_day_status(session, matches),
+        "target_summary": _build_planned_target_summary(session),
+        "notes": session.target_notes or session.description_text,
+    }
+
+
+def _planned_session_day_status(session: PlannedSession, matches: list[dict[str, Any]]) -> str:
+    linked_match = next((item for item in matches if item.get("planned_session_id") == session.id and item.get("activity_id") is not None), None)
+    if linked_match is not None:
+        return "completed"
+    if is_session_completed(session) or is_manually_completed_strength_session(session):
+        return "completed"
+    return "no_activity"
+
+
+def _serialize_day_manual_sessions(planned_sessions: list[PlannedSession]) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for session in planned_sessions:
+        if not is_manually_completed_strength_session(session):
+            continue
+        payload.append(
+            {
+                "id": session.id,
+                "date": session.training_day.day_date.isoformat() if session.training_day and session.training_day.day_date else None,
+                "name": session.name,
+                "sport": _normalize_sport_value(session.sport_type) or session.sport_type,
+                "modality": session.modality,
+                "duration_sec": completed_duration_sec(session),
+                "status": "completed",
+                "source": "planned_session_manual",
+            }
+        )
+    return payload
+
+
+def _build_day_matches_payload(
+    db: Session,
+    planned_sessions: list[PlannedSession],
+    activities: list[GarminActivity],
+) -> list[dict[str, Any]]:
+    matches: list[dict[str, Any]] = []
+    added_pairs: set[tuple[int | None, int | None]] = set()
+
+    for planned_session in planned_sessions:
+        explicit = _resolve_explicit_match(planned_session.activity_match.garmin_activity if planned_session.activity_match else None, planned_session)
+        if explicit is not None:
+            pair = (explicit.planned_session_id_fk, explicit.garmin_activity_id_fk)
+            if pair not in added_pairs:
+                payload = _serialize_match_payload(explicit, source="explicit")
+                matches.append(
+                    {
+                        "planned_session_id": explicit.planned_session_id_fk,
+                        "activity_id": explicit.garmin_activity_id_fk,
+                        "source": payload["source"],
+                        "score": payload["score"],
+                    }
+                )
+                added_pairs.add(pair)
+            continue
+
+        fallback_activity = _pick_activity_candidate_for_planned(activities, planned_session)
+        if fallback_activity is not None:
+            pair = (planned_session.id, fallback_activity.id)
+            if pair not in added_pairs:
+                matches.append(
+                    {
+                        "planned_session_id": planned_session.id,
+                        "activity_id": fallback_activity.id,
+                        "source": "date_sport",
+                        "score": None,
+                    }
+                )
+                added_pairs.add(pair)
+
+    for activity in activities:
+        explicit = _resolve_explicit_match(activity, activity.activity_match.planned_session if activity.activity_match else None)
+        if explicit is not None:
+            continue
+        if not any(item.get("activity_id") == activity.id for item in matches):
+            fallback_planned = _pick_planned_candidate_for_activity(planned_sessions, activity)
+            if fallback_planned is not None:
+                pair = (fallback_planned.id, activity.id)
+                if pair not in added_pairs:
+                    matches.append(
+                        {
+                            "planned_session_id": fallback_planned.id,
+                            "activity_id": activity.id,
+                            "source": "date_sport",
+                            "score": None,
+                        }
+                    )
+                    added_pairs.add(pair)
+
+    return matches
+
+
+def _build_day_overview_summary(
+    planned_sessions: list[PlannedSession],
+    activities: list[GarminActivity],
+    matches: list[dict[str, Any]],
+    manual_sessions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    has_planned = bool(planned_sessions)
+    has_completed_training = bool(activities or manual_sessions)
+    has_garmin_activities = bool(activities)
+    if has_planned and manual_sessions and not has_garmin_activities:
+        message = (
+            "Hay una sesión programada marcada como realizada manualmente y no hay actividad Garmin asociada."
+            if len(manual_sessions) == 1
+            else "Hay sesiones programadas marcadas como realizadas manualmente y no hay actividades Garmin asociadas."
+        )
+    elif has_planned and not has_completed_training:
+        message = "Hay una sesión programada pero no hay actividad Garmin realizada asociada." if len(planned_sessions) == 1 else "Hay sesiones programadas pero no hay actividad Garmin realizada asociada."
+    elif not has_planned and has_completed_training:
+        message = "Hay actividad Garmin realizada pero no hay planificación asociada para esa fecha."
+    elif has_planned and has_completed_training:
+        explicit_count = sum(1 for item in matches if item.get("source") == "explicit")
+        if explicit_count:
+            message = "Hay sesiones planificadas y actividades realizadas con coincidencias asociadas."
+        elif manual_sessions and not has_garmin_activities:
+            message = "Hay sesiones planificadas realizadas manualmente para esa fecha."
+        else:
+            message = "Hay sesiones planificadas y actividades realizadas en la fecha, pero sin una vinculación explícita guardada."
+    else:
+        message = "No hay sesiones planificadas ni actividades Garmin registradas para esa fecha."
+    return {
+        "has_planned_sessions": has_planned,
+        "has_completed_activities": has_completed_training,
+        "message": message,
     }
 
 
@@ -1893,22 +2172,44 @@ def _week_end_from_start(value: date) -> date:
     return value + (6 * date.resolution)
 
 
-def _build_week_load_week_payload(context: Any, metrics: dict[str, Any]) -> dict[str, Any]:
+def _build_week_load_week_payload(
+    context: Any,
+    metrics: dict[str, Any],
+    *,
+    sports_breakdown: dict[str, Any] | None = None,
+    manual_sessions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     totals = metrics.get("totals", {})
     compliance = metrics.get("compliance", {})
     activities = list(getattr(context, "activities", []) or [])
+    manual_sessions = manual_sessions if manual_sessions is not None else _serialize_manual_week_sessions(context)
+    sports_breakdown = sports_breakdown if sports_breakdown is not None else _sports_breakdown(
+        activities,
+        list(getattr(context, "planned_sessions", []) or []),
+    )
+    garmin_activities_count = len(activities)
+    completed_manual_sessions_count = len(manual_sessions)
+    completed_strength_sessions_count = _count_completed_strength_sessions(
+        activities,
+        list(getattr(context, "planned_sessions", []) or []),
+    )
+    total_completed_training_count = garmin_activities_count + completed_manual_sessions_count
     weighted_hr = _weighted_average_hr(activities)
     return {
         "start_date": context.week_start_date.isoformat(),
         "end_date": context.week_end_date.isoformat(),
-        "completed_activities_count": totals.get("activity_count") or 0,
+        "completed_activities_count": total_completed_training_count,
+        "garmin_activities_count": garmin_activities_count,
+        "completed_manual_sessions_count": completed_manual_sessions_count,
+        "completed_strength_sessions_count": completed_strength_sessions_count,
+        "total_completed_training_count": total_completed_training_count,
         "planned_sessions_count": compliance.get("planned_sessions") or 0,
         "completed_sessions_count": compliance.get("completed_sessions") or 0,
         "total_duration_sec": totals.get("total_duration_sec") or 0,
         "total_distance_m": totals.get("total_distance_m") or 0,
         "total_training_load": _total_training_load(activities),
         "avg_hr_weighted": weighted_hr,
-        "sports_breakdown": _sports_breakdown(activities),
+        "sports_breakdown": sports_breakdown,
     }
 
 
@@ -1932,24 +2233,74 @@ def _total_training_load(activities: list[Any]) -> float:
     return round(total, 1)
 
 
-def _sports_breakdown(activities: list[Any]) -> dict[str, Any]:
+def _sports_breakdown(activities: list[Any], planned_sessions: list[Any]) -> dict[str, Any]:
     buckets: dict[str, dict[str, float | int]] = {
-        "running": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
-        "cycling": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
-        "strength": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
-        "other": {"activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "running": {"planned_count": 0, "completed_count": 0, "manual_completed_count": 0, "activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "cycling": {"planned_count": 0, "completed_count": 0, "manual_completed_count": 0, "activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "strength": {"planned_count": 0, "completed_count": 0, "manual_completed_count": 0, "activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
+        "other": {"planned_count": 0, "completed_count": 0, "manual_completed_count": 0, "activities_count": 0, "total_duration_sec": 0, "total_distance_m": 0.0, "total_training_load": 0.0},
     }
+    for session in planned_sessions:
+        bucket = _sport_bucket(getattr(session, "sport_type", None))
+        current = buckets[bucket]
+        current["planned_count"] += 1
     for activity in activities:
         bucket = _sport_bucket(getattr(activity, "sport_type", None))
         current = buckets[bucket]
         current["activities_count"] += 1
+        current["completed_count"] += 1
         current["total_duration_sec"] += int(getattr(activity, "duration_sec", 0) or 0)
         current["total_distance_m"] += float(getattr(activity, "distance_m", 0) or 0)
         current["total_training_load"] += float(getattr(activity, "training_load", 0) or 0)
+    for session in planned_sessions:
+        if not getattr(session, "manual_completed", False):
+            continue
+        if getattr(session, "matched", False) or getattr(session, "linked_activity_id", None) is not None:
+            continue
+        bucket = _sport_bucket(getattr(session, "sport_type", None))
+        current = buckets[bucket]
+        current["manual_completed_count"] += 1
+        current["completed_count"] += 1
+        current["total_duration_sec"] += int(getattr(session, "completed_duration_sec", 0) or 0)
     for item in buckets.values():
         item["total_distance_m"] = round(float(item["total_distance_m"]), 1)
         item["total_training_load"] = round(float(item["total_training_load"]), 1)
     return buckets
+
+
+def _serialize_manual_week_sessions(context: Any) -> list[dict[str, Any]]:
+    payload: list[dict[str, Any]] = []
+    for session in list(getattr(context, "planned_sessions", []) or []):
+        if not getattr(session, "manual_completed", False):
+            continue
+        if getattr(session, "matched", False) or getattr(session, "linked_activity_id", None) is not None:
+            continue
+        payload.append(
+            {
+                "id": getattr(session, "planned_session_id", None),
+                "date": session.session_date.isoformat() if getattr(session, "session_date", None) else None,
+                "name": getattr(session, "title", None),
+                "sport": _normalize_sport_value(getattr(session, "sport_type", None)) or getattr(session, "sport_type", None),
+                "modality": getattr(session, "modality", None),
+                "duration_sec": int(getattr(session, "completed_duration_sec", 0) or 0),
+                "status": "completed",
+                "source": "planned_session_manual",
+            }
+        )
+    return payload
+
+
+def _count_completed_strength_sessions(activities: list[Any], planned_sessions: list[Any]) -> int:
+    count = sum(1 for activity in activities if _sport_bucket(getattr(activity, "sport_type", None)) == "strength")
+    count += sum(
+        1
+        for session in planned_sessions
+        if _sport_bucket(getattr(session, "sport_type", None)) == "strength"
+        and getattr(session, "manual_completed", False)
+        and not getattr(session, "matched", False)
+        and getattr(session, "linked_activity_id", None) is None
+    )
+    return count
 
 
 def _sport_bucket(value: str | None) -> str:
@@ -2248,12 +2599,16 @@ def _build_session_payload_data_quality(
 
 
 def _build_week_load_data_quality(context: Any, weekly_analysis: WeeklyAnalysis | None, health_payload: dict[str, Any]) -> dict[str, Any]:
-    has_activities = bool(getattr(context, "activities", []) or [])
+    has_garmin_activities = bool(getattr(context, "activities", []) or [])
+    has_manual_sessions = bool(_serialize_manual_week_sessions(context))
+    has_completed_training = has_garmin_activities or has_manual_sessions
     has_planned = bool(getattr(context, "planned_sessions", []) or [])
     has_health = bool(health_payload.get("days_available"))
     warnings: list[str] = []
-    if not has_activities:
-        warnings.append("No hay actividades realizadas cargadas para esa semana.")
+    if not has_completed_training:
+        warnings.append("No hay entrenamientos realizados cargados para esa semana.")
+    elif not has_garmin_activities:
+        warnings.append("No hay actividades Garmin para esa semana; el resumen usa sesiones manuales completadas.")
     if not has_planned:
         warnings.append("No hay sesiones planificadas cargadas para esa semana.")
     if not has_health:
@@ -2261,7 +2616,10 @@ def _build_week_load_data_quality(context: Any, weekly_analysis: WeeklyAnalysis 
     if weekly_analysis is None:
         warnings.append("No hay weekly_analysis guardado para esa semana.")
     return {
-        "has_activities": has_activities,
+        "has_activities": has_completed_training,
+        "has_garmin_activities": has_garmin_activities,
+        "has_manual_sessions": has_manual_sessions,
+        "has_completed_training": has_completed_training,
         "has_planned_sessions": has_planned,
         "has_health": has_health,
         "has_weekly_analysis": weekly_analysis is not None,
@@ -2282,11 +2640,11 @@ def _build_week_load_recommendation(
     reasons: list[str] = []
     next_step = "Mantener el seguimiento de la carga y revisar sensaciones en los proximos dias."
 
-    if not data_quality.get("has_activities"):
+    if not data_quality.get("has_completed_training"):
         return {
             "status": "no_data",
             "summary": "No hay actividades suficientes para construir un resumen de carga semanal.",
-            "reasons": ["La semana no tiene actividades registradas."],
+            "reasons": ["La semana no tiene entrenamientos registrados."],
             "next_step": "Sincronizar actividades o revisar la semana consultada.",
         }
 

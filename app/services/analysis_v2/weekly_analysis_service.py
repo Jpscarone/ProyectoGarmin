@@ -87,6 +87,7 @@ class WeeklyPlannedSessionContext:
     session_date: date | None
     title: str
     sport_type: str | None
+    modality: str | None
     session_type: str | None
     expected_duration_min: int | None
     expected_distance_km: float | None
@@ -648,6 +649,7 @@ def _build_weekly_planned_session_context(session: PlannedSession) -> WeeklyPlan
         session_date=session.training_day.day_date if session.training_day else None,
         title=session.name,
         sport_type=session.sport_type,
+        modality=session.modality,
         session_type=session.session_type,
         expected_duration_min=session.expected_duration_min,
         expected_distance_km=session.expected_distance_km,

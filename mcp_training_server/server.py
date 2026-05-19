@@ -88,6 +88,18 @@ async def get_my_training_status(access_code: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def get_day_overview(athlete_id: int, date: str) -> dict[str, Any]:
+    """Devuelve el panorama completo del dia exacto: planificacion, actividades y matches si existen."""
+    return await CLIENT.get_day_overview(athlete_id=athlete_id, date=date)
+
+
+@mcp.tool()
+async def get_my_day_overview(access_code: str, date: str) -> dict[str, Any]:
+    """Devuelve el panorama completo del dia exacto solo para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_day_overview(access_code=access_code, date=date)
+
+
+@mcp.tool()
 async def compare_planned_vs_done(
     athlete_id: int,
     date: str | None = None,

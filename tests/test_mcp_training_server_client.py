@@ -122,6 +122,38 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["athlete"]["name"], "Carolina")
 
+    async def test_get_day_overview_sends_athlete_id_and_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/day-overview")
+            self.assertEqual(request.url.params.get("athlete_id"), "2")
+            self.assertEqual(request.url.params.get("date"), "2026-05-19")
+            return httpx.Response(200, json={"date": "2026-05-19", "planned_sessions": [{"name": "Gimnasio suave"}]})
+
+        client = _build_client(handler)
+        payload = await client.get_day_overview(athlete_id=2, date="2026-05-19")
+
+        self.assertEqual(payload["date"], "2026-05-19")
+        self.assertEqual(payload["planned_sessions"][0]["name"], "Gimnasio suave")
+
+    async def test_get_my_day_overview_only_sends_access_code_and_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/day-overview")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("date"), "19-05-2026")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(
+                200,
+                json={
+                    "date": "2026-05-19",
+                    "summary": {"message": "Hay una sesion programada pero no hay actividad Garmin realizada asociada."},
+                },
+            )
+
+        client = _build_client(handler)
+        payload = await client.get_my_day_overview(access_code="CARO-7K92-XP31", date="19-05-2026")
+
+        self.assertEqual(payload["date"], "2026-05-19")
+
     async def test_get_my_recent_activities_does_not_send_athlete_id(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/me/activities/recent")
@@ -193,6 +225,7 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         signatures = {
             "identify_me": inspect.signature(mcp_server.identify_me),
+            "get_my_day_overview": inspect.signature(mcp_server.get_my_day_overview),
             "get_my_recent_activities": inspect.signature(mcp_server.get_my_recent_activities),
             "get_my_health_summary": inspect.signature(mcp_server.get_my_health_summary),
             "get_my_training_status": inspect.signature(mcp_server.get_my_training_status),

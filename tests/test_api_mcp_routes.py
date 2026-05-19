@@ -246,9 +246,221 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual([item["activity_name"] for item in payload["activities"]], ["Solo atleta correcto"])
 
+    def test_my_day_overview_returns_planned_session_when_no_garmin_activity_exists(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 19),
+            day_type="strength",
+            day_notes="Dia liviano",
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.athlete.id,
+                training_day_id=training_day.id,
+                name="Gimnasio suave",
+                sport_type="strength",
+                modality="indoor",
+                expected_duration_min=45,
+                session_order=1,
+                target_notes="Movilidad y fuerza general suave",
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/day-overview?access_code=ATLETA-MCP-1234&date=19-05-2026",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["date"], "2026-05-19")
+        self.assertIsNotNone(payload["training_day"])
+        self.assertEqual(payload["training_day"]["date"], "2026-05-19")
+        self.assertEqual(len(payload["planned_sessions"]), 1)
+        self.assertEqual(payload["planned_sessions"][0]["name"], "Gimnasio suave")
+        self.assertEqual(payload["planned_sessions"][0]["planned_duration_sec"], 2700)
+        self.assertEqual(payload["planned_sessions"][0]["status"], "no_activity")
+        self.assertEqual(payload["activities"], [])
+        self.assertTrue(payload["summary"]["has_planned_sessions"])
+        self.assertFalse(payload["summary"]["has_completed_activities"])
+        self.assertEqual(
+            payload["summary"]["message"],
+            "Hay una sesión programada pero no hay actividad Garmin realizada asociada.",
+        )
+
+    def test_my_day_overview_marks_manual_strength_session_as_completed(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 23),
+            day_type="strength",
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            name="Gym completado",
+            sport_type="strength",
+            modality="indoor",
+            expected_duration_min=50,
+            session_order=1,
+            completed_at=datetime(2026, 5, 23, 19, 30, 0),
+            completion_source="manual",
+            manual_duration_sec=3000,
+        )
+        self.db.add(session)
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/day-overview?access_code=ATLETA-MCP-1234&date=2026-05-23",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["planned_sessions"][0]["status"], "completed")
+        self.assertEqual(len(payload["manual_sessions"]), 1)
+        self.assertEqual(payload["manual_sessions"][0]["source"], "planned_session_manual")
+        self.assertTrue(payload["summary"]["has_completed_activities"])
+
+    def test_my_day_overview_returns_activity_when_no_planning_exists(self) -> None:
+        self.db.add(
+            GarminActivity(
+                athlete_id=self.athlete.id,
+                garmin_activity_id=700001,
+                activity_name="Rodaje libre",
+                sport_type="running",
+                start_time=datetime(2026, 5, 20, 8, 0, 0),
+                duration_sec=2400,
+                distance_m=6200,
+                avg_hr=142,
+                training_load=48,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/day-overview?access_code=ATLETA-MCP-1234&date=2026-05-20",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["date"], "2026-05-20")
+        self.assertEqual(payload["planned_sessions"], [])
+        self.assertEqual(len(payload["activities"]), 1)
+        self.assertEqual(payload["activities"][0]["activity_name"], "Rodaje libre")
+        self.assertFalse(payload["summary"]["has_planned_sessions"])
+        self.assertTrue(payload["summary"]["has_completed_activities"])
+        self.assertEqual(
+            payload["summary"]["message"],
+            "Hay actividad Garmin realizada pero no hay planificación asociada para esa fecha.",
+        )
+
+    def test_my_day_overview_returns_clear_summary_when_no_data_exists(self) -> None:
+        response = self.client.get(
+            "/api/mcp/me/day-overview?access_code=ATLETA-MCP-1234&date=2026-05-21",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["date"], "2026-05-21")
+        self.assertIsNone(payload["training_day"])
+        self.assertEqual(payload["planned_sessions"], [])
+        self.assertEqual(payload["activities"], [])
+        self.assertEqual(payload["matches"], [])
+        self.assertEqual(
+            payload["summary"]["message"],
+            "No hay sesiones planificadas ni actividades Garmin registradas para esa fecha.",
+        )
+
+    def test_my_day_overview_only_returns_data_for_access_code_athlete(self) -> None:
+        other_plan = TrainingPlan(
+            athlete_id=self.other_athlete.id,
+            name="Plan atleta ajeno",
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            status="active",
+        )
+        self.db.add(other_plan)
+        self.db.commit()
+        self.db.refresh(other_plan)
+
+        other_training_day = TrainingDay(
+            athlete_id=self.other_athlete.id,
+            training_plan_id=other_plan.id,
+            day_date=date(2026, 5, 22),
+            day_type="running",
+        )
+        self.db.add(other_training_day)
+        self.db.commit()
+        self.db.refresh(other_training_day)
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.other_athlete.id,
+                training_day_id=other_training_day.id,
+                name="Solo atleta ajeno",
+                sport_type="running",
+                modality="outdoor",
+                expected_duration_min=30,
+                session_order=1,
+            )
+        )
+        self.db.add(
+            GarminActivity(
+                athlete_id=self.other_athlete.id,
+                garmin_activity_id=700002,
+                activity_name="Actividad ajena",
+                sport_type="running",
+                start_time=datetime(2026, 5, 22, 7, 0, 0),
+                duration_sec=1800,
+                distance_m=5000,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/day-overview?access_code=ATLETA-MCP-1234&date=2026-05-22",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["planned_sessions"], [])
+        self.assertEqual(payload["activities"], [])
+
+    def test_my_day_overview_returns_401_for_invalid_access_code(self) -> None:
+        response = self.client.get(
+            "/api/mcp/me/day-overview?access_code=NOPE-0000&date=2026-05-19",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Clave de acceso invalida.")
+
     def test_my_endpoints_reject_manual_athlete_id(self) -> None:
         response = self.client.get(
             f"/api/mcp/me/training/status?access_code=ATLETA-MCP-1234&athlete_id={self.other_athlete.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "athlete_id no esta permitido en este endpoint.")
+
+    def test_my_day_overview_rejects_manual_athlete_id(self) -> None:
+        response = self.client.get(
+            f"/api/mcp/me/day-overview?access_code=ATLETA-MCP-1234&date=2026-05-19&athlete_id={self.other_athlete.id}",
             headers=self.headers,
         )
 
@@ -707,6 +919,288 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertFalse(payload["data_quality"]["has_activities"])
         self.assertFalse(payload["data_quality"]["has_health"])
         self.assertEqual(payload["recommendation"]["status"], "no_data")
+
+    def test_week_load_summary_counts_manual_strength_sessions(self) -> None:
+        day_one = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 12),
+            day_type="strength",
+        )
+        day_two = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 15),
+            day_type="strength",
+        )
+        self.db.add_all([day_one, day_two])
+        self.db.commit()
+        self.db.refresh(day_one)
+        self.db.refresh(day_two)
+        self.db.add_all(
+            [
+                PlannedSession(
+                    athlete_id=self.athlete.id,
+                    training_day_id=day_one.id,
+                    name="Gym A",
+                    sport_type="strength",
+                    modality="indoor",
+                    expected_duration_min=45,
+                    session_order=1,
+                    completed_at=datetime(2026, 5, 12, 20, 0, 0),
+                    completion_source="manual",
+                    manual_duration_sec=2700,
+                ),
+                PlannedSession(
+                    athlete_id=self.athlete.id,
+                    training_day_id=day_two.id,
+                    name="Gym B",
+                    sport_type="gym",
+                    modality="indoor",
+                    expected_duration_min=40,
+                    session_order=1,
+                    completed_at=datetime(2026, 5, 15, 20, 0, 0),
+                    completion_source="manual",
+                    manual_duration_sec=2400,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/week-load-summary?athlete_id={self.athlete.id}&week_start_date=2026-05-11&compare_previous=false",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["week"]["garmin_activities_count"], 0)
+        self.assertEqual(payload["week"]["completed_manual_sessions_count"], 2)
+        self.assertEqual(payload["week"]["completed_strength_sessions_count"], 2)
+        self.assertEqual(payload["week"]["total_completed_training_count"], 2)
+        self.assertEqual(payload["week"]["completed_activities_count"], 2)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["planned_count"], 2)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["completed_count"], 2)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["manual_completed_count"], 2)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["total_duration_sec"], 5100)
+        self.assertEqual(len(payload["manual_sessions"]), 2)
+        self.assertTrue(payload["data_quality"]["has_manual_sessions"])
+        self.assertTrue(payload["data_quality"]["has_activities"])
+        self.assertEqual(payload["recommendation"]["status"], "balanced")
+
+    def test_week_load_summary_counts_running_garmin_plus_manual_strength(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 14),
+            day_type="strength",
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.athlete.id,
+                training_day_id=training_day.id,
+                name="Gym complementario",
+                sport_type="strength",
+                modality="indoor",
+                expected_duration_min=35,
+                session_order=1,
+                completed_at=datetime(2026, 5, 14, 18, 0, 0),
+                completion_source="manual",
+                manual_duration_sec=2100,
+            )
+        )
+        self.db.add(
+            GarminActivity(
+                athlete_id=self.athlete.id,
+                garmin_activity_id=930001,
+                activity_name="Rodaje semana",
+                sport_type="running",
+                start_time=datetime(2026, 5, 13, 7, 0, 0),
+                duration_sec=3600,
+                distance_m=10000,
+                training_load=75,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/week-load-summary?athlete_id={self.athlete.id}&week_start_date=2026-05-11&compare_previous=false",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["week"]["garmin_activities_count"], 1)
+        self.assertEqual(payload["week"]["completed_manual_sessions_count"], 1)
+        self.assertEqual(payload["week"]["total_completed_training_count"], 2)
+        self.assertEqual(payload["week"]["completed_strength_sessions_count"], 1)
+        self.assertEqual(payload["sports_breakdown"]["running"]["completed_count"], 1)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["completed_count"], 1)
+
+    def test_week_load_summary_does_not_duplicate_strength_session_with_garmin_match(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 16),
+            day_type="strength",
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            name="Strength con match",
+            sport_type="strength",
+            modality="indoor",
+            expected_duration_min=50,
+            session_order=1,
+        )
+        self.db.add(planned_session)
+        self.db.commit()
+        self.db.refresh(planned_session)
+
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=930002,
+            activity_name="Strength Garmin",
+            sport_type="strength_training",
+            start_time=datetime(2026, 5, 16, 9, 0, 0),
+            duration_sec=3000,
+            training_load=40,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        self.db.add(
+            ActivitySessionMatch(
+                athlete_id=self.athlete.id,
+                garmin_activity_id_fk=activity.id,
+                planned_session_id_fk=planned_session.id,
+                training_day_id_fk=training_day.id,
+                match_confidence=0.95,
+                match_method="manual",
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/week-load-summary?athlete_id={self.athlete.id}&week_start_date=2026-05-11&compare_previous=false",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["week"]["garmin_activities_count"], 1)
+        self.assertEqual(payload["week"]["completed_manual_sessions_count"], 0)
+        self.assertEqual(payload["week"]["completed_strength_sessions_count"], 1)
+        self.assertEqual(payload["week"]["total_completed_training_count"], 1)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["activities_count"], 1)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["manual_completed_count"], 0)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["completed_count"], 1)
+        self.assertEqual(payload["manual_sessions"], [])
+
+    def test_my_week_load_summary_only_returns_manual_sessions_for_access_code_athlete(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 12),
+            day_type="strength",
+        )
+        other_plan = TrainingPlan(
+            athlete_id=self.other_athlete.id,
+            name="Plan ajeno",
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            status="active",
+        )
+        self.db.add_all([training_day, other_plan])
+        self.db.commit()
+        self.db.refresh(training_day)
+        self.db.refresh(other_plan)
+        other_training_day = TrainingDay(
+            athlete_id=self.other_athlete.id,
+            training_plan_id=other_plan.id,
+            day_date=date(2026, 5, 13),
+            day_type="strength",
+        )
+        self.db.add(other_training_day)
+        self.db.commit()
+        self.db.refresh(other_training_day)
+
+        self.db.add_all(
+            [
+                PlannedSession(
+                    athlete_id=self.athlete.id,
+                    training_day_id=training_day.id,
+                    name="Gym propio",
+                    sport_type="strength",
+                    modality="indoor",
+                    expected_duration_min=45,
+                    session_order=1,
+                    completed_at=datetime(2026, 5, 12, 19, 0, 0),
+                    completion_source="manual",
+                    manual_duration_sec=2700,
+                ),
+                PlannedSession(
+                    athlete_id=self.other_athlete.id,
+                    training_day_id=other_training_day.id,
+                    name="Gym ajeno",
+                    sport_type="strength",
+                    modality="indoor",
+                    expected_duration_min=45,
+                    session_order=1,
+                    completed_at=datetime(2026, 5, 13, 19, 0, 0),
+                    completion_source="manual",
+                    manual_duration_sec=2700,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/training/week-load-summary?access_code=ATLETA-MCP-1234&week_start_date=2026-05-11&compare_previous=false",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["week"]["completed_manual_sessions_count"], 1)
+        self.assertEqual(len(payload["manual_sessions"]), 1)
+        self.assertEqual(payload["manual_sessions"][0]["name"], "Gym propio")
+
+    def test_week_load_summary_returns_zero_strength_counts_when_absent(self) -> None:
+        self.db.add(
+            GarminActivity(
+                athlete_id=self.athlete.id,
+                garmin_activity_id=930003,
+                activity_name="Rodaje sin gym",
+                sport_type="running",
+                start_time=datetime(2026, 5, 12, 7, 0, 0),
+                duration_sec=1800,
+                distance_m=5000,
+                training_load=30,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/week-load-summary?athlete_id={self.athlete.id}&week_start_date=2026-05-11&compare_previous=false",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["week"]["completed_strength_sessions_count"], 0)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["planned_count"], 0)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["completed_count"], 0)
+        self.assertEqual(payload["sports_breakdown"]["strength"]["manual_completed_count"], 0)
 
     def test_session_analysis_payload_returns_saved_analysis_and_laps(self) -> None:
         training_day = TrainingDay(

@@ -79,6 +79,24 @@ class TrainingAppApiClient:
             params={"access_code": access_code},
         )
 
+    async def get_day_overview(self, *, athlete_id: int, date: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/training/day-overview",
+            params={
+                "athlete_id": str(int(athlete_id)),
+                "date": date,
+            },
+        )
+
+    async def get_my_day_overview(self, *, access_code: str, date: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/day-overview",
+            params={
+                "access_code": access_code,
+                "date": date,
+            },
+        )
+
     async def compare_planned_vs_done(
         self,
         *,

@@ -16,7 +16,9 @@ No modifica el estado del sistema.
 - `get_health_summary(athlete_id: int)`
 - `get_latest_weekly_analysis(athlete_id: int)`
 - `get_training_status(athlete_id: int)`
+- `get_day_overview(athlete_id: int, date: str)`
 - `identify_me(access_code: str)`
+- `get_my_day_overview(access_code: str, date: str)`
 - `get_my_recent_activities(access_code: str, limit: int = 10)`
 - `get_my_health_summary(access_code: str)`
 - `get_my_training_status(access_code: str)`
@@ -37,6 +39,7 @@ Ademas de las tools admin/coach basadas en `athlete_id`, existe una capa experim
 - Las tools `my_*` solo aceptan `access_code`.
 - La API resuelve internamente el atleta y nunca permite consultar otro `athlete_id`.
 - Todo sigue siendo read-only.
+- Si el atleta pregunta por una fecha concreta, conviene usar `get_my_day_overview` para responder con la planificacion y las actividades exactas de ese dia.
 
 Creacion de codigo:
 
@@ -70,6 +73,33 @@ Advertencias de seguridad:
 - Una iteracion futura puede migrar a hash, rotacion o OAuth.
 
 ## Nueva tool comparativa
+
+## Nueva tool de dia exacto
+
+`get_day_overview` y `get_my_day_overview` consultan `GET /api/mcp/training/day-overview` y `GET /api/mcp/me/day-overview`.
+
+Devuelven un JSON read-only con:
+
+- atleta y fecha resuelta
+- `training_day` si existe
+- `planned_sessions` del dia exacto
+- `activities` Garmin del dia exacto
+- `matches` cuando haya vinculacion explicita o coincidencia simple por fecha/deporte
+- `summary` con mensaje claro cuando hay plan sin Garmin, Garmin sin plan o no hay datos
+
+Reglas importantes:
+
+- No reemplaza la fecha consultada por una actividad cercana.
+- Acepta `YYYY-MM-DD` y tambien `DD-MM-YYYY`.
+- Si hay una sesion planificada sin actividad asociada, devuelve igualmente la planificacion del dia.
+
+Prompt ejemplo:
+
+- `Soy Pablo Scarone, mi clave de atleta es XXXX. Que tengo para el 19-05-2026?`
+
+Respuesta esperable:
+
+- `Para el 19/05/2026 tenes programado Gimnasio suave, 45 minutos. No hay actividad Garmin asociada todavia.`
 
 `compare_planned_vs_done` consulta `GET /api/mcp/compare/planned-vs-done` y devuelve un JSON read-only con:
 
@@ -247,6 +277,8 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&date=2026-05-13"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&activity_id=123"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&planned_session_id=456"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-overview?athlete_id=1&date=2026-05-19"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-overview?athlete_id=1&date=19-05-2026"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1&reference_date=2026-05-13"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1&planned_session_id=456"
