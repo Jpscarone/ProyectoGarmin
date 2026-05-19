@@ -310,6 +310,8 @@ curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/compare/pla
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/week-load-summary?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/me/identify?access_code=CARO-7K92-XP31"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/me/activities/recent?access_code=CARO-7K92-XP31&limit=5"
 ```
 
 Prompt de prueba desde ChatGPT:
@@ -320,6 +322,48 @@ Usando ProyectoGarmin, dame una recomendacion para la proxima sesion de Pablo Sc
 Usando ProyectoGarmin, dame un resumen de carga semanal de Pablo Scarone y comparalo con la semana anterior.
 Usando ProyectoGarmin, traeme el payload de analisis de la ultima actividad de Pablo y dame feedback tecnico por bloques.
 ```
+
+### Acceso experimental por atleta
+
+Existe una capa experimental para algunos atletas conocidos usando `access_code` privado.
+
+- No reemplaza el acceso admin/coach actual con `athlete_id`.
+- No requiere OAuth en esta etapa.
+- El MCP sigue entrando por `https://proyectogarmin.dyndns.org/mcp`.
+- Las tools nuevas `my_*` reciben `access_code` y la API interna resuelve el atleta.
+- No se acepta `athlete_id` en esos endpoints `me`.
+
+Crear una clave:
+
+```bash
+cd ~/ProyectoGarmin
+source .venv/bin/activate
+python ./scripts/create_athlete_access_code.py --athlete-id 2 --label "Carolina ChatGPT" --prefix CARO
+deactivate
+```
+
+Crear una clave manual:
+
+```bash
+python ./scripts/create_athlete_access_code.py --athlete-id 2 --code CARO-TEST-1234 --label "Carolina ChatGPT"
+```
+
+Entrega:
+
+- Entregar el `access_code` al atleta por un canal privado.
+- El atleta puede decir en ChatGPT algo como:
+  `Soy Carolina, mi clave de atleta es CARO-7K92-XP31`
+
+Revocacion:
+
+- Por ahora, desactivar el codigo directamente en la tabla `athlete_access_codes` poniendo `is_active=false`.
+- No borrar historico si solo queres cortar acceso.
+
+Advertencia:
+
+- Esta V1 guarda `access_code` en texto plano por simplicidad experimental.
+- No usar este enfoque con usuarios externos o no confiables.
+- Si el alcance crece, migrar a hash, rotacion o un esquema con OAuth.
 
 ### MCP local
 

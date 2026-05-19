@@ -5,7 +5,7 @@ import unittest
 from datetime import date, datetime
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -14,6 +14,7 @@ from app.db.base import Base
 from app.db.models import activity_session_match  # noqa: F401
 from app.db.models import analysis_report  # noqa: F401
 from app.db.models import athlete  # noqa: F401
+from app.db.models import athlete_access_code  # noqa: F401
 from app.db.models import daily_health_metric  # noqa: F401
 from app.db.models import garmin_activity  # noqa: F401
 from app.db.models import garmin_activity_lap  # noqa: F401
@@ -28,6 +29,7 @@ from app.db.models import weekly_analysis  # noqa: F401
 from app.db.models.activity_session_match import ActivitySessionMatch
 from app.db.models.analysis_report import AnalysisReport
 from app.db.models.athlete import Athlete
+from app.db.models.athlete_access_code import AthleteAccessCode
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
@@ -61,6 +63,35 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.db.add(self.athlete)
         self.db.commit()
         self.db.refresh(self.athlete)
+        self.db.add(
+            AthleteAccessCode(
+                athlete_id=self.athlete.id,
+                access_code="ATLETA-MCP-1234",
+                label="Atleta principal MCP",
+                is_active=True,
+            )
+        )
+        self.other_athlete = Athlete(name="Atleta ajeno MCP")
+        self.db.add(self.other_athlete)
+        self.db.commit()
+        self.db.refresh(self.other_athlete)
+        self.db.add_all(
+            [
+                AthleteAccessCode(
+                    athlete_id=self.other_athlete.id,
+                    access_code="ATLETA-INACTIVO-9999",
+                    label="Inactivo",
+                    is_active=False,
+                ),
+                AthleteAccessCode(
+                    athlete_id=self.other_athlete.id,
+                    access_code="OTRO-MCP-5678",
+                    label="Atleta ajeno",
+                    is_active=True,
+                ),
+            ]
+        )
+        self.db.commit()
 
         self.plan = TrainingPlan(
             athlete_id=self.athlete.id,
@@ -104,7 +135,7 @@ class ApiMcpRoutesTests(unittest.TestCase):
 
     def test_session_feedback_works_without_activity(self) -> None:
         response = self.client.get(
-            "/api/mcp/session-feedback?date=2026-05-05",
+            f"/api/mcp/session-feedback?date=2026-05-05&athlete_id={self.athlete.id}",
             headers=self.headers,
         )
 
@@ -146,15 +177,96 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["count"], 1)
         self.assertEqual(payload["activities"][0]["activity_name"], "Rodaje MCP")
 
+    def test_identify_me_returns_athlete_from_valid_access_code(self) -> None:
+        response = self.client.get(
+            "/api/mcp/me/identify?access_code=ATLETA-MCP-1234",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["athlete"]["name"], self.athlete.name)
+        access_row = self.db.scalar(select(AthleteAccessCode).where(AthleteAccessCode.access_code == "ATLETA-MCP-1234"))
+        self.assertIsNotNone(access_row)
+        assert access_row is not None
+        self.assertIsNotNone(access_row.last_used_at)
+
+    def test_identify_me_returns_401_for_invalid_access_code(self) -> None:
+        response = self.client.get(
+            "/api/mcp/me/identify?access_code=NOPE-0000",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Clave de acceso invalida.")
+
+    def test_identify_me_returns_401_for_inactive_access_code(self) -> None:
+        response = self.client.get(
+            "/api/mcp/me/identify?access_code=ATLETA-INACTIVO-9999",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()["detail"], "Clave de acceso invalida.")
+
+    def test_my_recent_activities_only_returns_activities_for_access_code_athlete(self) -> None:
+        self.db.add_all(
+            [
+                GarminActivity(
+                    athlete_id=self.athlete.id,
+                    garmin_activity_id=600001,
+                    activity_name="Solo atleta correcto",
+                    sport_type="running",
+                    start_time=datetime(2026, 5, 18, 7, 0, 0),
+                    duration_sec=1800,
+                    distance_m=5000,
+                ),
+                GarminActivity(
+                    athlete_id=self.other_athlete.id,
+                    garmin_activity_id=600002,
+                    activity_name="Atleta ajeno",
+                    sport_type="running",
+                    start_time=datetime(2026, 5, 18, 8, 0, 0),
+                    duration_sec=2100,
+                    distance_m=6000,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/activities/recent?access_code=ATLETA-MCP-1234&limit=10",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["count"], 1)
+        self.assertEqual([item["activity_name"] for item in payload["activities"]], ["Solo atleta correcto"])
+
+    def test_my_endpoints_reject_manual_athlete_id(self) -> None:
+        response = self.client.get(
+            f"/api/mcp/me/training/status?access_code=ATLETA-MCP-1234&athlete_id={self.other_athlete.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"], "athlete_id no esta permitido en este endpoint.")
+
     def test_week_context_returns_schema_version(self) -> None:
-        response = self.client.get("/api/mcp/week-context", headers=self.headers)
+        response = self.client.get(f"/api/mcp/week-context?athlete_id={self.athlete.id}", headers=self.headers)
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["schema_version"], "mcp_week_context_v1")
 
     def test_last_activity_feedback_does_not_break_without_activity(self) -> None:
-        response = self.client.get("/api/mcp/last-activity-feedback", headers=self.headers)
+        response = self.client.get(
+            f"/api/mcp/last-activity-feedback?athlete_id={self.athlete.id}",
+            headers=self.headers,
+        )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -163,7 +275,10 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertIsNone(payload["analysis"])
 
     def test_next_session_context_does_not_break_without_next_session(self) -> None:
-        response = self.client.get("/api/mcp/next-session-context", headers=self.headers)
+        response = self.client.get(
+            f"/api/mcp/next-session-context?athlete_id={self.athlete.id}",
+            headers=self.headers,
+        )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()

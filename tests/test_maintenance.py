@@ -65,26 +65,28 @@ class MaintenanceTests(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
-    def test_admin_sees_maintenance_in_navbar(self) -> None:
+    def test_admin_sees_configuracion_in_navbar(self) -> None:
         self._login_cookie(self.admin.id)
 
         response = self.client.get("/athletes/select", headers={"accept": "text/html"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn(">Mantenimiento<", response.text)
+        self.assertIn(">Configuracion<", response.text)
+        self.assertNotIn(">Sync Garmin<", response.text)
 
-    def test_non_admin_does_not_see_maintenance_in_navbar(self) -> None:
+    def test_non_admin_does_not_see_configuracion_in_navbar(self) -> None:
         self._login_cookie(self.coach.id)
 
         response = self.client.get("/athletes/select", headers={"accept": "text/html"})
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn(">Mantenimiento<", response.text)
+        self.assertNotIn(">Configuracion<", response.text)
+        self.assertIn(">Sync Garmin<", response.text)
 
     def test_non_admin_cannot_access_maintenance_directly(self) -> None:
         self._login_cookie(self.coach.id)
 
-        response = self.client.get("/maintenance")
+        response = self.client.get("/configuracion")
 
         self.assertEqual(response.status_code, 403)
 
@@ -103,10 +105,10 @@ class MaintenanceTests(unittest.TestCase):
                 patch("app.services.maintenance_service.shutil.which", return_value="pg_dump"),
                 patch("app.services.maintenance_service.subprocess.run", side_effect=fake_run),
             ):
-                response = self.client.post("/maintenance/database-backup", follow_redirects=False)
+                response = self.client.post("/configuracion/database-backup", follow_redirects=False)
 
                 self.assertEqual(response.status_code, 303)
-                self.assertIn("/maintenance?status_message=", response.headers["location"])
+                self.assertIn("/configuracion?status_message=", response.headers["location"])
 
                 backup_files = list(backup_dir.glob("*.sql"))
                 self.assertEqual(len(backup_files), 1)
@@ -116,11 +118,11 @@ class MaintenanceTests(unittest.TestCase):
                     r"^\d{8}_\d{4}_ProyectoGarmin_training_app\.sql$",
                 )
 
-                maintenance_page = self.client.get("/maintenance")
+                maintenance_page = self.client.get("/configuracion")
                 self.assertEqual(maintenance_page.status_code, 200)
                 self.assertIn(backup_name, maintenance_page.text)
 
-                download_response = self.client.get(f"/maintenance/database-backup/download/{backup_name}")
+                download_response = self.client.get(f"/configuracion/database-backup/download/{backup_name}")
                 self.assertEqual(download_response.status_code, 200)
                 self.assertIn("attachment;", download_response.headers.get("content-disposition", ""))
                 self.assertEqual(download_response.content, b"-- backup --")
@@ -132,7 +134,7 @@ class MaintenanceTests(unittest.TestCase):
                 patch("app.services.maintenance_service.BACKUP_DIR", Path(temp_dir)),
                 patch("app.services.maintenance_service.shutil.which", return_value=None),
             ):
-                response = self.client.post("/maintenance/database-backup", follow_redirects=False)
+                response = self.client.post("/configuracion/database-backup", follow_redirects=False)
 
                 self.assertEqual(response.status_code, 303)
                 self.assertIn("pg_dump", response.headers["location"])
@@ -141,7 +143,7 @@ class MaintenanceTests(unittest.TestCase):
         self._login_cookie(self.admin.id)
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch("app.services.maintenance_service.BACKUP_DIR", Path(temp_dir)):
-                response = self.client.get("/maintenance/database-backup/download/../secret.txt")
+                response = self.client.get("/configuracion/database-backup/download/../secret.txt")
 
         self.assertEqual(response.status_code, 404)
 
@@ -150,8 +152,8 @@ class MaintenanceTests(unittest.TestCase):
         settings = self._settings(app_env="production", enable_local_db_sync=True)
 
         with self._patch_settings(settings):
-            page = self.client.get("/maintenance")
-            post = self.client.post("/maintenance/sync-db-from-vps")
+            page = self.client.get("/configuracion")
+            post = self.client.post("/configuracion/sync-db-from-vps")
 
         self.assertEqual(page.status_code, 200)
         self.assertNotIn("Traer BD desde VPS", page.text)
@@ -162,8 +164,8 @@ class MaintenanceTests(unittest.TestCase):
         settings = self._settings(app_env="local", enable_local_db_sync=False)
 
         with self._patch_settings(settings):
-            page = self.client.get("/maintenance")
-            post = self.client.post("/maintenance/sync-db-from-vps")
+            page = self.client.get("/configuracion")
+            post = self.client.post("/configuracion/sync-db-from-vps")
 
         self.assertEqual(page.status_code, 200)
         self.assertNotIn("Traer BD desde VPS", page.text)
@@ -174,7 +176,7 @@ class MaintenanceTests(unittest.TestCase):
         settings = self._settings(app_env="local", enable_local_db_sync=True)
 
         with self._patch_settings(settings):
-            page = self.client.get("/maintenance")
+            page = self.client.get("/configuracion")
 
         self.assertEqual(page.status_code, 200)
         self.assertIn("Traer BD desde VPS", page.text)
@@ -229,7 +231,7 @@ class MaintenanceTests(unittest.TestCase):
                 patch("app.services.local_db_sync_service.shutil.which", side_effect=fake_which),
                 patch("app.services.local_db_sync_service.subprocess.run", side_effect=fake_run),
             ):
-                response = self.client.post("/maintenance/sync-db-from-vps", follow_redirects=False)
+                response = self.client.post("/configuracion/sync-db-from-vps", follow_redirects=False)
 
                 self.assertEqual(response.status_code, 303)
                 self.assertIn("Base%20local%20actualizada%20con%20datos%20del%20VPS", response.headers["location"])
@@ -246,6 +248,14 @@ class MaintenanceTests(unittest.TestCase):
         self.assertTrue(any(command[0] == "pg_dump" for command in commands))
         self.assertTrue(any(command[0] == "psql" for command in commands))
         self.assertTrue(any(command[:4] == [sys.executable, "-m", "alembic", "upgrade"] for command in commands))
+
+    def test_legacy_maintenance_url_redirects_to_configuracion(self) -> None:
+        self._login_cookie(self.admin.id)
+
+        response = self.client.get("/maintenance", follow_redirects=False)
+
+        self.assertEqual(response.status_code, 307)
+        self.assertEqual(response.headers["location"], "/configuracion")
 
     def _patch_settings(self, settings: Settings):
         @contextmanager

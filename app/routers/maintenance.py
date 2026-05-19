@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
@@ -29,7 +29,10 @@ from app.services.maintenance_service import (
 from app.web.templates import build_templates
 
 
-router = APIRouter(prefix="/maintenance", tags=["maintenance"])
+CONFIG_PATH = "/configuracion"
+LEGACY_PATH = "/maintenance"
+
+router = APIRouter(tags=["maintenance"])
 templates = build_templates(Path(__file__).resolve().parent.parent)
 
 
@@ -53,7 +56,7 @@ def _redirect(
     return RedirectResponse(url=f"{url}{suffix}", status_code=303)
 
 
-@router.get("", response_class=HTMLResponse)
+@router.get(CONFIG_PATH, response_class=HTMLResponse)
 def maintenance_index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     require_admin_user(request, db)
     settings = get_settings()
@@ -89,17 +92,26 @@ def maintenance_index(request: Request, db: Session = Depends(get_db)) -> HTMLRe
     )
 
 
-@router.post("/database-backup")
+@router.get(LEGACY_PATH)
+def maintenance_legacy_redirect(request: Request) -> RedirectResponse:
+    query = urlencode(list(request.query_params.multi_items()))
+    suffix = f"?{query}" if query else ""
+    return RedirectResponse(url=f"{CONFIG_PATH}{suffix}", status_code=307)
+
+
+@router.post(f"{CONFIG_PATH}/database-backup")
+@router.post(f"{LEGACY_PATH}/database-backup")
 def maintenance_create_database_backup(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     require_admin_user(request, db)
     try:
         backup_path = create_database_backup()
     except MaintenanceError as exc:
-        return _redirect("/maintenance", error_message=str(exc))
-    return _redirect("/maintenance", status_message=f"Backup generado: {backup_path.name}")
+        return _redirect(CONFIG_PATH, error_message=str(exc))
+    return _redirect(CONFIG_PATH, status_message=f"Backup generado: {backup_path.name}")
 
 
-@router.get("/database-backup/download/{filename}")
+@router.get(f"{CONFIG_PATH}/database-backup/download/{{filename}}")
+@router.get(f"{LEGACY_PATH}/database-backup/download/{{filename}}")
 def maintenance_download_database_backup(filename: str, request: Request, db: Session = Depends(get_db)) -> FileResponse:
     require_admin_user(request, db)
     try:
@@ -113,7 +125,8 @@ def maintenance_download_database_backup(filename: str, request: Request, db: Se
     )
 
 
-@router.post("/sync-db-from-vps")
+@router.post(f"{CONFIG_PATH}/sync-db-from-vps")
+@router.post(f"{LEGACY_PATH}/sync-db-from-vps")
 def maintenance_sync_db_from_vps(request: Request, db: Session = Depends(get_db)) -> RedirectResponse:
     require_admin_user(request, db)
     settings = get_settings()
@@ -121,15 +134,15 @@ def maintenance_sync_db_from_vps(request: Request, db: Session = Depends(get_db)
         validate_local_db_sync_enabled(settings)
         result = sync_vps_to_local(settings=settings)
     except LocalDbSyncError as exc:
-        if exc.step in {"entorno", "configuración"}:
+        if exc.step in {"entorno", "configuracion", "configuraciÃ³n"}:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.message) from exc
-        return _redirect("/maintenance", error_message=f"{exc.step}: {exc.message}")
+        return _redirect(CONFIG_PATH, error_message=f"{exc.step}: {exc.message}")
     return _redirect(
-        "/maintenance",
+        CONFIG_PATH,
         status_message=result.message,
         extra_params={
             "remote_backup": result.remote_backup_filename,
             "local_backup": result.local_backup_filename,
-            "sync_result": "Sincronización completada correctamente.",
+            "sync_result": "Sincronizacion completada correctamente.",
         },
     )

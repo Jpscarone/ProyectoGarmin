@@ -64,6 +64,30 @@ async def get_training_status(athlete_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def identify_me(access_code: str) -> dict[str, Any]:
+    """Identifica al atleta asociado a una clave privada experimental, sin exponer athlete_id en la consulta."""
+    return await CLIENT.identify_me(access_code=access_code)
+
+
+@mcp.tool()
+async def get_my_recent_activities(access_code: str, limit: int = 10) -> dict[str, Any]:
+    """Devuelve las actividades recientes del atleta asociado a la clave privada indicada."""
+    return await CLIENT.get_my_recent_activities(access_code=access_code, limit=limit)
+
+
+@mcp.tool()
+async def get_my_health_summary(access_code: str) -> dict[str, Any]:
+    """Devuelve el resumen de salud/readiness del atleta asociado a la clave privada indicada."""
+    return await CLIENT.get_my_health_summary(access_code=access_code)
+
+
+@mcp.tool()
+async def get_my_training_status(access_code: str) -> dict[str, Any]:
+    """Devuelve el estado general del atleta asociado a la clave privada indicada."""
+    return await CLIENT.get_my_training_status(access_code=access_code)
+
+
+@mcp.tool()
 async def compare_planned_vs_done(
     athlete_id: int,
     date: str | None = None,
@@ -76,6 +100,18 @@ async def compare_planned_vs_done(
         date=date,
         activity_id=activity_id,
         planned_session_id=planned_session_id,
+    )
+
+
+@mcp.tool()
+async def compare_my_planned_vs_done(
+    access_code: str,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Compara lo planificado vs lo realizado solo para el atleta resuelto por la clave privada indicada."""
+    return await CLIENT.compare_my_planned_vs_done(
+        access_code=access_code,
+        date=date,
     )
 
 
@@ -94,6 +130,18 @@ async def get_next_session_recommendation(
 
 
 @mcp.tool()
+async def get_my_next_session_recommendation(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve una recomendacion read-only para la proxima sesion del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_next_session_recommendation(
+        access_code=access_code,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
 async def get_week_load_summary(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -102,6 +150,20 @@ async def get_week_load_summary(
     """Devuelve un resumen read-only de carga semanal, opcionalmente comparado con la semana previa."""
     return await CLIENT.get_week_load_summary(
         athlete_id=athlete_id,
+        week_start_date=week_start_date,
+        compare_previous=compare_previous,
+    )
+
+
+@mcp.tool()
+async def get_my_week_load_summary(
+    access_code: str,
+    week_start_date: str | None = None,
+    compare_previous: bool = True,
+) -> dict[str, Any]:
+    """Devuelve un resumen read-only de carga semanal para el atleta resuelto por la clave privada."""
+    return await CLIENT.get_my_week_load_summary(
+        access_code=access_code,
         week_start_date=week_start_date,
         compare_previous=compare_previous,
     )
@@ -117,6 +179,22 @@ async def get_session_analysis_payload(
     """Devuelve el payload tecnico del analisis de sesion para evitar copiado manual desde la web."""
     return await CLIENT.get_session_analysis_payload(
         athlete_id=athlete_id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date=date,
+    )
+
+
+@mcp.tool()
+async def get_my_session_analysis_payload(
+    access_code: str,
+    date: str | None = None,
+    activity_id: int | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Devuelve el payload tecnico de analisis de sesion solo para el atleta resuelto por la clave privada."""
+    return await CLIENT.get_my_session_analysis_payload(
+        access_code=access_code,
         planned_session_id=planned_session_id,
         activity_id=activity_id,
         date=date,

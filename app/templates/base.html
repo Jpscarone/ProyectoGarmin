@@ -18,11 +18,12 @@
                 <a href="/calendar">Calendario</a>
                 <a href="/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% if request.state.current_training_plan %}&training_plan_id={{ request.state.current_training_plan.id }}{% endif %}{% endif %}">Actividades</a>
                 <a href="/health{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Salud</a>
+                {% if request.state.current_user.role != "admin" %}
                 <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Sync Garmin</a>
+                {% endif %}
                 <a href="/garmin/account">Cuenta Garmin</a>
                 {% if request.state.current_user.role == "admin" %}
-                <a href="/maintenance">Mantenimiento</a>
-                <a href="/admin/users">Usuarios</a>
+                <a href="/configuracion">Configuracion</a>
                 {% endif %}
                 {% endif %}
             </nav>
@@ -37,11 +38,11 @@
                     · {{ request.state.current_training_plan.name }}
                     {% endif %}
                 </div>
-                <form method="post" action="/logout">
-                    <button type="submit">Cerrar sesión</button>
+                <form method="post" action="/logout" class="top-context-logout">
+                    <button type="submit" class="button button-secondary button-logout">Cerrar sesion</button>
                 </form>
                 {% else %}
-                <a class="top-context-link top-context-missing" href="/login">Iniciar sesión</a>
+                <a class="top-context-link top-context-missing" href="/login">Iniciar sesion</a>
                 {% endif %}
             </div>
         </header>

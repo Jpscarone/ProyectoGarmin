@@ -52,6 +52,33 @@ class TrainingAppApiClient:
             params={"athlete_id": str(int(athlete_id))},
         )
 
+    async def identify_me(self, *, access_code: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/identify",
+            params={"access_code": access_code},
+        )
+
+    async def get_my_recent_activities(self, *, access_code: str, limit: int = 10) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/activities/recent",
+            params={
+                "access_code": access_code,
+                "limit": str(max(1, int(limit))),
+            },
+        )
+
+    async def get_my_health_summary(self, *, access_code: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/health/summary",
+            params={"access_code": access_code},
+        )
+
+    async def get_my_training_status(self, *, access_code: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/training/status",
+            params={"access_code": access_code},
+        )
+
     async def compare_planned_vs_done(
         self,
         *,
@@ -124,6 +151,72 @@ class TrainingAppApiClient:
             params["date"] = date
         return await self._get_json(
             "/api/mcp/analysis/session-payload",
+            params=params,
+        )
+
+    async def compare_my_planned_vs_done(
+        self,
+        *,
+        access_code: str,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/me/compare/planned-vs-done",
+            params=params,
+        )
+
+    async def get_my_next_session_recommendation(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json(
+            "/api/mcp/me/training/next-session-recommendation",
+            params=params,
+        )
+
+    async def get_my_week_load_summary(
+        self,
+        *,
+        access_code: str,
+        week_start_date: str | None = None,
+        compare_previous: bool = True,
+    ) -> dict[str, Any]:
+        params = {
+            "access_code": access_code,
+            "compare_previous": "true" if compare_previous else "false",
+        }
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json(
+            "/api/mcp/me/training/week-load-summary",
+            params=params,
+        )
+
+    async def get_my_session_analysis_payload(
+        self,
+        *,
+        access_code: str,
+        planned_session_id: int | None = None,
+        activity_id: int | None = None,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/me/analysis/session-payload",
             params=params,
         )
 

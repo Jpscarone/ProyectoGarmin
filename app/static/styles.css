@@ -80,6 +80,8 @@ a {
     gap: 0.4rem;
     flex-wrap: wrap;
     justify-content: flex-end;
+    align-items: center;
+    flex: 1 1 auto;
 }
 
 .site-nav a {
@@ -102,16 +104,19 @@ a {
     margin-left: auto;
     display: flex;
     align-items: center;
+    gap: 0.75rem;
+    flex-shrink: 0;
 }
 
 .top-context-link {
     display: inline-flex;
     align-items: center;
-    max-width: 320px;
-    padding: 0.55rem 0.8rem;
-    border: 1px solid #cfe0ee;
+    max-width: 420px;
+    min-height: 44px;
+    padding: 0.65rem 0.95rem;
+    border: 1px solid #d7e3ec;
     border-radius: 999px;
-    background: #f4f8fb;
+    background: linear-gradient(180deg, #f8fbfd, #eef4f8);
     color: var(--primary-dark);
     font-size: 0.9rem;
     font-weight: 700;
@@ -125,6 +130,28 @@ a {
     color: var(--warning);
     border-color: #f0dca2;
     background: #fff8df;
+}
+
+.top-context-logout {
+    display: inline-flex;
+}
+
+.button-logout {
+    min-width: 128px;
+    min-height: 44px;
+    padding-inline: 1rem;
+    border-color: #d7e3ec;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #ffffff, #eef3f7);
+    color: var(--utility-text);
+    font-weight: 700;
+    box-shadow: none;
+}
+
+.button-logout:hover {
+    background: linear-gradient(180deg, #f7fafc, #e7eef4);
+    border-color: #c8d7e3;
+    color: var(--primary-dark);
 }
 
 .page-content {
@@ -220,6 +247,58 @@ a {
     font-size: 0.8rem;
     font-weight: 700;
     letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.maintenance-shortcuts {
+    display: grid;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    padding: 1.15rem;
+    border: 1px solid rgba(60, 95, 131, 0.14);
+    border-radius: var(--radius-lg);
+    background: linear-gradient(135deg, rgba(238, 244, 248, 0.92), rgba(255, 255, 255, 0.98));
+}
+
+.maintenance-shortcuts-header h2 {
+    margin: 0;
+    font-size: 1.35rem;
+}
+
+.maintenance-shortcuts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 0.9rem;
+}
+
+.maintenance-shortcut-card {
+    display: grid;
+    gap: 0.45rem;
+    padding: 1rem 1.05rem;
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
+    box-shadow: var(--shadow-sm);
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.maintenance-shortcut-card:hover {
+    transform: translateY(-1px);
+    border-color: rgba(60, 95, 131, 0.25);
+    box-shadow: var(--shadow-md);
+}
+
+.maintenance-shortcut-card strong {
+    font-size: 1.02rem;
+    line-height: 1.35;
+}
+
+.maintenance-shortcut-label {
+    color: var(--primary);
+    font-size: 0.78rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 

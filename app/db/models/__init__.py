@@ -5,6 +5,7 @@ from app.db.models.activity_weather import ActivityWeather
 from app.db.models.analysis_report import AnalysisReport
 from app.db.models.analysis_report_item import AnalysisReportItem
 from app.db.models.athlete import Athlete
+from app.db.models.athlete_access_code import AthleteAccessCode
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.garmin_activity_lap import GarminActivityLap
@@ -32,6 +33,7 @@ __all__ = [
     "AnalysisReport",
     "AnalysisReportItem",
     "Athlete",
+    "AthleteAccessCode",
     "DailyHealthMetric",
     "GarminActivity",
     "GarminActivityLap",

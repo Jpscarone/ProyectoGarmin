@@ -1,14 +1,14 @@
 {% extends "base.html" %}
 
-{% block title %}Mantenimiento | training_app{% endblock %}
+{% block title %}Configuracion | training_app{% endblock %}
 
 {% block content %}
 <section class="panel">
     <div class="section-heading">
         <div>
             <p class="eyebrow">Administracion</p>
-            <h1>Mantenimiento</h1>
-            <p class="text-muted">Herramientas seguras para soporte operativo, backups y tareas administrativas.</p>
+            <h1>Configuracion</h1>
+            <p class="text-muted">Centro de herramientas administrativas, sincronizacion y mantenimiento del sistema.</p>
         </div>
     </div>
 
@@ -26,6 +26,27 @@
     </div>
     {% endif %}
 
+    <section class="maintenance-shortcuts">
+        <div class="maintenance-shortcuts-header">
+            <div>
+                <p class="eyebrow">Accesos rapidos</p>
+                <h2>Herramientas centralizadas</h2>
+            </div>
+        </div>
+        <div class="maintenance-shortcuts-grid">
+            <a class="maintenance-shortcut-card" href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">
+                <span class="maintenance-shortcut-label">Sync Garmin</span>
+                <strong>Sincronizacion manual y diagnostico</strong>
+                <span class="text-muted">Forza sincronizaciones, revisa estado y accede a utilidades de emergencia.</span>
+            </a>
+            <a class="maintenance-shortcut-card" href="/admin/users">
+                <span class="maintenance-shortcut-label">Usuarios</span>
+                <strong>Gestion de accesos y roles</strong>
+                <span class="text-muted">Administra usuarios, permisos por atleta y reseteo de credenciales.</span>
+            </a>
+        </div>
+    </section>
+
     <div class="maintenance-grid">
         <article class="panel panel-subtle maintenance-card">
             <div class="maintenance-card-header">
@@ -38,7 +59,7 @@
             <p class="text-muted">
                 Genera un backup PostgreSQL usando la configuracion actual del sistema y lo guarda en <code>var/backups/</code>.
             </p>
-            <form method="post" action="/maintenance/database-backup" class="maintenance-action-form">
+            <form method="post" action="/configuracion/database-backup" class="maintenance-action-form">
                 <button
                     class="button"
                     type="submit"
@@ -70,7 +91,7 @@
                                 <td>{{ backup.size_label }}</td>
                                 <td>{{ format_local_datetime(backup.created_at) }}</td>
                                 <td>
-                                    <a class="button button-secondary" href="/maintenance/database-backup/download/{{ backup.filename }}">Descargar</a>
+                                    <a class="button button-secondary" href="/configuracion/database-backup/download/{{ backup.filename }}">Descargar</a>
                                 </td>
                             </tr>
                             {% endfor %}
@@ -101,7 +122,7 @@
             </div>
 
             {% if local_db_sync_enabled %}
-            <form method="post" action="/maintenance/sync-db-from-vps" class="maintenance-action-form">
+            <form method="post" action="/configuracion/sync-db-from-vps" class="maintenance-action-form">
                 <button
                     class="button button-danger"
                     type="submit"

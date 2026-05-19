@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.db.models.athlete_access_code import AthleteAccessCode
     from app.db.models.activity_session_match import ActivitySessionMatch
     from app.db.models.analysis_report import AnalysisReport
     from app.db.models.daily_health_metric import DailyHealthMetric
@@ -125,6 +126,10 @@ class Athlete(Base):
         order_by="WeeklyAnalysis.week_start_date.desc()",
     )
     user_permissions: Mapped[list["UserAthletePermission"]] = relationship(
+        back_populates="athlete",
+        cascade="all, delete-orphan",
+    )
+    access_codes: Mapped[list["AthleteAccessCode"]] = relationship(
         back_populates="athlete",
         cascade="all, delete-orphan",
     )

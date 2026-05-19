@@ -32,6 +32,7 @@ from app.services.mcp_context_service import (
     build_session_feedback_payload,
     build_week_context_payload,
 )
+from app.services.athlete_access_code_service import resolve_athlete_by_access_code
 from app.services.mcp_security import verify_mcp_bearer_token
 from app.services.training_plan_service import select_default_training_plan
 from app.utils.datetime_utils import today_local
@@ -70,6 +71,121 @@ def list_mcp_athletes(db: Session = Depends(get_db)) -> list[dict[str, Any]]:
         }
         for athlete in athletes
     ]
+
+
+@router.get("/me/identify")
+def identify_mcp_athlete(
+    request: Request,
+    access_code: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return {"athlete": _serialize_athlete_min(athlete)}
+
+
+@router.get("/me/activities/recent")
+def list_my_recent_activities(
+    request: Request,
+    access_code: str = Query(...),
+    limit: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return list_recent_activities(athlete_id=athlete.id, limit=limit, db=db)
+
+
+@router.get("/me/health/summary")
+def read_my_health_summary(
+    request: Request,
+    access_code: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return read_health_summary(athlete_id=athlete.id, db=db)
+
+
+@router.get("/me/training/status")
+def read_my_training_status(
+    request: Request,
+    access_code: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return read_training_status(athlete_id=athlete.id, db=db)
+
+
+@router.get("/me/compare/planned-vs-done")
+def compare_my_planned_vs_done(
+    request: Request,
+    access_code: str = Query(...),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return compare_planned_vs_done(
+        athlete_id=athlete.id,
+        date_value=date_value,
+        db=db,
+    )
+
+
+@router.get("/me/training/next-session-recommendation")
+def get_my_next_session_recommendation(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_next_session_recommendation(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
+@router.get("/me/training/week-load-summary")
+def get_my_week_load_summary(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    compare_previous: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_week_load_summary(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        compare_previous=compare_previous,
+        db=db,
+    )
+
+
+@router.get("/me/analysis/session-payload")
+def get_my_session_analysis_payload(
+    request: Request,
+    access_code: str = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    activity_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_session_analysis_payload(
+        athlete_id=athlete.id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date_value=date_value,
+        db=db,
+    )
 
 
 @router.get("/activities/recent")
@@ -557,6 +673,15 @@ def _parse_iso_date(raw_value: str, field_name: str) -> date:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"{field_name} debe tener formato YYYY-MM-DD.",
         ) from exc
+
+
+def _reject_forbidden_query_params(request: Request, *names: str) -> None:
+    for name in names:
+        if name in request.query_params:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{name} no esta permitido en este endpoint.",
+            )
 
 
 def _resolve_context_athlete(request: Request, db: Session, *, athlete_id: int | None) -> Athlete | None:

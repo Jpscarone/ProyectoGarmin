@@ -16,10 +16,57 @@ No modifica el estado del sistema.
 - `get_health_summary(athlete_id: int)`
 - `get_latest_weekly_analysis(athlete_id: int)`
 - `get_training_status(athlete_id: int)`
+- `identify_me(access_code: str)`
+- `get_my_recent_activities(access_code: str, limit: int = 10)`
+- `get_my_health_summary(access_code: str)`
+- `get_my_training_status(access_code: str)`
 - `compare_planned_vs_done(athlete_id: int, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+- `compare_my_planned_vs_done(access_code: str, date: str | None = None)`
 - `get_next_session_recommendation(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
+- `get_my_next_session_recommendation(access_code: str, reference_date: str | None = None)`
 - `get_week_load_summary(athlete_id: int, week_start_date: str | None = None, compare_previous: bool = True)`
+- `get_my_week_load_summary(access_code: str, week_start_date: str | None = None, compare_previous: bool = True)`
 - `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
+- `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+
+## Acceso experimental por atleta
+
+Ademas de las tools admin/coach basadas en `athlete_id`, existe una capa experimental orientada al atleta con `access_code`.
+
+- El atleta no necesita conocer `athlete_id`.
+- Las tools `my_*` solo aceptan `access_code`.
+- La API resuelve internamente el atleta y nunca permite consultar otro `athlete_id`.
+- Todo sigue siendo read-only.
+
+Creacion de codigo:
+
+```powershell
+python .\scripts\create_athlete_access_code.py --athlete-id 2 --label "Carolina ChatGPT" --prefix CARO
+```
+
+Ejemplo de salida:
+
+```text
+Athlete access code created: id=7 athlete_id=2 athlete_name=Carolina access_code=CARO-7K92-XP31
+```
+
+Codigo manual:
+
+```powershell
+python .\scripts\create_athlete_access_code.py --athlete-id 2 --code CARO-TEST-1234 --label "Carolina ChatGPT"
+```
+
+Revocacion o desactivacion:
+
+- Esta V1 no tiene pantalla web todavia.
+- Desactivar manualmente `athlete_access_codes.is_active = false` en base o desde un script/admin futuro.
+
+Advertencias de seguridad:
+
+- Esta V1 guarda `access_code` en texto plano por simplicidad experimental.
+- Sirve solo para atletas conocidos y escenarios controlados.
+- No usar este enfoque con usuarios externos o desconocidos.
+- Una iteracion futura puede migrar a hash, rotacion o OAuth.
 
 ## Nueva tool comparativa
 

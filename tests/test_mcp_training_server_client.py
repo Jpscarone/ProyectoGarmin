@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import unittest
 
 import httpx
@@ -108,6 +109,101 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(payload["resolved_by"], "planned_session_id")
+
+    async def test_identify_me_uses_access_code_without_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/identify")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"athlete": {"id": 2, "name": "Carolina", "status": "active"}})
+
+        client = _build_client(handler)
+        payload = await client.identify_me(access_code="CARO-7K92-XP31")
+
+        self.assertEqual(payload["athlete"]["name"], "Carolina")
+
+    async def test_get_my_recent_activities_does_not_send_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/activities/recent")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("limit"), "7")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"count": 1, "activities": [{"activity_name": "Rodaje"}]})
+
+        client = _build_client(handler)
+        payload = await client.get_my_recent_activities(access_code="CARO-7K92-XP31", limit=7)
+
+        self.assertEqual(payload["count"], 1)
+
+    async def test_get_my_week_load_summary_does_not_send_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/week-load-summary")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-12")
+            self.assertEqual(request.url.params.get("compare_previous"), "true")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"week": {"start_date": "2026-05-12"}})
+
+        client = _build_client(handler)
+        payload = await client.get_my_week_load_summary(
+            access_code="CARO-7K92-XP31",
+            week_start_date="2026-05-12",
+            compare_previous=True,
+        )
+
+        self.assertEqual(payload["week"]["start_date"], "2026-05-12")
+
+    async def test_compare_my_planned_vs_done_only_sends_access_code_and_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/compare/planned-vs-done")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("date"), "2026-05-18")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            self.assertIsNone(request.url.params.get("activity_id"))
+            self.assertIsNone(request.url.params.get("planned_session_id"))
+            return httpx.Response(200, json={"date": "2026-05-18"})
+
+        client = _build_client(handler)
+        payload = await client.compare_my_planned_vs_done(
+            access_code="CARO-7K92-XP31",
+            date="2026-05-18",
+        )
+
+        self.assertEqual(payload["date"], "2026-05-18")
+
+    async def test_get_my_next_session_recommendation_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/next-session-recommendation")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-18")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            self.assertIsNone(request.url.params.get("planned_session_id"))
+            return httpx.Response(200, json={"reference_date": "2026-05-18"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_next_session_recommendation(
+            access_code="CARO-7K92-XP31",
+            reference_date="2026-05-18",
+        )
+
+        self.assertEqual(payload["reference_date"], "2026-05-18")
+
+    def test_my_tool_signatures_do_not_accept_athlete_id(self) -> None:
+        from mcp_training_server import server as mcp_server
+
+        signatures = {
+            "identify_me": inspect.signature(mcp_server.identify_me),
+            "get_my_recent_activities": inspect.signature(mcp_server.get_my_recent_activities),
+            "get_my_health_summary": inspect.signature(mcp_server.get_my_health_summary),
+            "get_my_training_status": inspect.signature(mcp_server.get_my_training_status),
+            "compare_my_planned_vs_done": inspect.signature(mcp_server.compare_my_planned_vs_done),
+            "get_my_next_session_recommendation": inspect.signature(mcp_server.get_my_next_session_recommendation),
+            "get_my_week_load_summary": inspect.signature(mcp_server.get_my_week_load_summary),
+            "get_my_session_analysis_payload": inspect.signature(mcp_server.get_my_session_analysis_payload),
+        }
+
+        for tool_name, signature in signatures.items():
+            self.assertNotIn("athlete_id", signature.parameters, tool_name)
 
 
 def _build_client(handler) -> TrainingAppApiClient:
