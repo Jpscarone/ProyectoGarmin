@@ -306,11 +306,16 @@ curl http://127.0.0.1:8000
 
 ```bash
 curl -H "Authorization: Bearer TOKEN" http://127.0.0.1:8000/api/mcp/ping
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=2026-05-20"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=20/05/2026"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1&week_start_date=2026-05-19"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/training/week-load-summary?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/me/identify?access_code=CARO-7K92-XP31"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/me/day-plan?access_code=CARO-7K92-XP31&date=20/05/2026"
+curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/me/week-plan?access_code=CARO-7K92-XP31&week_start_date=2026-05-19"
 curl -H "Authorization: Bearer TOKEN" "http://127.0.0.1:8000/api/mcp/me/activities/recent?access_code=CARO-7K92-XP31&limit=5"
 ```
 
@@ -321,6 +326,8 @@ Usando ProyectoGarmin, comparame la ultima actividad de Pablo Scarone con lo que
 Usando ProyectoGarmin, dame una recomendacion para la proxima sesion de Pablo Scarone segun su estado actual.
 Usando ProyectoGarmin, dame un resumen de carga semanal de Pablo Scarone y comparalo con la semana anterior.
 Usando ProyectoGarmin, traeme el payload de analisis de la ultima actividad de Pablo y dame feedback tecnico por bloques.
+Usando ProyectoGarmin, soy Pablo y mi clave es XXXX. Que sesion tengo manana.
+Usando ProyectoGarmin, soy Pablo y mi clave es XXXX. Que sesiones tengo esta semana.
 ```
 
 ### Acceso experimental por atleta

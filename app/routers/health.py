@@ -17,12 +17,9 @@ from app.services.auth_context import require_current_user
 from app.services.daily_health_metric_service import get_health_metric, get_health_metrics
 from app.services.athlete_context import get_current_athlete
 from app.services.health_ai_analysis_service import (
-    analyze_health_readiness_with_ai,
-    build_health_llm_json_hash,
-    create_health_ai_analysis,
     get_latest_health_ai_analysis_for_date,
+    get_or_create_health_ai_analysis,
     list_health_ai_analyses_for_athlete,
-    should_auto_run_health_ai_analysis,
 )
 from app.services.health_auto_sync_service import (
     build_health_sync_view,
@@ -33,12 +30,11 @@ from app.services.health_auto_sync_service import (
     utc_now,
 )
 from app.services.health_readiness_service import (
-    build_health_llm_json,
     build_health_readiness_summary,
     build_health_training_context,
     evaluate_health_readiness,
 )
-from app.services.openai_client import OpenAIIntegrationError, get_openai_model
+from app.services.openai_client import OpenAIIntegrationError
 from app.services.user_permission_service import require_can_edit_athlete, require_can_sync_garmin, require_can_view_athlete
 from app.utils.datetime_utils import format_local_datetime, today_local
 from app.web.templates import build_templates
@@ -134,10 +130,13 @@ def _serialize_health_ai_analysis(analysis: Any | None) -> dict[str, Any] | None
         "reference_date": analysis.reference_date.isoformat(),
         "created_at": analysis.created_at.isoformat() if analysis.created_at else None,
         "created_at_label": format_local_datetime(analysis.created_at),
+        "updated_at": analysis.updated_at.isoformat() if getattr(analysis, "updated_at", None) else None,
+        "updated_at_label": format_local_datetime(getattr(analysis, "updated_at", None)),
         "summary": _ui_health_text(analysis.summary),
         "training_recommendation": _ui_health_text(analysis.training_recommendation),
         "risk_level": analysis.risk_level,
         "model_name": analysis.model_name,
+        "source": getattr(analysis, "source", None),
         "llm_json_hash": analysis.llm_json_hash,
         "main_factors": list((analysis.ai_response_json or {}).get("main_factors") or []),
         "what_to_watch": list((analysis.ai_response_json or {}).get("what_to_watch") or []),
@@ -490,26 +489,6 @@ def _build_recent_trend_view(recent_ai_trend: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _should_auto_generate_health_ai_analysis(
-    athlete: Athlete,
-    *,
-    summary: Any,
-    evaluation: Any,
-    selected_date: date,
-    training_context: dict[str, Any],
-    latest_ai_analysis: Any | None,
-) -> bool:
-    llm_json = build_health_llm_json(
-        athlete,
-        summary,
-        evaluation,
-        selected_date,
-        training_context=training_context,
-    )
-    llm_json_hash = build_health_llm_json_hash(llm_json)
-    return should_auto_run_health_ai_analysis(latest_ai_analysis, llm_json_hash)
-
-
 def _build_health_readiness_view_model(
     db: Session,
     *,
@@ -547,6 +526,10 @@ def _build_health_readiness_view_model(
             "sync_view": build_health_sync_view(None, should_auto_sync=False),
             "should_auto_sync": False,
             "should_auto_ai_analysis": False,
+            "can_generate_ai_analysis": False,
+            "can_regenerate_ai_analysis": False,
+            "ai_analysis_button_label": "Generar analisis ahora",
+            "ai_analysis_empty_message": "Todavia no hay analisis IA de salud para esta fecha.",
             "health_auto_sync_url": "",
             "decision_card": {
                 "title": _decision_title("insufficient_data"),
@@ -577,14 +560,6 @@ def _build_health_readiness_view_model(
     recent_ai_trend = _serialize_health_ai_analysis_trend(recent_ai_analyses)
     sync_state = get_health_sync_state(db, athlete.id)
     should_sync = should_auto_sync_health(sync_state, utc_now(), selected_date)
-    should_auto_ai_analysis = _should_auto_generate_health_ai_analysis(
-        athlete,
-        summary=summary,
-        evaluation=evaluation,
-        selected_date=selected_date,
-        training_context=training_context,
-        latest_ai_analysis=latest_ai_analysis,
-    )
     today = today_local(athlete=athlete)
 
     def build_health_url(target_date: date) -> str:
@@ -622,7 +597,11 @@ def _build_health_readiness_view_model(
         "sync_state": serialize_health_sync_state(sync_state),
         "sync_view": build_health_sync_view(sync_state, should_auto_sync=should_sync),
         "should_auto_sync": should_sync,
-        "should_auto_ai_analysis": should_auto_ai_analysis,
+        "should_auto_ai_analysis": False,
+        "can_generate_ai_analysis": latest_ai_analysis is None,
+        "can_regenerate_ai_analysis": latest_ai_analysis is not None,
+        "ai_analysis_button_label": "Regenerar analisis" if latest_ai_analysis is not None else "Generar analisis ahora",
+        "ai_analysis_empty_message": "Todavia no hay analisis IA de salud para esta fecha.",
         "health_auto_sync_url": f"/health/auto-sync?selected_date={selected_date.isoformat()}&athlete_id={athlete.id}",
         "latest_ai_analysis": _serialize_health_ai_analysis(latest_ai_analysis),
         "recent_ai_history": _serialize_health_ai_analysis_history(recent_ai_analyses[:5], athlete.id),
@@ -707,6 +686,8 @@ def list_health_metrics(
         require_can_view_athlete(db, user, athlete_id)
         metrics = [metric for metric in metrics if metric.athlete_id == current_athlete.id]
     selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
+    if not selected_date and current_athlete is not None:
+        selected_date_value = today_local(athlete=current_athlete)
     readiness_view = _build_health_readiness_view_model(
         db,
         athlete_id=athlete_id,
@@ -737,11 +718,13 @@ def read_health_readiness(
     db: Session = Depends(get_db),
 ):
     user = require_current_user(request, db)
-    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
         require_can_view_athlete(db, user, athlete_id)
+    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
+    if not selected_date and current_athlete is not None:
+        selected_date_value = today_local(athlete=current_athlete)
     if invalid_selected_date:
         return {
             "error": "invalid_selected_date",
@@ -769,11 +752,13 @@ def auto_sync_health(
     db: Session = Depends(get_db),
 ):
     user = require_current_user(request, db)
-    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
         require_can_sync_garmin(db, user, athlete_id)
+    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
+    if not selected_date and current_athlete is not None:
+        selected_date_value = today_local(athlete=current_athlete)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return JSONResponse(
@@ -805,11 +790,13 @@ def read_health_readiness_llm_json(
     db: Session = Depends(get_db),
 ):
     user = require_current_user(request, db)
-    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
         require_can_view_athlete(db, user, athlete_id)
+    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
+    if not selected_date and current_athlete is not None:
+        selected_date_value = today_local(athlete=current_athlete)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return {
@@ -820,13 +807,9 @@ def read_health_readiness_llm_json(
     summary = build_health_readiness_summary(db, athlete.id, selected_date_value)
     evaluation = evaluate_health_readiness(summary)
     training_context = build_health_training_context(db, athlete.id, selected_date_value)
-    payload = build_health_llm_json(
-        athlete,
-        summary,
-        evaluation,
-        selected_date_value,
-        training_context=training_context,
-    )
+    from app.services.health_readiness_service import build_health_llm_json
+
+    payload = build_health_llm_json(athlete, summary, evaluation, selected_date_value, training_context=training_context)
     if invalid_selected_date:
         return {
             "error": "invalid_selected_date",
@@ -842,14 +825,17 @@ def analyze_health_readiness(
     request: Request,
     athlete_id: int | None = None,
     selected_date: str | None = Query(default=None),
+    force: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     user = require_current_user(request, db)
-    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
         require_can_edit_athlete(db, user, athlete_id)
+    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
+    if not selected_date and current_athlete is not None:
+        selected_date_value = today_local(athlete=current_athlete)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return JSONResponse(
@@ -860,20 +846,14 @@ def analyze_health_readiness(
             },
         )
 
-    summary = build_health_readiness_summary(db, athlete.id, selected_date_value)
-    evaluation = evaluate_health_readiness(summary)
-    training_context = build_health_training_context(db, athlete.id, selected_date_value)
-    llm_json = build_health_llm_json(
-        athlete,
-        summary,
-        evaluation,
-        selected_date_value,
-        training_context=training_context,
-    )
-    llm_json_hash = build_health_llm_json_hash(llm_json)
-
     try:
-        analysis = analyze_health_readiness_with_ai(llm_json)
+        saved_analysis, result_kind = get_or_create_health_ai_analysis(
+            db,
+            athlete_id=athlete.id,
+            reference_date=selected_date_value,
+            force=force,
+            source="manual",
+        )
     except OpenAIIntegrationError as exc:
         error_code = "missing_api_key" if "api_key" in str(exc).lower() else "ai_analysis_failed"
         status_code = 503 if error_code == "missing_api_key" else 502
@@ -893,29 +873,29 @@ def analyze_health_readiness(
             },
         )
 
-    model_name = None
-    try:
-        model_name = get_openai_model(get_settings())
-    except Exception:
-        model_name = None
-
-    saved_analysis = create_health_ai_analysis(
-        db,
-        athlete_id=athlete.id,
-        reference_date=selected_date_value,
-        llm_json=llm_json,
-        ai_response_json=analysis,
-        summary=analysis.get("summary"),
-        training_recommendation=analysis.get("training_recommendation"),
-        risk_level=analysis.get("risk_level"),
-        model_name=model_name,
-        llm_json_hash=llm_json_hash,
-    )
+    if saved_analysis is None:
+        response_payload: dict[str, Any] = {
+            "selected_date": selected_date_value.isoformat(),
+            "generated": False,
+            "reason": "insufficient_data",
+            "message": "Todavia no hay datos suficientes para generar el analisis IA de salud.",
+            "saved_analysis": None,
+        }
+        if invalid_selected_date:
+            response_payload["warning"] = "selected_date invalida; se uso la fecha de hoy."
+        return response_payload
 
     response_payload: dict[str, Any] = {
         "selected_date": selected_date_value.isoformat(),
-        "llm_json": llm_json,
-        "analysis": analysis,
+        "generated": result_kind in {"created", "updated"},
+        "reason": result_kind,
+        "message": (
+            "Se actualizo el analisis IA de salud."
+            if result_kind == "updated"
+            else ("Se genero el analisis IA de salud." if result_kind == "created" else "Ya existia un analisis IA para esta fecha.")
+        ),
+        "llm_json": saved_analysis.llm_json or {},
+        "analysis": saved_analysis.ai_response_json or {},
         "saved_analysis": _serialize_health_ai_analysis(saved_analysis),
     }
     if invalid_selected_date:
@@ -928,14 +908,17 @@ def auto_analyze_health_readiness(
     request: Request,
     athlete_id: int | None = None,
     selected_date: str | None = Query(default=None),
+    force: bool = Query(default=False),
     db: Session = Depends(get_db),
 ):
     user = require_current_user(request, db)
-    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
     current_athlete = get_current_athlete(request, db, athlete_id=athlete_id)
     if current_athlete is not None:
         athlete_id = current_athlete.id
         require_can_edit_athlete(db, user, athlete_id)
+    selected_date_value, invalid_selected_date = _coerce_selected_date(selected_date)
+    if not selected_date and current_athlete is not None:
+        selected_date_value = today_local(athlete=current_athlete)
     athlete = _resolve_health_athlete(db, athlete_id, get_health_metrics(db))
     if athlete is None:
         return JSONResponse(
@@ -947,28 +930,14 @@ def auto_analyze_health_readiness(
             },
         )
 
-    summary = build_health_readiness_summary(db, athlete.id, selected_date_value)
-    evaluation = evaluate_health_readiness(summary)
-    training_context = build_health_training_context(db, athlete.id, selected_date_value)
-    llm_json = build_health_llm_json(
-        athlete,
-        summary,
-        evaluation,
-        selected_date_value,
-        training_context=training_context,
-    )
-    llm_json_hash = build_health_llm_json_hash(llm_json)
-    latest_analysis = get_latest_health_ai_analysis_for_date(db, athlete.id, selected_date_value)
-
-    if not should_auto_run_health_ai_analysis(latest_analysis, llm_json_hash):
-        return {
-            "ran": False,
-            "reason": "already_analyzed",
-            "latest_analysis": _serialize_health_ai_analysis(latest_analysis),
-        }
-
     try:
-        analysis = analyze_health_readiness_with_ai(llm_json)
+        saved_analysis, result_kind = get_or_create_health_ai_analysis(
+            db,
+            athlete_id=athlete.id,
+            reference_date=selected_date_value,
+            force=force,
+            source="page_view",
+        )
     except OpenAIIntegrationError as exc:
         return JSONResponse(
             status_code=502,
@@ -988,30 +957,23 @@ def auto_analyze_health_readiness(
             },
         )
 
-    model_name = None
-    try:
-        model_name = get_openai_model(get_settings())
-    except Exception:
-        model_name = None
-
-    saved_analysis = create_health_ai_analysis(
-        db,
-        athlete_id=athlete.id,
-        reference_date=selected_date_value,
-        llm_json=llm_json,
-        llm_json_hash=llm_json_hash,
-        ai_response_json=analysis,
-        summary=analysis.get("summary"),
-        training_recommendation=analysis.get("training_recommendation"),
-        risk_level=analysis.get("risk_level"),
-        model_name=model_name,
-    )
+    if saved_analysis is None:
+        response_payload: dict[str, Any] = {
+            "ran": False,
+            "reason": "insufficient_data",
+            "message": "Todavia no hay datos suficientes para generar el analisis IA de salud.",
+            "saved_analysis": None,
+        }
+        if invalid_selected_date:
+            response_payload["warning"] = "selected_date invalida; se uso la fecha de hoy."
+        return response_payload
 
     response_payload: dict[str, Any] = {
-        "ran": True,
-        "reason": "generated",
-        "analysis": analysis,
+        "ran": result_kind in {"created", "updated"},
+        "reason": "generated" if result_kind in {"created", "updated"} else "already_analyzed",
+        "analysis": saved_analysis.ai_response_json or {},
         "saved_analysis": _serialize_health_ai_analysis(saved_analysis),
+        "latest_analysis": _serialize_health_ai_analysis(saved_analysis),
     }
     if invalid_selected_date:
         response_payload["warning"] = "selected_date invalida; se uso la fecha de hoy."

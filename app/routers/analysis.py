@@ -103,6 +103,7 @@ def read_weekly_analysis_v2(
 def rerun_weekly_analysis_v2(
     athlete_id: int,
     week_start_date: str,
+    request: Request,
     return_to: str | None = Form(default=None),
     plan_id: int | None = Form(default=None),
     month: str | None = Form(default=None),

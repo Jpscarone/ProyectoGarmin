@@ -32,18 +32,14 @@ from app.services.garmin.auth import get_garmin_auth_context
 from app.services.garmin.client import GarminClient
 from app.services.garmin.health_sync import _build_health_values, _get_sync_athlete, _merge_metric_values
 from app.services.health_ai_analysis_service import (
-    analyze_health_readiness_with_ai,
-    build_health_llm_json_hash,
-    create_health_ai_analysis,
     get_latest_health_ai_analysis_for_date,
+    get_or_create_health_ai_analysis,
 )
 from app.services.health_readiness_service import (
-    build_health_llm_json,
     build_health_readiness_summary,
-    build_health_training_context,
     evaluate_health_readiness,
 )
-from app.services.openai_client import OpenAIIntegrationError, get_openai_model
+from app.services.openai_client import OpenAIIntegrationError
 from app.services.session_match_service import auto_match_unlinked_activities
 from app.utils.datetime_utils import local_date_range_utc_bounds, now_utc, today_local, to_local_date, to_local_datetime
 
@@ -342,18 +338,8 @@ def generate_health_ai_if_needed(
     athlete_id: int,
     reference_date: date,
     force: bool = False,
+    source: str = "scheduled",
 ) -> SyncOperationResult:
-    athlete = db.get(Athlete, athlete_id)
-    if athlete is None:
-        raise ValueError(f"No se encontro Athlete #{athlete_id}.")
-
-    existing = get_latest_health_ai_analysis_for_date(db, athlete_id, reference_date)
-    if existing is not None and not force:
-        return SyncOperationResult(
-            status="skipped",
-            message=f"Health AI ya existe para {reference_date.isoformat()}.",
-        )
-
     summary = build_health_readiness_summary(db, athlete_id, reference_date)
     evaluation = evaluate_health_readiness(summary)
     if evaluation.readiness_score is None:
@@ -362,46 +348,29 @@ def generate_health_ai_if_needed(
             message=f"Health AI omitido para {reference_date.isoformat()} por datos insuficientes.",
         )
 
-    training_context = build_health_training_context(db, athlete_id, reference_date)
-    llm_json = build_health_llm_json(
-        athlete,
-        summary,
-        evaluation,
-        reference_date,
-        training_context=training_context,
+    existing = get_latest_health_ai_analysis_for_date(db, athlete_id, reference_date)
+    analysis, result_kind = get_or_create_health_ai_analysis(
+        db,
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+        force=force,
+        source=source,
     )
-    llm_json_hash = build_health_llm_json_hash(llm_json)
-    analysis_payload = analyze_health_readiness_with_ai(llm_json)
-    model_name = _safe_model_name()
-
-    if existing is not None and force:
-        existing.llm_json = llm_json
-        existing.llm_json_hash = llm_json_hash
-        existing.ai_response_json = analysis_payload
-        existing.summary = analysis_payload.get("summary")
-        existing.training_recommendation = analysis_payload.get("training_recommendation")
-        existing.risk_level = analysis_payload.get("risk_level")
-        existing.model_name = model_name
-        db.add(existing)
-        db.commit()
-        db.refresh(existing)
+    if analysis is None:
+        return SyncOperationResult(
+            status="skipped",
+            message=f"Health AI omitido para {reference_date.isoformat()} por datos insuficientes.",
+        )
+    if result_kind == "existing":
+        return SyncOperationResult(
+            status="skipped",
+            message=f"Health AI ya existe para {reference_date.isoformat()}.",
+        )
+    if result_kind == "updated":
         return SyncOperationResult(
             status="success",
             message=f"Health AI actualizado para {reference_date.isoformat()}.",
         )
-
-    create_health_ai_analysis(
-        db,
-        athlete_id=athlete_id,
-        reference_date=reference_date,
-        llm_json=llm_json,
-        llm_json_hash=llm_json_hash,
-        ai_response_json=analysis_payload,
-        summary=analysis_payload.get("summary"),
-        training_recommendation=analysis_payload.get("training_recommendation"),
-        risk_level=analysis_payload.get("risk_level"),
-        model_name=model_name,
-    )
     return SyncOperationResult(
         status="success",
         message=f"Health AI generado para {reference_date.isoformat()}.",
@@ -914,13 +883,6 @@ def _recalculate_readiness(db: Session, athlete_id: int, reference_date: date) -
     # Trigger the current evaluation pipeline to ensure the data window is valid after sync.
     summary = build_health_readiness_summary(db, athlete_id, reference_date)
     evaluate_health_readiness(summary)
-
-
-def _safe_model_name() -> str | None:
-    try:
-        return get_openai_model(get_settings())
-    except Exception:
-        return None
 
 
 def _find_blocking_running_job(db: Session, job_type: str, *, now: datetime) -> ScheduledSyncJobLog | None:

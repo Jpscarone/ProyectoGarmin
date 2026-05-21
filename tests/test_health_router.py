@@ -171,7 +171,7 @@ class HealthRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("Analizar con IA", response.text)
+        self.assertIn("Generar analisis ahora", response.text)
         self.assertIn(
             'data-health-ai-analysis-url="/health/readiness/ai-analysis?selected_date=2026-04-18&amp;athlete_id=1"',
             response.text,
@@ -179,18 +179,18 @@ class HealthRouterTests(unittest.TestCase):
         self.assertIn("Copiar analisis IA", response.text)
         self.assertIn("copyHealthAiAnalysis(this)", response.text)
 
-    def test_health_html_auto_sync_success_triggers_auto_ai_analysis(self) -> None:
+    def test_health_html_auto_sync_does_not_trigger_auto_ai_analysis(self) -> None:
         response = self.client.get(
             f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
             headers={"accept": "text/html"},
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("data-health-auto-ai-analysis-url=", response.text)
         self.assertIn("if (payload.synced) {", response.text)
-        self.assertIn("runHealthAutoAiAnalysisAfterSync(statusEl)", response.text)
+        self.assertNotIn("runHealthAutoAiAnalysisAfterSync", response.text)
+        self.assertIn("Genera IA manualmente si todavia falta.", response.text)
 
-    def test_health_html_auto_sync_fresh_can_trigger_auto_ai_analysis(self) -> None:
+    def test_health_html_auto_sync_fresh_keeps_existing_analysis_without_auto_run(self) -> None:
         response = self.client.get(
             f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
             headers={"accept": "text/html"},
@@ -198,8 +198,8 @@ class HealthRouterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('if (payload.reason === "fresh") {', response.text)
-        self.assertIn("Verificando si falta generar el analisis IA.", response.text)
-        self.assertIn('data-should-auto-ai-analysis="true"', response.text)
+        self.assertIn("Se mantiene el ultimo analisis IA guardado.", response.text)
+        self.assertNotIn('data-should-auto-ai-analysis="true"', response.text)
 
     def test_health_html_copy_json_button_updates_when_selected_date_changes(self) -> None:
         response = self.client.get(
@@ -377,7 +377,7 @@ class HealthRouterTests(unittest.TestCase):
         self.assertIn("0 min totales", response.text)
         self.assertIn("0 km", response.text)
 
-    @patch("app.routers.health.analyze_health_readiness_with_ai")
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
     def test_health_ai_analysis_endpoint_returns_expected_structure(self, mock_analyze) -> None:
         reference_date = date(2026, 4, 23)
         for offset in range(14):
@@ -422,14 +422,45 @@ class HealthRouterTests(unittest.TestCase):
         self.assertEqual(payload["analysis"]["not_medical_advice"], True)
         self.assertIn("llm_json", payload)
         self.assertIn("saved_analysis", payload)
+        self.assertTrue(payload["generated"])
+        self.assertEqual(payload["reason"], "created")
         self.assertEqual(payload["saved_analysis"]["risk_level"], "low")
         latest = get_latest_health_ai_analysis_for_date(self.db, self.athlete.id, date(2026, 4, 18))
         self.assertIsNotNone(latest)
         self.assertEqual(latest.summary, "Readiness bastante estable para entrenar.")
+        self.assertEqual(latest.source, "manual")
         mock_analyze.assert_called_once()
 
-    @patch("app.routers.health.analyze_health_readiness_with_ai")
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
+    def test_health_ai_analysis_endpoint_does_not_duplicate_existing_analysis(self, mock_analyze) -> None:
+        self._seed_metric_window(reference_date=date(2026, 4, 18))
+        mock_analyze.return_value = {
+            "summary": "Readiness estable.",
+            "training_recommendation": "Mantener control.",
+            "risk_level": "low",
+            "main_factors": [],
+            "what_to_watch": [],
+            "not_medical_advice": True,
+        }
+
+        first = self.client.post(
+            f"/health/readiness/ai-analysis?athlete_id={self.athlete.id}&selected_date=2026-04-18"
+        )
+        second = self.client.post(
+            f"/health/readiness/ai-analysis?athlete_id={self.athlete.id}&selected_date=2026-04-18"
+        )
+
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertTrue(first.json()["generated"])
+        self.assertFalse(second.json()["generated"])
+        self.assertEqual(second.json()["reason"], "existing")
+        self.assertEqual(self.db.query(health_ai_analysis.HealthAiAnalysis).count(), 1)
+        mock_analyze.assert_called_once()
+
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
     def test_health_ai_analysis_endpoint_handles_missing_api_key(self, mock_analyze) -> None:
+        self._seed_metric_window(reference_date=date(2026, 4, 18))
         mock_analyze.side_effect = OpenAIIntegrationError("OPENAI_API_KEY no configurada.")
 
         response = self.client.post(
@@ -442,7 +473,7 @@ class HealthRouterTests(unittest.TestCase):
         self.assertIn("OPENAI_API_KEY", payload["message"])
         self.assertIsNone(get_latest_health_ai_analysis_for_date(self.db, self.athlete.id, date(2026, 4, 18)))
 
-    def test_get_latest_health_ai_analysis_for_date_returns_newest(self) -> None:
+    def test_get_latest_health_ai_analysis_for_date_returns_single_upserted_row(self) -> None:
         first = create_health_ai_analysis(
             self.db,
             athlete_id=self.athlete.id,
@@ -464,14 +495,17 @@ class HealthRouterTests(unittest.TestCase):
             training_recommendation="Normal",
             risk_level="low",
             model_name="gpt-test",
+            force=True,
         )
 
         latest = get_latest_health_ai_analysis_for_date(self.db, self.athlete.id, date(2026, 4, 18))
 
         self.assertIsNotNone(latest)
-        self.assertEqual(latest.id, second.id)
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(latest.id, first.id)
+        self.assertEqual(latest.summary, "Segundo")
         analyses = list_health_ai_analyses_for_athlete(self.db, self.athlete.id)
-        self.assertEqual([row.id for row in analyses], [second.id, first.id])
+        self.assertEqual([row.id for row in analyses], [first.id])
 
     def test_health_html_shows_latest_saved_ai_analysis(self) -> None:
         create_health_ai_analysis(
@@ -502,7 +536,7 @@ class HealthRouterTests(unittest.TestCase):
         self.assertIn("Ultimo analisis IA guardado", response.text)
         self.assertIn("Estado estable.", response.text)
         self.assertIn("Mantener control.", response.text)
-        self.assertIn("Analizar con IA", response.text)
+        self.assertIn("Regenerar analisis", response.text)
 
     def test_health_html_shows_recent_ai_history_when_available(self) -> None:
         create_health_ai_analysis(
@@ -797,9 +831,10 @@ class HealthRouterTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn('data-should-auto-sync="false"', response.text)
-        self.assertIn('data-should-auto-ai-analysis="true"', response.text)
+        self.assertNotIn('data-should-auto-ai-analysis="true"', response.text)
+        self.assertIn("Todavia no hay analisis IA de salud para esta fecha.", response.text)
 
-    def test_health_html_marks_auto_ai_as_updated_when_hash_matches(self) -> None:
+    def test_health_html_does_not_mark_auto_ai_pending_when_analysis_exists(self) -> None:
         readiness = self.client.get(
             f"/health/readiness/llm-json?athlete_id={self.athlete.id}&selected_date=2026-04-18"
         ).json()
@@ -824,7 +859,7 @@ class HealthRouterTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn('data-should-auto-ai-analysis="false"', response.text)
+        self.assertNotIn('data-should-auto-ai-analysis="true"', response.text)
 
     def _seed_metric_window(self, reference_date: date) -> None:
         for offset in range(14):
@@ -862,8 +897,9 @@ class HealthRouterTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "failed")
         self.assertIn("Garmin temporalmente no disponible", payload["error"])
 
-    @patch("app.routers.health.analyze_health_readiness_with_ai")
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
     def test_auto_ai_analysis_runs_when_no_previous_analysis(self, mock_analyze) -> None:
+        self._seed_metric_window(reference_date=date(2026, 4, 18))
         mock_analyze.return_value = {
             "summary": "Readiness estable.",
             "training_recommendation": "Entrenar con control.",
@@ -880,9 +916,11 @@ class HealthRouterTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ran"])
+        self.assertEqual(payload["reason"], "generated")
         latest = get_latest_health_ai_analysis_for_date(self.db, self.athlete.id, date(2026, 4, 18))
         self.assertIsNotNone(latest)
         self.assertIsNotNone(latest.llm_json_hash)
+        self.assertEqual(latest.source, "page_view")
 
     @patch("app.services.health_ai_analysis_service.build_openai_client")
     @patch("app.services.health_ai_analysis_service.get_settings")
@@ -912,7 +950,7 @@ class HealthRouterTests(unittest.TestCase):
         call_kwargs = mock_client_builder.return_value.responses.parse.call_args.kwargs
         self.assertIn("2026-04-29", call_kwargs["input"])
 
-    @patch("app.routers.health.analyze_health_readiness_with_ai")
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
     def test_auto_ai_analysis_skips_when_hash_matches(self, mock_analyze) -> None:
         readiness = self.client.get(
             f"/health/readiness/llm-json?athlete_id={self.athlete.id}&selected_date=2026-04-18"
@@ -942,8 +980,9 @@ class HealthRouterTests(unittest.TestCase):
         self.assertEqual(payload["reason"], "already_analyzed")
         mock_analyze.assert_not_called()
 
-    @patch("app.routers.health.analyze_health_readiness_with_ai")
-    def test_auto_ai_analysis_runs_when_json_changes(self, mock_analyze) -> None:
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
+    def test_auto_ai_analysis_force_true_updates_existing_analysis(self, mock_analyze) -> None:
+        self._seed_metric_window(reference_date=date(2026, 4, 18))
         create_health_ai_analysis(
             self.db,
             athlete_id=self.athlete.id,
@@ -966,15 +1005,20 @@ class HealthRouterTests(unittest.TestCase):
         }
 
         response = self.client.post(
-            f"/health/readiness/auto-ai-analysis?athlete_id={self.athlete.id}&selected_date=2026-04-18"
+            f"/health/readiness/auto-ai-analysis?athlete_id={self.athlete.id}&selected_date=2026-04-18&force=true"
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ran"])
         mock_analyze.assert_called_once()
+        latest = get_latest_health_ai_analysis_for_date(self.db, self.athlete.id, date(2026, 4, 18))
+        self.assertIsNotNone(latest)
+        self.assertEqual(latest.summary, "Nuevo.")
+        self.assertEqual(self.db.query(health_ai_analysis.HealthAiAnalysis).count(), 1)
 
-    @patch("app.routers.health.analyze_health_readiness_with_ai")
+    @patch("app.services.health_ai_analysis_service.analyze_health_readiness_with_ai")
     def test_auto_ai_analysis_error_does_not_save_analysis(self, mock_analyze) -> None:
+        self._seed_metric_window(reference_date=date(2026, 4, 18))
         mock_analyze.side_effect = OpenAIIntegrationError("OpenAI fallo")
 
         response = self.client.post(
@@ -986,6 +1030,20 @@ class HealthRouterTests(unittest.TestCase):
         self.assertFalse(payload["ran"])
         self.assertEqual(payload["reason"], "ai_analysis_failed")
         self.assertIsNone(get_latest_health_ai_analysis_for_date(self.db, self.athlete.id, date(2026, 4, 18)))
+
+    def test_entering_health_twice_does_not_create_health_ai_analysis(self) -> None:
+        response_one = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
+            headers={"accept": "text/html"},
+        )
+        response_two = self.client.get(
+            f"/health?athlete_id={self.athlete.id}&selected_date=2026-04-18",
+            headers={"accept": "text/html"},
+        )
+
+        self.assertEqual(response_one.status_code, 200)
+        self.assertEqual(response_two.status_code, 200)
+        self.assertEqual(self.db.query(health_ai_analysis.HealthAiAnalysis).count(), 0)
 
 
 if __name__ == "__main__":

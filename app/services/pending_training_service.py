@@ -505,6 +505,7 @@ def _resolve_readiness_without_ai(db: Session, item: PendingTrainingItem, *, for
         athlete_id=item.athlete_id,
         reference_date=reference_date,
         force=force,
+        source="pending_resolver",
     )
     if result.status in {"success", "skipped"}:
         analysis = get_latest_health_ai_analysis_for_date(db, item.athlete_id, reference_date)

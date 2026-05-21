@@ -516,7 +516,10 @@ class ApiMcpRoutesTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["planned_sessions"], [])
         self.assertFalse(payload["summary"]["has_sessions"])
+        self.assertEqual(payload["summary"]["completed_sessions_count"], 0)
+        self.assertEqual(payload["summary"]["pending_sessions_count"], 0)
         self.assertEqual(payload["summary"]["message"], "No hay sesion programada para esta fecha.")
+        self.assertIn("No hay training_day cargado", " ".join(payload["data_quality"]["warnings"]))
 
     def test_training_week_plan_returns_all_week_days_and_sessions(self) -> None:
         monday = TrainingDay(
@@ -570,10 +573,13 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["week"]["end_date"], "2026-05-31")
         self.assertEqual(len(payload["days"]), 7)
         self.assertEqual(payload["week"]["planned_sessions_count"], 2)
+        self.assertEqual(payload["week"]["completed_sessions_count"], 0)
+        self.assertEqual(payload["week"]["pending_sessions_count"], 2)
         self.assertEqual(
             [item["date"] for item in payload["days"] if item["planned_sessions"]],
             ["2026-05-25", "2026-05-27"],
         )
+        self.assertEqual(payload["data_quality"]["warnings"], [])
 
     def test_my_day_plan_only_queries_athlete_from_access_code(self) -> None:
         other_plan = TrainingPlan(
@@ -619,6 +625,69 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["planned_sessions"], [])
         self.assertEqual(payload["summary"]["message"], "No hay sesion programada para esta fecha.")
 
+    def test_my_week_plan_only_queries_athlete_from_access_code(self) -> None:
+        own_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 26),
+            day_type="running",
+        )
+        other_plan = TrainingPlan(
+            athlete_id=self.other_athlete.id,
+            name="Plan ajeno semana",
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            status="active",
+        )
+        self.db.add_all([own_day, other_plan])
+        self.db.commit()
+        self.db.refresh(own_day)
+        self.db.refresh(other_plan)
+        other_day = TrainingDay(
+            athlete_id=self.other_athlete.id,
+            training_plan_id=other_plan.id,
+            day_date=date(2026, 5, 27),
+            day_type="strength",
+        )
+        self.db.add(other_day)
+        self.db.commit()
+        self.db.refresh(other_day)
+        self.db.add_all(
+            [
+                PlannedSession(
+                    athlete_id=self.athlete.id,
+                    training_day_id=own_day.id,
+                    name="Sesion propia",
+                    sport_type="running",
+                    modality="outdoor",
+                    expected_duration_min=35,
+                    session_order=1,
+                ),
+                PlannedSession(
+                    athlete_id=self.other_athlete.id,
+                    training_day_id=other_day.id,
+                    name="Sesion ajena",
+                    sport_type="strength",
+                    modality="indoor",
+                    expected_duration_min=50,
+                    session_order=1,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            "/api/mcp/me/week-plan?access_code=ATLETA-MCP-1234&week_start_date=2026-05-25",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["week"]["planned_sessions_count"], 1)
+        visible_names = [session["name"] for day in payload["days"] for session in day["planned_sessions"]]
+        self.assertEqual(visible_names, ["Sesion propia"])
+
     def test_training_day_plan_does_not_mix_nearby_garmin_activity(self) -> None:
         training_day = TrainingDay(
             athlete_id=self.athlete.id,
@@ -663,6 +732,39 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(len(payload["planned_sessions"]), 1)
         self.assertIsNone(payload["planned_sessions"][0]["matched_activity"])
         self.assertNotEqual(payload["planned_sessions"][0]["status"], "matched_with_activity")
+
+    def test_training_day_plan_accepts_date_with_slashes(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 20),
+            day_type="strength",
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.athlete.id,
+                training_day_id=training_day.id,
+                name="Gym con barra",
+                sport_type="strength",
+                modality="indoor",
+                expected_duration_min=40,
+                session_order=1,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/training/day-plan?athlete_id={self.athlete.id}&date=20/05/2026",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["date"], "2026-05-20")
+        self.assertEqual(payload["planned_sessions"][0]["name"], "Gym con barra")
 
     def test_week_context_returns_schema_version(self) -> None:
         response = self.client.get(f"/api/mcp/week-context?athlete_id={self.athlete.id}", headers=self.headers)

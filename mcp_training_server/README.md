@@ -96,13 +96,14 @@ Reglas importantes:
 
 - No reemplaza la fecha consultada por la proxima sesion pendiente.
 - No mezcla una actividad Garmin cercana cuando la consulta pide una fecha exacta.
-- Acepta `YYYY-MM-DD` y tambien `DD-MM-YYYY`.
+- Acepta `YYYY-MM-DD`, `DD-MM-YYYY` y `DD/MM/YYYY`.
 - Si hay una sesion planificada sin actividad asociada, devuelve igualmente la planificacion del dia.
 
 Prompt ejemplo:
 
 - `Soy Pablo Scarone, mi clave de atleta es XXXX. Manana que sesion tengo?`
 - `Que tengo el 20-05-2026?`
+- `Que tengo el 20/05/2026?`
 
 `get_week_plan` y `get_my_week_plan` consultan `GET /api/mcp/training/week-plan` y `GET /api/mcp/me/week-plan`.
 
@@ -331,6 +332,7 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&planned_session_id=456"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=2026-05-20"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=20-05-2026"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=20/05/2026"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1&week_start_date=2026-05-18"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1&week_start_date=2026-05-18&include_completed=false"

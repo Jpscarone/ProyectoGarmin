@@ -45,10 +45,10 @@
                     <button
                         class="button button-utility"
                         type="button"
-                        data-health-ai-analysis-url="{{ health_ai_analysis_url }}"
+                        data-health-ai-analysis-url="{{ health_ai_analysis_url }}{% if readiness.can_regenerate_ai_analysis %}&force=true{% endif %}"
                         onclick="runHealthAiAnalysis(this)"
                     >
-                        Analizar con IA
+                        {{ readiness.ai_analysis_button_label if readiness.ai_analysis_button_label is defined else "Generar analisis ahora" }}
                     </button>
                 </div>
             </form>
@@ -71,9 +71,7 @@
         id="health-sync-status"
         class="health-sync-status {{ readiness.sync_view.class }}"
         data-should-auto-sync="{{ 'true' if readiness.should_auto_sync else 'false' }}"
-        data-should-auto-ai-analysis="{{ 'true' if readiness.should_auto_ai_analysis is defined and readiness.should_auto_ai_analysis else 'false' }}"
         data-health-auto-sync-url="{{ readiness.health_auto_sync_url }}"
-        data-health-auto-ai-analysis-url="{{ health_auto_ai_analysis_url }}"
     >
         <div>
             <strong id="health-sync-label">{{ readiness.sync_view.label }}</strong>
@@ -236,6 +234,18 @@
             </article>
         </div>
     </section>
+
+    {% if not readiness.latest_ai_analysis %}
+    <section class="panel panel-subtle">
+        <div class="section-heading">
+            <div>
+                <p class="eyebrow">Analisis de IA</p>
+                <h2>Analisis pendiente</h2>
+            </div>
+        </div>
+        <p class="empty-state">{{ readiness.ai_analysis_empty_message if readiness.ai_analysis_empty_message is defined else "Todavia no hay analisis IA de salud para esta fecha." }}</p>
+    </section>
+    {% endif %}
 
     <section id="health-ai-analysis-card" class="health-ai-analysis-card" hidden>
         <div class="health-ai-analysis-header">
@@ -407,13 +417,11 @@ async function runHealthAutoSync(buttonEl, force = false) {
       return;
     }
     if (payload.synced) {
-      updateHealthSyncStatus("Salud sincronizada", "Analizando salud con IA...", "health-sync-success");
-      await runHealthAutoAiAnalysisAfterSync(statusEl);
+      updateHealthSyncStatus("Salud sincronizada", "La salud ya quedo actualizada. Genera IA manualmente si todavia falta.", "health-sync-success");
       return;
     }
     if (payload.reason === "fresh") {
-      updateHealthSyncStatus("Salud ya sincronizada recientemente", "Verificando si falta generar el analisis IA.", "health-sync-success");
-      await runHealthAutoAiAnalysisAfterSync(statusEl);
+      updateHealthSyncStatus("Salud ya sincronizada recientemente", "Se mantiene el ultimo analisis IA guardado.", "health-sync-success");
       return;
     }
     updateHealthSyncStatus("Salud ya sincronizada recientemente", "No hizo falta volver a consultar Garmin.", "health-sync-success");
@@ -429,43 +437,10 @@ async function runHealthAutoSync(buttonEl, force = false) {
   }
 }
 
-async function runHealthAutoAiAnalysisAfterSync(statusEl) {
-  const url = statusEl?.dataset?.healthAutoAiAnalysisUrl;
-  if (!url) {
-    window.setTimeout(() => window.location.reload(), 900);
-    return;
-  }
-
-  try {
-    const response = await fetch(url, { method: "POST", headers: { "accept": "application/json" } });
-    const payload = await response.json();
-    if (!response.ok) {
-      updateHealthSyncStatus("Salud sincronizada", payload.message || "No se pudo generar el analisis IA automatico.", "health-sync-failed");
-      return;
-    }
-    if (payload.ran) {
-      updateHealthSyncStatus("Analisis IA generado", "Actualizando datos...", "health-sync-success");
-      window.setTimeout(() => window.location.reload(), 900);
-      return;
-    }
-    updateHealthSyncStatus("Analisis IA ya actualizado", "No hizo falta generar un analisis nuevo.", "health-sync-success");
-    if (payload.latest_analysis) {
-      renderSavedHealthAiAnalysis(payload.latest_analysis);
-    }
-  } catch (error) {
-    updateHealthSyncStatus("Salud sincronizada", "No se pudo ejecutar el analisis IA automatico.", "health-sync-failed");
-  }
-}
-
 window.addEventListener("DOMContentLoaded", () => {
   const statusEl = document.getElementById("health-sync-status");
   if (statusEl?.dataset?.shouldAutoSync === "true") {
     runHealthAutoSync(null, false);
-    return;
-  }
-  if (statusEl?.dataset?.shouldAutoAiAnalysis === "true") {
-    updateHealthSyncStatus("Salud sincronizada", "Generando analisis IA pendiente...", "health-sync-success");
-    runHealthAutoAiAnalysisAfterSync(statusEl);
   }
 });
 

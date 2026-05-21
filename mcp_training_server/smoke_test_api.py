@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import date
 from typing import Any
 
 import httpx
@@ -34,11 +35,14 @@ def _request(client: httpx.Client, path: str, headers: dict[str, str]) -> dict[s
 def main() -> int:
     settings = get_settings()
     headers = _build_headers(settings.training_app_mcp_token)
+    today_value = date.today().isoformat()
 
     targets = [
         "/api/mcp/ping",
         "/api/mcp/athletes",
         "/api/mcp/activities/recent?athlete_id=1&limit=5",
+        f"/api/mcp/training/day-plan?athlete_id=1&date={today_value}",
+        "/api/mcp/training/week-plan?athlete_id=1",
         "/api/mcp/compare/planned-vs-done?athlete_id=1",
         "/api/mcp/training/next-session-recommendation?athlete_id=1",
         "/api/mcp/training/week-load-summary?athlete_id=1",

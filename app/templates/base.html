@@ -21,11 +21,16 @@
                 {% if request.state.current_user.role != "admin" %}
                 <a href="/sync/garmin/activities{% if request.state.current_athlete %}?athlete_id={{ request.state.current_athlete.id }}{% endif %}">Sync Garmin</a>
                 {% endif %}
-                <a href="/garmin/account">Cuenta Garmin</a>
-                {% if request.state.current_user.role == "admin" %}
-                <a href="/admin/mcp-access-codes">Accesos MCP</a>
-                <a href="/configuracion">Configuracion</a>
-                {% endif %}
+                <details class="site-nav-menu">
+                    <summary>Configuracion</summary>
+                    <div class="site-nav-menu-panel">
+                        <a href="/garmin/account">Cuenta Garmin</a>
+                        {% if request.state.current_user.role == "admin" %}
+                        <a href="/admin/mcp-access-codes">Accesos MCP</a>
+                        <a href="/configuracion">Configuracion general</a>
+                        {% endif %}
+                    </div>
+                </details>
                 {% endif %}
             </nav>
             <div class="top-context">

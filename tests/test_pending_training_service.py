@@ -146,12 +146,20 @@ class PendingTrainingServiceTests(unittest.TestCase):
             reference_date=date(2026, 5, 14),
         )
 
-        def fake_generate_health_ai(db: Session, *, athlete_id: int, reference_date: date, force: bool = False):
+        def fake_generate_health_ai(
+            db: Session,
+            *,
+            athlete_id: int,
+            reference_date: date,
+            force: bool = False,
+            source: str = "scheduled",
+        ):
             analysis = HealthAiAnalysis(
                 athlete_id=athlete_id,
                 reference_date=reference_date,
                 summary="Ok",
                 training_recommendation="Controlar carga",
+                source=source,
             )
             db.add(analysis)
             db.commit()
@@ -162,6 +170,7 @@ class PendingTrainingServiceTests(unittest.TestCase):
 
         self.assertEqual(resolved.status, STATUS_RESOLVED)
         self.assertEqual(self.db.query(HealthAiAnalysis).count(), 1)
+        self.assertEqual(self.db.query(HealthAiAnalysis).one().source, "pending_resolver")
 
     def test_resolve_activity_unlinked_keeps_pending_when_match_is_ambiguous(self) -> None:
         activity = self._activity(start_time=datetime(2026, 5, 14, 1, 30, tzinfo=timezone.utc), name="Actividad ambigua")

@@ -44,6 +44,7 @@ def _strength_session(
         session_date=date(2026, 4, 29),
         title="Gimnasio pierna",
         sport_type="strength",
+        modality=None,
         session_type=None,
         expected_duration_min=duration,
         expected_distance_km=None,

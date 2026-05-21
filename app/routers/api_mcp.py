@@ -798,12 +798,13 @@ def _parse_mcp_date(raw_value: str, field_name: str) -> date:
         return date.fromisoformat(normalized)
     except ValueError as exc:
         try:
-            day_text, month_text, year_text = normalized.split("-", 2)
+            separator = "/" if "/" in normalized else "-"
+            day_text, month_text, year_text = normalized.split(separator, 2)
             return date(int(year_text), int(month_text), int(day_text))
         except (TypeError, ValueError):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{field_name} debe tener formato YYYY-MM-DD o DD-MM-YYYY.",
+                detail=f"{field_name} debe tener formato YYYY-MM-DD, DD-MM-YYYY o DD/MM/YYYY.",
             ) from exc
 
 
@@ -1573,11 +1574,19 @@ def _build_training_day_plan_payload(
     target_date: date,
 ) -> dict[str, Any]:
     plan = _resolve_relevant_plan_for_date(db, athlete.id, target_date)
-    training_day = _get_relevant_training_day_for_date(db, athlete.id, target_date, plan)
+    training_days = _get_training_days_for_date(db, athlete.id, target_date)
+    training_day = _select_relevant_training_day(training_days, plan)
     serialized_sessions = [
         _serialize_plan_planned_session(item, athlete=athlete)
         for item in (training_day.planned_sessions if training_day is not None else [])
     ]
+    warnings: list[str] = []
+    if len(training_days) > 1:
+        warnings.append("Hay mas de un training_day para la misma fecha; se muestra el mas relevante.")
+    if training_day is None:
+        warnings.append("No hay training_day cargado para esta fecha.")
+    elif not serialized_sessions:
+        warnings.append("El training_day existe pero no tiene planned_sessions cargadas.")
     return {
         "athlete": _serialize_athlete_min(athlete),
         "date": target_date.isoformat(),
@@ -1585,6 +1594,7 @@ def _build_training_day_plan_payload(
         "training_day": _serialize_training_day_overview(training_day),
         "planned_sessions": serialized_sessions,
         "summary": _build_day_plan_summary(serialized_sessions),
+        "data_quality": {"warnings": warnings},
     }
 
 
@@ -1631,6 +1641,14 @@ def _build_training_week_plan_payload(
             }
         )
 
+    warnings: list[str] = []
+    if plan is None:
+        warnings.append("No hay un plan relevante resuelto para la semana consultada.")
+    if not training_days:
+        warnings.append("No hay training_days cargados para esta semana.")
+    if planned_sessions_count == 0:
+        warnings.append("No hay sesiones programadas para esta semana.")
+
     return {
         "athlete": _serialize_athlete_min(athlete),
         "plan": _serialize_training_plan(plan),
@@ -1649,6 +1667,7 @@ def _build_training_week_plan_payload(
                 pending_sessions_count=pending_sessions_count,
             ),
         },
+        "data_quality": {"warnings": warnings},
     }
 
 
@@ -1656,13 +1675,7 @@ def _resolve_relevant_plan_for_date(db: Session, athlete_id: int, target_date: d
     return select_default_training_plan(db, athlete_id=athlete_id, today=target_date)
 
 
-def _get_relevant_training_day_for_date(
-    db: Session,
-    athlete_id: int,
-    target_date: date,
-    plan: TrainingPlan | None,
-) -> TrainingDay | None:
-    training_days = _get_training_days_for_date(db, athlete_id, target_date)
+def _select_relevant_training_day(training_days: list[TrainingDay], plan: TrainingPlan | None) -> TrainingDay | None:
     if not training_days:
         return None
     if plan is not None:
@@ -1749,24 +1762,37 @@ def _serialize_matched_activity_for_plan(session: PlannedSession) -> dict[str, A
     return {
         "id": activity.id,
         "activity_name": activity.activity_name,
+        "sport_type": activity.sport_type,
         "start_time": activity.start_time.isoformat() if activity.start_time else None,
         "duration_sec": activity.duration_sec,
         "distance_m": activity.distance_m,
+        "avg_hr": activity.avg_hr,
+        "training_load": activity.training_load,
     }
 
 
 def _build_day_plan_summary(planned_sessions: list[dict[str, Any]]) -> dict[str, Any]:
     has_sessions = bool(planned_sessions)
     sessions_count = len(planned_sessions)
+    completed_sessions_count = sum(
+        1 for item in planned_sessions if item["status"] in {"completed", "matched_with_activity"}
+    )
+    pending_sessions_count = sum(1 for item in planned_sessions if item["status"] in {"planned", "no_activity"})
     if not has_sessions:
         message = "No hay sesion programada para esta fecha."
+    elif pending_sessions_count and completed_sessions_count:
+        message = "Hay sesiones programadas para esta fecha, con algunas completadas y otras pendientes."
     elif any(item["status"] == "no_activity" for item in planned_sessions):
         message = "Hay sesiones programadas para esta fecha, pero no tienen actividad vinculada."
+    elif completed_sessions_count == sessions_count:
+        message = "Las sesiones programadas para esta fecha ya figuran como completadas."
     else:
         message = "Hay sesiones programadas para esta fecha."
     return {
         "has_sessions": has_sessions,
         "sessions_count": sessions_count,
+        "completed_sessions_count": completed_sessions_count,
+        "pending_sessions_count": pending_sessions_count,
         "message": message,
     }
 
