@@ -8,6 +8,7 @@ from app.services.analysis_v2.scoring import (
     average_scores,
     closeness_score_from_delta_pct,
     enrich_hr_target_evaluation,
+    enrich_pace_target_evaluation,
     range_target_score,
     stability_score_from_cv,
 )
@@ -30,7 +31,8 @@ from app.services.analysis_v2.structured import (
 def compute_session_metrics(context: Any) -> dict[str, Any]:
     modality_info = _build_modality_info(context)
     structured_plan = _build_structured_plan(context)
-    planned_vs_actual = _build_planned_vs_actual(context, modality_info)
+    session_target_basis = _detect_session_target_basis(context, structured_plan["expanded_steps"])
+    planned_vs_actual = _build_planned_vs_actual(context, modality_info, session_target_basis)
     elevation = _build_elevation_metrics(context, planned_vs_actual)
     heart_rate = _build_heart_rate_metrics(context)
     pace = _build_pace_metrics(context)
@@ -40,6 +42,7 @@ def compute_session_metrics(context: Any) -> dict[str, Any]:
     block_analysis = build_block_analysis(laps.get("structured_match", {})) if laps.get("structured_match") else []
     if not block_analysis and structured_plan["expanded_steps"]:
         block_analysis = _build_planned_only_block_analysis(structured_plan["expanded_steps"])
+    block_analysis = _enrich_block_analysis(context, structured_plan, block_analysis)
     intensity = _build_intensity_metrics(context, structured_plan)
     recent_comparisons = _build_recent_similar_comparisons(context)
     weekly_context = _build_weekly_context(context)
@@ -47,9 +50,15 @@ def compute_session_metrics(context: Any) -> dict[str, Any]:
     derived_flags = _build_flags(context, planned_vs_actual, heart_rate, pace, intensity, laps, structured_plan, block_analysis)
     block_analysis = apply_block_short_notes(block_analysis, derived_flags.get("recovery_block_not_effective_flag", False))
     scores = _build_scores(context, compliance, heart_rate, pace, power, cadence, intensity, laps, structured_plan, block_analysis)
+    fatigue_evidence = _build_fatigue_evidence(context, scores, heart_rate, derived_flags)
+    _apply_fatigue_evidence(block_analysis, fatigue_evidence)
+    derived_flags["fatigue_evidence_level"] = fatigue_evidence["level"]
+    derived_flags["fatigue_evidence_reasons"] = fatigue_evidence["reasons"]
 
     return {
         "session_intent": structured_plan["session_intent"],
+        "session_target_basis": session_target_basis["basis"],
+        "distance_is_informational": session_target_basis["distance_is_informational"],
         "modality": modality_info,
         "planned_vs_actual": planned_vs_actual,
         "intensity": intensity,
@@ -126,7 +135,29 @@ def _infer_zone_from_notes(*notes: str | None) -> str | None:
     return None
 
 
-def _build_planned_vs_actual(context: Any, modality_info: dict[str, Any]) -> dict[str, Any]:
+def _detect_session_target_basis(context: Any, expanded_steps: list[dict[str, Any]]) -> dict[str, Any]:
+    duration_steps = sum(1 for step in expanded_steps if step.get("duration_sec"))
+    distance_steps = sum(1 for step in expanded_steps if step.get("distance_m"))
+    explicit_distance_steps = sum(1 for step in expanded_steps if step.get("distance_m") not in (None, 0))
+    planned_distance = getattr(context.planned_session, "expected_distance_km", None)
+
+    if duration_steps and (duration_steps > distance_steps) and explicit_distance_steps == 0 and planned_distance in (None, 0):
+        basis = "duration"
+    elif distance_steps and distance_steps >= duration_steps and planned_distance is not None:
+        basis = "distance"
+    elif duration_steps and distance_steps:
+        basis = "mixed"
+    else:
+        basis = "unknown"
+
+    distance_is_informational = basis == "duration"
+    return {
+        "basis": basis,
+        "distance_is_informational": distance_is_informational,
+    }
+
+
+def _build_planned_vs_actual(context: Any, modality_info: dict[str, Any], session_target_basis: dict[str, Any]) -> dict[str, Any]:
     actual_duration_min = _seconds_to_minutes(context.activity.duration_sec)
     actual_distance_km = _meters_to_km(context.activity.distance_m)
     distance_metric = _comparison_metric(context.planned_session.expected_distance_km, actual_distance_km)
@@ -165,6 +196,16 @@ def _build_planned_vs_actual(context: Any, modality_info: dict[str, Any]) -> dic
                 note=note,
             )
 
+    if session_target_basis["distance_is_informational"]:
+        note = "La sesion esta basada principalmente en duracion; la distancia se muestra solo como referencia."
+        distance_metric = _comparison_metric(
+            context.planned_session.expected_distance_km,
+            actual_distance_km,
+            evaluated=False,
+            confidence="informational",
+            note=note,
+        )
+
     planned_date = context.planned_session.session_date
     executed_date = context.activity.local_date
     days_offset = (executed_date - planned_date).days if planned_date and executed_date else None
@@ -174,6 +215,8 @@ def _build_planned_vs_actual(context: Any, modality_info: dict[str, Any]) -> dic
         "executed_date": executed_date.isoformat() if executed_date else None,
         "days_offset": days_offset,
         "executed_on_different_day": bool(days_offset) if days_offset is not None else False,
+        "session_target_basis": session_target_basis["basis"],
+        "distance_is_informational": session_target_basis["distance_is_informational"],
         "duration": _comparison_metric(context.planned_session.expected_duration_min, actual_duration_min),
         "distance": distance_metric,
         "elevation": elevation_metric,
@@ -447,6 +490,143 @@ def _build_planned_only_block_analysis(expanded_steps: list[dict[str, Any]]) -> 
     ]
 
 
+def _enrich_block_analysis(
+    context: Any,
+    structured_plan: dict[str, Any],
+    block_analysis: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    previous_work_block: dict[str, Any] | None = None
+    for block in block_analysis:
+        if block.get("target_type") == "pace" and block.get("target_evaluation"):
+            block["target_evaluation"] = enrich_pace_target_evaluation(
+                block["target_evaluation"],
+                block.get("actual_value"),
+                block.get("planned_target_min"),
+                block.get("planned_target_max"),
+            )
+            block["status_detail"] = block["target_evaluation"].get("status_detail")
+            block["direction_label"] = block["target_evaluation"].get("direction_label")
+            block["intensity_interpretation"] = block["target_evaluation"].get("intensity_interpretation")
+
+        block["block_subtype"] = _detect_block_subtype(context, structured_plan, block)
+        if block["block_subtype"] in {"technical_stride", "progressive_technical"} and block.get("score") is not None:
+            block["score"] = max(float(block["score"]), 88.0)
+
+        if block.get("role") == "recovery" and block.get("target_type") == "hr":
+            _apply_short_hr_recovery_logic(block, previous_work_block)
+
+        if block.get("role") == "work":
+            previous_work_block = block
+    return block_analysis
+
+
+def _detect_block_subtype(context: Any, structured_plan: dict[str, Any], block: dict[str, Any]) -> str | None:
+    if block.get("role") != "work" or block.get("target_type") != "pace":
+        return None
+    if (block.get("planned_duration_sec") or 0) > 60:
+        return None
+
+    target_zone = _normalized(block.get("target_zone"))
+    pace_intense = target_zone in {"z4", "z5"}
+    target_min = block.get("planned_target_min")
+    target_max = block.get("planned_target_max")
+    if not pace_intense and target_min is not None and target_max is not None:
+        midpoint = (float(target_min) + float(target_max)) / 2.0
+        pace_intense = midpoint <= 300.0
+    if not pace_intense:
+        return None
+
+    intent = structured_plan.get("session_intent")
+    title_bits = " ".join(
+        part
+        for part in [
+            getattr(context.planned_session, "title", None),
+            getattr(context.planned_session, "description", None),
+            getattr(context.planned_session, "target_notes", None),
+        ]
+        if part
+    ).lower()
+    session_type = _normalized(getattr(context.planned_session, "session_type", None)) or ""
+    keywords = ("tecnica", "progresiv", "stride", "strides", "activacion", "tecnico")
+    has_keyword = any(keyword in title_bits for keyword in keywords)
+    aerobic_family = intent in {"base_aerobic", "mixed_structured"} or session_type in {"base", "easy", "aerobic", "technique", "mixed_aerobic"}
+    if not (has_keyword or aerobic_family):
+        return None
+    if "stride" in title_bits or "activacion" in title_bits:
+        return "technical_stride"
+    return "progressive_technical"
+
+
+def _apply_short_hr_recovery_logic(block: dict[str, Any], previous_work_block: dict[str, Any] | None) -> None:
+    duration_sec = block.get("planned_duration_sec") or block.get("actual_duration_sec") or 0
+    if duration_sec > 90:
+        return
+
+    target_max = block.get("planned_target_max")
+    avg_hr = block.get("actual_avg_hr")
+    end_hr = block.get("end_hr")
+    last_20s_avg_hr = block.get("last_20s_avg_hr")
+    pace_value = block.get("actual_avg_pace_sec_km")
+    cadence_value = block.get("actual_avg_cadence")
+    distance_value = block.get("actual_distance_m")
+    previous_pace = previous_work_block.get("actual_avg_pace_sec_km") if previous_work_block else None
+    previous_cadence = previous_work_block.get("actual_avg_cadence") if previous_work_block else None
+    previous_distance = previous_work_block.get("actual_distance_m") if previous_work_block else None
+
+    block["recovery_evaluation_method"] = "short_hr_recovery"
+    if previous_work_block and previous_work_block.get("actual_avg_hr") is not None and avg_hr is not None:
+        block["hr_drop_bpm"] = previous_work_block["actual_avg_hr"] - avg_hr
+    if previous_work_block and avg_hr is not None and previous_work_block.get("actual_avg_hr") is not None:
+        block["hr_trend"] = "down" if avg_hr < previous_work_block["actual_avg_hr"] else "flat_or_up"
+
+    if target_max is None:
+        return
+
+    if end_hr is not None and end_hr <= target_max + 2:
+        block["recovery_effective"] = True
+        block["status_detail"] = "within_range_upper_edge" if end_hr > target_max else "within_range"
+        return
+    if last_20s_avg_hr is not None and last_20s_avg_hr <= target_max + 2:
+        block["recovery_effective"] = True
+        block["status_detail"] = "within_range_upper_edge" if last_20s_avg_hr > target_max else "within_range"
+        return
+
+    softness_signals = 0
+    if pace_value is not None and previous_pace is not None and pace_value > previous_pace:
+        softness_signals += 1
+    if cadence_value is not None and previous_cadence is not None and cadence_value < previous_cadence:
+        softness_signals += 1
+    if distance_value is not None and previous_distance is not None and distance_value < previous_distance:
+        softness_signals += 1
+    moved_soft = bool(
+        avg_hr is not None
+        and target_max is not None
+        and avg_hr > target_max
+        and softness_signals >= 2
+    )
+    if moved_soft:
+        block["recovery_effective"] = True
+        block["status_detail"] = "executed_soft_but_hr_lagged"
+        block["direction_label"] = "recuperacion suave"
+        block["intensity_interpretation"] = "fc promedio alta por demora fisiologica"
+        return
+
+    if avg_hr is not None:
+        if avg_hr <= target_max + 2:
+            block["recovery_effective"] = True
+            block["status_detail"] = "within_range_upper_edge" if avg_hr > target_max else "within_range"
+            block["recovery_evaluation_method"] = "avg_hr_with_short_recovery_tolerance"
+        elif avg_hr <= target_max + 6:
+            block["recovery_effective"] = None
+            block["status_detail"] = "recovery_partial"
+            block["direction_label"] = "algo alta"
+            block["intensity_interpretation"] = "recuperacion parcial"
+            block["recovery_evaluation_method"] = "avg_hr_prudent_short_recovery"
+        else:
+            block["recovery_effective"] = False
+            block["recovery_evaluation_method"] = "avg_hr_prudent_short_recovery"
+
+
 def _build_intensity_metrics(context: Any, structured_plan: dict[str, Any]) -> dict[str, Any]:
     target_type = context.planned_session.target_type
     target_zone = _session_target_zone_name(context)
@@ -570,6 +750,9 @@ def _build_flags(
     duration_ratio = planned_vs_actual["duration"]["actual_to_planned_ratio"]
     distance_ratio = planned_vs_actual["distance"]["actual_to_planned_ratio"]
     elevation_ratio = planned_vs_actual["elevation"]["actual_to_planned_ratio"]
+    duration_delta_pct = planned_vs_actual["duration"].get("delta_pct")
+    session_target_basis = planned_vs_actual.get("session_target_basis")
+    distance_is_informational = bool(planned_vs_actual.get("distance_is_informational"))
 
     cardiac_drift_flag = False
     if heart_rate and heart_rate.get("cardiac_drift_ratio") is not None:
@@ -601,9 +784,25 @@ def _build_flags(
     )
 
     return {
-        "duration_over_target_flag": bool(duration_ratio is not None and duration_ratio > rules.DURATION_OVER_TARGET_RATIO),
-        "distance_over_target_flag": bool(distance_ratio is not None and distance_ratio > rules.DISTANCE_OVER_TARGET_RATIO),
+        "duration_over_target_flag": bool(
+            duration_ratio is not None
+            and duration_ratio > rules.DURATION_OVER_TARGET_RATIO
+            and not (duration_delta_pct is not None and abs(duration_delta_pct) <= 5.0)
+        ),
+        "distance_over_target_flag": bool(
+            not distance_is_informational
+            and distance_ratio is not None
+            and distance_ratio > rules.DISTANCE_OVER_TARGET_RATIO
+        ),
         "elevation_over_target_flag": bool(elevation_ratio is not None and elevation_ratio > rules.ELEVATION_OVER_TARGET_RATIO),
+        "duration_within_tolerance_flag": bool(duration_delta_pct is not None and abs(duration_delta_pct) <= 5.0),
+        "distance_informational_flag": distance_is_informational,
+        "short_recovery_hr_lag_flag": any(block.get("status_detail") == "executed_soft_but_hr_lagged" for block in block_analysis),
+        "technical_stride_intensity_flag": any(
+            block.get("block_subtype") in {"technical_stride", "progressive_technical"}
+            and block.get("status_detail") == "faster_than_target"
+            for block in block_analysis
+        ),
         "heart_rate_high_flag": heart_rate_high_flag,
         "pace_instability_flag": pace_instability_flag,
         "possible_heat_impact_flag": possible_heat_impact_flag,
@@ -612,6 +811,7 @@ def _build_flags(
         "cardiac_drift_severity": _cardiac_drift_severity(heart_rate.get("cardiac_drift_ratio") if heart_rate else None),
         "hydration_risk_flag": hydration_risk_flag,
         "manual_review_needed": manual_review_needed,
+        "session_target_basis": session_target_basis,
         **structured_flags,
     }
 
@@ -872,12 +1072,17 @@ def _evaluate_step_target(step: Any, lap: Any) -> dict[str, Any] | None:
             maximum,
         )
     if target_type == "pace":
-        return range_target_score(
+        return enrich_pace_target_evaluation(
+            range_target_score(
             _get_lap_value(lap, "avg_pace_sec_km"),
             _get_step_value(step, "target_pace_min_sec_km"),
             _get_step_value(step, "target_pace_max_sec_km"),
             rules.TARGET_MARGIN_PACE_SEC,
             higher_is_better=True,
+            ),
+            _get_lap_value(lap, "avg_pace_sec_km"),
+            _get_step_value(step, "target_pace_min_sec_km"),
+            _get_step_value(step, "target_pace_max_sec_km"),
         )
     if target_type == "power":
         return range_target_score(_get_lap_value(lap, "avg_power"), _get_step_value(step, "target_power_min"), _get_step_value(step, "target_power_max"), rules.TARGET_MARGIN_POWER)
@@ -906,6 +1111,53 @@ def _cardiac_drift_severity(drift_ratio: float | None) -> str | None:
     if drift_ratio > 0.08:
         return "relevant"
     return "mild_moderate"
+
+
+def _build_fatigue_evidence(
+    context: Any,
+    scores: dict[str, Any],
+    heart_rate: dict[str, Any] | None,
+    derived_flags: dict[str, Any],
+) -> dict[str, Any]:
+    reasons: list[str] = []
+    health = getattr(context, "health", None)
+    weekly_summary = getattr(context, "weekly_summary", None)
+
+    if health is not None:
+        if getattr(health, "body_battery_start", None) is not None and health.body_battery_start < 40:
+            reasons.append(f"body battery baja ({health.body_battery_start})")
+        if _normalized(getattr(health, "hrv_status", None)) in {"low", "unbalanced"}:
+            reasons.append(f"hrv {health.hrv_status}")
+        if getattr(health, "sleep_hours", None) is not None and health.sleep_hours < 6.0:
+            reasons.append(f"sueno bajo ({health.sleep_hours:.1f} h)")
+        if getattr(health, "stress_avg", None) is not None and health.stress_avg >= 40:
+            reasons.append(f"estres alto ({health.stress_avg})")
+        if getattr(health, "recovery_time_hours", None) is not None and health.recovery_time_hours >= 24:
+            reasons.append(f"recuperacion pendiente ({round(health.recovery_time_hours)} h)")
+
+    if weekly_summary is not None and getattr(weekly_summary, "activity_count", 0) >= 6:
+        reasons.append(f"carga semanal alta ({weekly_summary.activity_count} actividades)")
+
+    drift_ratio = (heart_rate or {}).get("cardiac_drift_ratio")
+    if drift_ratio is not None and drift_ratio > 0.12:
+        reasons.append(f"drift alto ({round(drift_ratio, 3)})")
+
+    fatigue_score = scores.get("fatigue_score")
+    if not reasons and fatigue_score is not None and fatigue_score >= 72:
+        return {"level": "possible", "reasons": ["la sesion genero una carga moderada-alta"]}
+    if len(reasons) >= 4:
+        return {"level": "strong", "reasons": reasons}
+    if len(reasons) >= 2:
+        return {"level": "supported", "reasons": reasons}
+    if reasons:
+        return {"level": "possible", "reasons": reasons}
+    return {"level": "none", "reasons": []}
+
+
+def _apply_fatigue_evidence(block_analysis: list[dict[str, Any]], fatigue_evidence: dict[str, Any]) -> None:
+    for block in block_analysis:
+        block["fatigue_evidence_level"] = fatigue_evidence["level"]
+        block["fatigue_evidence_reasons"] = list(fatigue_evidence["reasons"])
 
 
 def _classify_extra_laps(unmatched_lap_indexes: list[int], laps: list[Any]) -> list[dict[str, Any]]:

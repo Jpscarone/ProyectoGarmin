@@ -7,6 +7,7 @@ from app.services.analysis_v2.scoring import (
     average_scores,
     closeness_score_from_delta_pct,
     enrich_hr_target_evaluation,
+    enrich_pace_target_evaluation,
     range_target_score,
     stability_score_from_cv,
 )
@@ -510,6 +511,8 @@ def build_block_analysis(match_result: dict[str, Any]) -> list[dict[str, Any]]:
             evaluation = range_target_score(actual_value, target_min, target_max, _target_margin(target_type))
             if target_type == "hr":
                 evaluation = enrich_hr_target_evaluation(evaluation, actual_value, target_min, target_max)
+            elif target_type == "pace":
+                evaluation = enrich_pace_target_evaluation(evaluation, actual_value, target_min, target_max)
         within_range = evaluation["within_range"] if evaluation else None
         score = evaluation["score"] if evaluation else None
         duration_delta_pct = _delta_pct(step.get("duration_sec"), lap.get("duration_sec"))
@@ -534,13 +537,27 @@ def build_block_analysis(match_result: dict[str, Any]) -> list[dict[str, Any]]:
                 "distance_delta_pct": distance_delta_pct,
                 "consistency_score": consistency_score,
                 "actual_value": actual_value,
+                "actual_avg_hr": lap.get("avg_hr"),
+                "actual_avg_pace_sec_km": lap.get("avg_pace_sec_km"),
+                "actual_avg_cadence": lap.get("avg_cadence"),
                 "activity_lap_index": lap.get("index"),
                 "within_range": within_range,
                 "target_evaluation": evaluation,
                 "status_detail": evaluation.get("status_detail") if evaluation else None,
+                "direction_label": evaluation.get("direction_label") if evaluation else None,
+                "intensity_interpretation": evaluation.get("intensity_interpretation") if evaluation else None,
                 "delta_to_upper": evaluation.get("delta_to_upper") if evaluation else None,
                 "delta_to_lower": evaluation.get("delta_to_lower") if evaluation else None,
                 "range_position_label": evaluation.get("range_position_label") if evaluation else None,
+                "block_subtype": None,
+                "recovery_effective": None,
+                "recovery_evaluation_method": None,
+                "end_hr": lap.get("end_hr"),
+                "last_20s_avg_hr": lap.get("last_20s_avg_hr"),
+                "hr_drop_bpm": None,
+                "hr_trend": None,
+                "fatigue_evidence_level": "none",
+                "fatigue_evidence_reasons": [],
                 "score": score,
                 "short_note": _block_short_note(within_range, target_type),
             }
@@ -607,7 +624,16 @@ def derive_structured_flags(session_intent: str, match_result: dict[str, Any], b
 
     recovery_block_not_effective_flag = False
     if recovery_blocks:
-        out_of_range = sum(1 for block in recovery_blocks if block.get("within_range") is False)
+        out_of_range = sum(
+            1
+            for block in recovery_blocks
+            if block.get("recovery_effective") is False
+            or (
+                block.get("recovery_effective") is None
+                and block.get("within_range") is False
+                and block.get("status_detail") != "executed_soft_but_hr_lagged"
+            )
+        )
         recovery_block_not_effective_flag = out_of_range >= max(1, len(recovery_blocks) // 2)
 
     return {
@@ -652,7 +678,7 @@ def _expanded_step(step: Any, repeat_group_id: int | None, repeat_iteration: int
 
 def _infer_role(step_type: str | None, target_zone: str | None) -> str:
     normalized_step = (step_type or "").lower()
-    if normalized_step in {"warmup", "cooldown"}:
+    if normalized_step in {"warmup", "cooldown", "recovery"}:
         return normalized_step
     if target_zone and target_zone.lower() in {"z1", "z2"}:
         return "recovery"
@@ -742,6 +768,10 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
     )
 
     if role == "recovery" and target_type == "hr":
+        if block.get("status_detail") == "executed_soft_but_hr_lagged":
+            return "recuperacion suave, FC promedio alta por demora fisiologica"
+        if block.get("status_detail") == "recovery_partial":
+            return "recuperacion parcial"
         if block.get("status_detail") in {"within_range", "within_range_upper_edge"}:
             return "recuperacion efectiva"
         if recovery_block_not_effective_flag and direction == "above":
@@ -755,6 +785,12 @@ def _short_note_for_block(block: dict[str, Any], recovery_block_not_effective_fl
         return "recuperacion fuera de rango"
 
     if role == "work":
+        if block.get("block_subtype") in {"technical_stride", "progressive_technical"}:
+            if block.get("status_detail") == "faster_than_target":
+                return "progresivo algo intenso"
+            if block.get("status_detail") == "slower_than_target":
+                return "activacion tecnica mas suave de lo previsto"
+            return "progresivo tecnico controlado"
         if target_type == "hr":
             status_detail = block.get("status_detail")
             if status_detail == "within_range_upper_edge":
@@ -867,9 +903,11 @@ def _lap_summary(lap: Any) -> dict[str, Any]:
         "duration_sec": getattr(lap, "duration_sec", None),
         "distance_m": getattr(lap, "distance_m", None),
         "avg_hr": getattr(lap, "avg_hr", None),
+        "max_hr": getattr(lap, "max_hr", None),
         "avg_pace_sec_km": getattr(lap, "avg_pace_sec_km", None),
         "avg_power": getattr(lap, "avg_power", None),
         "avg_cadence": getattr(lap, "avg_cadence", None),
+        "max_cadence": getattr(lap, "max_cadence", None),
         "lap_type": getattr(lap, "lap_type", None),
     }
 
@@ -955,8 +993,14 @@ def _count_target_status(blocks: list[dict[str, Any]], status: str) -> int:
 def _count_actionable_above_target(blocks: list[dict[str, Any]]) -> int:
     count = 0
     for block in blocks:
+        if block.get("block_subtype") in {"technical_stride", "progressive_technical"} and block.get("status_detail") == "faster_than_target":
+            continue
         if block.get("target_type") == "hr":
             if block.get("status_detail") in {"above_range", "clearly_above_range"}:
+                count += 1
+            continue
+        if block.get("target_type") == "pace":
+            if block.get("status_detail") == "faster_than_target":
                 count += 1
             continue
         if block.get("within_range") is False and block.get("actual_value") is not None and block.get("planned_target_max") is not None:

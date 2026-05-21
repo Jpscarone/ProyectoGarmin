@@ -135,6 +135,35 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["date"], "2026-05-19")
         self.assertEqual(payload["planned_sessions"][0]["name"], "Gimnasio suave")
 
+    async def test_get_day_plan_sends_athlete_id_and_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/day-plan")
+            self.assertEqual(request.url.params.get("athlete_id"), "2")
+            self.assertEqual(request.url.params.get("date"), "2026-05-20")
+            return httpx.Response(200, json={"date": "2026-05-20", "planned_sessions": [{"name": "Series"}]})
+
+        client = _build_client(handler)
+        payload = await client.get_day_plan(athlete_id=2, date="2026-05-20")
+
+        self.assertEqual(payload["planned_sessions"][0]["name"], "Series")
+
+    async def test_get_week_plan_sends_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/week-plan")
+            self.assertEqual(request.url.params.get("athlete_id"), "2")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-18")
+            self.assertEqual(request.url.params.get("include_completed"), "false")
+            return httpx.Response(200, json={"week": {"start_date": "2026-05-18"}, "days": []})
+
+        client = _build_client(handler)
+        payload = await client.get_week_plan(
+            athlete_id=2,
+            week_start_date="2026-05-18",
+            include_completed=False,
+        )
+
+        self.assertEqual(payload["week"]["start_date"], "2026-05-18")
+
     async def test_get_my_day_overview_only_sends_access_code_and_date(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/me/day-overview")
@@ -153,6 +182,37 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         payload = await client.get_my_day_overview(access_code="CARO-7K92-XP31", date="19-05-2026")
 
         self.assertEqual(payload["date"], "2026-05-19")
+
+    async def test_get_my_day_plan_only_sends_access_code_and_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/day-plan")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("date"), "20-05-2026")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"date": "2026-05-20", "summary": {"has_sessions": False}})
+
+        client = _build_client(handler)
+        payload = await client.get_my_day_plan(access_code="CARO-7K92-XP31", date="20-05-2026")
+
+        self.assertEqual(payload["date"], "2026-05-20")
+
+    async def test_get_my_week_plan_only_sends_access_code_and_filters(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/week-plan")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-18")
+            self.assertEqual(request.url.params.get("include_completed"), "true")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"week": {"start_date": "2026-05-18"}, "days": []})
+
+        client = _build_client(handler)
+        payload = await client.get_my_week_plan(
+            access_code="CARO-7K92-XP31",
+            week_start_date="2026-05-18",
+            include_completed=True,
+        )
+
+        self.assertEqual(payload["week"]["start_date"], "2026-05-18")
 
     async def test_get_my_recent_activities_does_not_send_athlete_id(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -225,10 +285,12 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         signatures = {
             "identify_me": inspect.signature(mcp_server.identify_me),
+            "get_my_day_plan": inspect.signature(mcp_server.get_my_day_plan),
             "get_my_day_overview": inspect.signature(mcp_server.get_my_day_overview),
             "get_my_recent_activities": inspect.signature(mcp_server.get_my_recent_activities),
             "get_my_health_summary": inspect.signature(mcp_server.get_my_health_summary),
             "get_my_training_status": inspect.signature(mcp_server.get_my_training_status),
+            "get_my_week_plan": inspect.signature(mcp_server.get_my_week_plan),
             "compare_my_planned_vs_done": inspect.signature(mcp_server.compare_my_planned_vs_done),
             "get_my_next_session_recommendation": inspect.signature(mcp_server.get_my_next_session_recommendation),
             "get_my_week_load_summary": inspect.signature(mcp_server.get_my_week_load_summary),

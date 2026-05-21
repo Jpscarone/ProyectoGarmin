@@ -131,6 +131,36 @@ def get_my_day_overview(
     return get_day_overview(athlete_id=athlete.id, date_value=date_value, db=db)
 
 
+@router.get("/me/day-plan")
+def get_my_day_plan(
+    request: Request,
+    access_code: str = Query(...),
+    date_value: str = Query(..., alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_training_day_plan(athlete_id=athlete.id, date_value=date_value, db=db)
+
+
+@router.get("/me/week-plan")
+def get_my_week_plan(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    include_completed: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_training_week_plan(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        include_completed=include_completed,
+        db=db,
+    )
+
+
 @router.get("/me/compare/planned-vs-done")
 def compare_my_planned_vs_done(
     request: Request,
@@ -365,6 +395,34 @@ def get_day_overview(
         "summary": summary,
         "data_quality": {"warnings": warnings},
     }
+
+
+@router.get("/training/day-plan")
+def get_training_day_plan(
+    athlete_id: int = Query(...),
+    date_value: str = Query(..., alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_mcp_date(date_value, "date")
+    return _build_training_day_plan_payload(db, athlete, target_date)
+
+
+@router.get("/training/week-plan")
+def get_training_week_plan(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    include_completed: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    start_date = _parse_iso_date(week_start_date, "week_start_date") if week_start_date else _week_start_from_date(today_local(athlete=athlete))
+    return _build_training_week_plan_payload(
+        db,
+        athlete=athlete,
+        week_start_date=start_date,
+        include_completed=include_completed,
+    )
 
 
 @router.get("/session-feedback")
@@ -1507,6 +1565,224 @@ def _serialize_day_planned_session(session: PlannedSession, matches: list[dict[s
         "target_summary": _build_planned_target_summary(session),
         "notes": session.target_notes or session.description_text,
     }
+
+
+def _build_training_day_plan_payload(
+    db: Session,
+    athlete: Athlete,
+    target_date: date,
+) -> dict[str, Any]:
+    plan = _resolve_relevant_plan_for_date(db, athlete.id, target_date)
+    training_day = _get_relevant_training_day_for_date(db, athlete.id, target_date, plan)
+    serialized_sessions = [
+        _serialize_plan_planned_session(item, athlete=athlete)
+        for item in (training_day.planned_sessions if training_day is not None else [])
+    ]
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "date": target_date.isoformat(),
+        "plan": _serialize_training_plan(plan),
+        "training_day": _serialize_training_day_overview(training_day),
+        "planned_sessions": serialized_sessions,
+        "summary": _build_day_plan_summary(serialized_sessions),
+    }
+
+
+def _build_training_week_plan_payload(
+    db: Session,
+    *,
+    athlete: Athlete,
+    week_start_date: date,
+    include_completed: bool,
+) -> dict[str, Any]:
+    week_end_date = _week_end_from_start(week_start_date)
+    plan = _resolve_relevant_plan_for_date(db, athlete.id, week_start_date)
+    training_days = _get_training_days_in_range(db, athlete.id, week_start_date, week_end_date, plan=plan)
+    training_days_by_date = {item.day_date: item for item in training_days if item.day_date is not None}
+
+    days: list[dict[str, Any]] = []
+    planned_sessions_count = 0
+    completed_sessions_count = 0
+    pending_sessions_count = 0
+
+    for offset in range(7):
+        target_date = week_start_date + (offset * date.resolution)
+        training_day = training_days_by_date.get(target_date)
+        serialized_sessions_all = [
+            _serialize_plan_planned_session(item, athlete=athlete)
+            for item in (training_day.planned_sessions if training_day is not None else [])
+        ]
+        serialized_sessions = (
+            serialized_sessions_all
+            if include_completed
+            else [item for item in serialized_sessions_all if item["status"] not in {"completed", "matched_with_activity"}]
+        )
+        planned_sessions_count += len(serialized_sessions)
+        completed_sessions_count += sum(
+            1 for item in serialized_sessions if item["status"] in {"completed", "matched_with_activity"}
+        )
+        pending_sessions_count += sum(1 for item in serialized_sessions if item["status"] in {"planned", "no_activity"})
+        days.append(
+            {
+                "date": target_date.isoformat(),
+                "training_day": _serialize_training_day_overview(training_day),
+                "planned_sessions": serialized_sessions,
+                "summary": _build_day_plan_summary(serialized_sessions),
+            }
+        )
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "plan": _serialize_training_plan(plan),
+        "week": {
+            "start_date": week_start_date.isoformat(),
+            "end_date": week_end_date.isoformat(),
+            "planned_sessions_count": planned_sessions_count,
+            "completed_sessions_count": completed_sessions_count,
+            "pending_sessions_count": pending_sessions_count,
+        },
+        "days": days,
+        "summary": {
+            "message": _build_week_plan_summary_message(
+                planned_sessions_count=planned_sessions_count,
+                completed_sessions_count=completed_sessions_count,
+                pending_sessions_count=pending_sessions_count,
+            ),
+        },
+    }
+
+
+def _resolve_relevant_plan_for_date(db: Session, athlete_id: int, target_date: date) -> TrainingPlan | None:
+    return select_default_training_plan(db, athlete_id=athlete_id, today=target_date)
+
+
+def _get_relevant_training_day_for_date(
+    db: Session,
+    athlete_id: int,
+    target_date: date,
+    plan: TrainingPlan | None,
+) -> TrainingDay | None:
+    training_days = _get_training_days_for_date(db, athlete_id, target_date)
+    if not training_days:
+        return None
+    if plan is not None:
+        exact = next((item for item in training_days if item.training_plan_id == plan.id), None)
+        if exact is not None:
+            return exact
+    return training_days[0]
+
+
+def _get_training_days_in_range(
+    db: Session,
+    athlete_id: int,
+    start_date: date,
+    end_date: date,
+    *,
+    plan: TrainingPlan | None,
+) -> list[TrainingDay]:
+    statement = (
+        select(TrainingDay)
+        .where(
+            TrainingDay.athlete_id == athlete_id,
+            TrainingDay.day_date >= start_date,
+            TrainingDay.day_date <= end_date,
+        )
+        .order_by(TrainingDay.day_date.asc(), TrainingDay.id.asc())
+        .options(*_training_day_loader_options())
+    )
+    if plan is not None:
+        statement = statement.where(TrainingDay.training_plan_id == plan.id)
+    training_days = list(db.scalars(statement).all())
+    if training_days or plan is not None:
+        return training_days
+    return list(
+        db.scalars(
+            select(TrainingDay)
+            .where(
+                TrainingDay.athlete_id == athlete_id,
+                TrainingDay.day_date >= start_date,
+                TrainingDay.day_date <= end_date,
+            )
+            .order_by(TrainingDay.day_date.asc(), TrainingDay.id.asc())
+            .options(*_training_day_loader_options())
+        ).all()
+    )
+
+
+def _serialize_plan_planned_session(session: PlannedSession, *, athlete: Athlete) -> dict[str, Any]:
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "name": session.name,
+        "sport": session.sport_type,
+        "modality": session.modality,
+        "planned_duration_sec": metrics.duration_sec,
+        "planned_distance_m": metrics.distance_m,
+        "target_summary": _build_planned_target_summary(session),
+        "notes": session.target_notes or session.description_text,
+        "status": _resolve_plan_planned_session_status(session, athlete=athlete),
+        "matched_activity": _serialize_matched_activity_for_plan(session),
+    }
+
+
+def _resolve_plan_planned_session_status(session: PlannedSession, *, athlete: Athlete) -> str:
+    source = (session.completion_source or "").strip().lower()
+    if source in {"cancelled", "canceled"}:
+        return "cancelled"
+    if source == "skipped":
+        return "skipped"
+    if session.activity_match is not None and getattr(session.activity_match, "garmin_activity", None) is not None:
+        return "matched_with_activity"
+    if is_session_completed(session) or is_manually_completed_strength_session(session):
+        return "completed"
+    session_date = session.training_day.day_date if session.training_day and session.training_day.day_date else None
+    if session_date is not None and session_date < today_local(athlete=athlete):
+        return "no_activity"
+    return "planned"
+
+
+def _serialize_matched_activity_for_plan(session: PlannedSession) -> dict[str, Any] | None:
+    match = session.activity_match
+    activity = match.garmin_activity if match is not None else None
+    if activity is None:
+        return None
+    return {
+        "id": activity.id,
+        "activity_name": activity.activity_name,
+        "start_time": activity.start_time.isoformat() if activity.start_time else None,
+        "duration_sec": activity.duration_sec,
+        "distance_m": activity.distance_m,
+    }
+
+
+def _build_day_plan_summary(planned_sessions: list[dict[str, Any]]) -> dict[str, Any]:
+    has_sessions = bool(planned_sessions)
+    sessions_count = len(planned_sessions)
+    if not has_sessions:
+        message = "No hay sesion programada para esta fecha."
+    elif any(item["status"] == "no_activity" for item in planned_sessions):
+        message = "Hay sesiones programadas para esta fecha, pero no tienen actividad vinculada."
+    else:
+        message = "Hay sesiones programadas para esta fecha."
+    return {
+        "has_sessions": has_sessions,
+        "sessions_count": sessions_count,
+        "message": message,
+    }
+
+
+def _build_week_plan_summary_message(
+    *,
+    planned_sessions_count: int,
+    completed_sessions_count: int,
+    pending_sessions_count: int,
+) -> str:
+    if planned_sessions_count == 0:
+        return "No hay sesiones programadas para esta semana."
+    return (
+        f"Semana con {planned_sessions_count} sesiones visibles: "
+        f"{completed_sessions_count} completadas y {pending_sessions_count} pendientes."
+    )
 
 
 def _planned_session_day_status(session: PlannedSession, matches: list[dict[str, Any]]) -> str:

@@ -52,6 +52,33 @@ class TrainingAppApiClient:
             params={"athlete_id": str(int(athlete_id))},
         )
 
+    async def get_day_plan(self, *, athlete_id: int, date: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/training/day-plan",
+            params={
+                "athlete_id": str(int(athlete_id)),
+                "date": date,
+            },
+        )
+
+    async def get_week_plan(
+        self,
+        *,
+        athlete_id: int,
+        week_start_date: str | None = None,
+        include_completed: bool = True,
+    ) -> dict[str, Any]:
+        params = {
+            "athlete_id": str(int(athlete_id)),
+            "include_completed": "true" if include_completed else "false",
+        }
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json(
+            "/api/mcp/training/week-plan",
+            params=params,
+        )
+
     async def identify_me(self, *, access_code: str) -> dict[str, Any]:
         return await self._get_json(
             "/api/mcp/me/identify",
@@ -77,6 +104,33 @@ class TrainingAppApiClient:
         return await self._get_json(
             "/api/mcp/me/training/status",
             params={"access_code": access_code},
+        )
+
+    async def get_my_day_plan(self, *, access_code: str, date: str) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/day-plan",
+            params={
+                "access_code": access_code,
+                "date": date,
+            },
+        )
+
+    async def get_my_week_plan(
+        self,
+        *,
+        access_code: str,
+        week_start_date: str | None = None,
+        include_completed: bool = True,
+    ) -> dict[str, Any]:
+        params = {
+            "access_code": access_code,
+            "include_completed": "true" if include_completed else "false",
+        }
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json(
+            "/api/mcp/me/week-plan",
+            params=params,
         )
 
     async def get_day_overview(self, *, athlete_id: int, date: str) -> dict[str, Any]:

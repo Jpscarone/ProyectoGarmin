@@ -64,6 +64,26 @@ async def get_training_status(athlete_id: int) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def get_day_plan(athlete_id: int, date: str) -> dict[str, Any]:
+    """Devuelve la planificacion exacta de una fecha: training_day, sesiones y actividad vinculada si existe."""
+    return await CLIENT.get_day_plan(athlete_id=athlete_id, date=date)
+
+
+@mcp.tool()
+async def get_week_plan(
+    athlete_id: int,
+    week_start_date: str | None = None,
+    include_completed: bool = True,
+) -> dict[str, Any]:
+    """Devuelve la planificacion semanal exacta sin reemplazar por actividades Garmin cercanas."""
+    return await CLIENT.get_week_plan(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+        include_completed=include_completed,
+    )
+
+
+@mcp.tool()
 async def identify_me(access_code: str) -> dict[str, Any]:
     """Identifica al atleta asociado a una clave privada experimental, sin exponer athlete_id en la consulta."""
     return await CLIENT.identify_me(access_code=access_code)
@@ -85,6 +105,26 @@ async def get_my_health_summary(access_code: str) -> dict[str, Any]:
 async def get_my_training_status(access_code: str) -> dict[str, Any]:
     """Devuelve el estado general del atleta asociado a la clave privada indicada."""
     return await CLIENT.get_my_training_status(access_code=access_code)
+
+
+@mcp.tool()
+async def get_my_day_plan(access_code: str, date: str) -> dict[str, Any]:
+    """Devuelve la planificacion exacta del dia solo para el atleta resuelto por la clave privada."""
+    return await CLIENT.get_my_day_plan(access_code=access_code, date=date)
+
+
+@mcp.tool()
+async def get_my_week_plan(
+    access_code: str,
+    week_start_date: str | None = None,
+    include_completed: bool = True,
+) -> dict[str, Any]:
+    """Devuelve la planificacion semanal exacta del atleta resuelto por la clave privada indicada."""
+    return await CLIENT.get_my_week_plan(
+        access_code=access_code,
+        week_start_date=week_start_date,
+        include_completed=include_completed,
+    )
 
 
 @mcp.tool()

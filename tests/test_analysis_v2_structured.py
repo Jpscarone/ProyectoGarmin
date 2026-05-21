@@ -58,7 +58,17 @@ def _make_step(
     )
 
 
-def _make_lap(index: int, *, duration_sec: int, distance_m: float, avg_hr: int | None, avg_pace_sec_km: float | None) -> ActivityLapContext:
+def _make_lap(
+    index: int,
+    *,
+    duration_sec: int,
+    distance_m: float,
+    avg_hr: int | None,
+    avg_pace_sec_km: float | None,
+    max_hr: int | None = None,
+    avg_cadence: float | None = None,
+    max_cadence: float | None = None,
+) -> ActivityLapContext:
     return ActivityLapContext(
         index=index,
         name=None,
@@ -70,12 +80,12 @@ def _make_lap(index: int, *, duration_sec: int, distance_m: float, avg_hr: int |
         elevation_gain_m=None,
         elevation_loss_m=None,
         avg_hr=avg_hr,
-        max_hr=None,
+        max_hr=max_hr,
         avg_pace_sec_km=avg_pace_sec_km,
         avg_power=None,
         max_power=None,
-        avg_cadence=None,
-        max_cadence=None,
+        avg_cadence=avg_cadence,
+        max_cadence=max_cadence,
     )
 
 
@@ -540,3 +550,143 @@ def test_indoor_running_with_planned_incline_adds_analysis_note():
 
     assert "Sesion en cinta con inclinacion planificada: se prioriza duracion e intensidad sobre ritmo/distancia." in metrics["compliance"]["notes"]
     assert metrics["scores"]["compliance_score"] is not None
+
+
+def test_short_hr_recovery_uses_prudent_logic_when_execution_was_soft():
+    steps = [
+        _make_step(1, target_type="pace", target_pace_min=260, target_pace_max=290, duration_sec=60),
+        _make_step(2, step_type="recovery", target_type="hr", target_hr_min=120, target_hr_max=140, duration_sec=60),
+    ]
+    laps = [
+        _make_lap(1, duration_sec=60, distance_m=320, avg_hr=160, avg_pace_sec_km=245, avg_cadence=178),
+        _make_lap(2, duration_sec=60, distance_m=70, avg_hr=149, avg_pace_sec_km=700, avg_cadence=118),
+    ]
+    context = _make_context(steps, laps)
+
+    metrics = compute_session_metrics(context)
+
+    recovery = metrics["block_analysis"][1]
+    assert recovery["status_detail"] == "executed_soft_but_hr_lagged"
+    assert recovery["recovery_effective"] is True
+    assert recovery["short_note"] == "recuperacion suave, FC promedio alta por demora fisiologica"
+    assert metrics["derived_flags"]["recovery_block_not_effective_flag"] is False
+    assert metrics["derived_flags"]["short_recovery_hr_lag_flag"] is True
+
+
+def test_time_based_session_marks_distance_as_informational():
+    steps = [
+        _make_step(1, target_type="hr", target_hr_min=126, target_hr_max=145, duration_sec=2400),
+        _make_step(2, repeat_count=4, target_type="pace", target_pace_min=260, target_pace_max=290, duration_sec=60),
+        _make_step(3, repeat_count=4, step_type="recovery", target_type="hr", target_hr_min=120, target_hr_max=140, duration_sec=60),
+        _make_step(4, target_type="hr", target_hr_min=120, target_hr_max=140, duration_sec=300),
+    ]
+    laps = [
+        _make_lap(1, duration_sec=2400, distance_m=6500, avg_hr=146, avg_pace_sec_km=369),
+        _make_lap(2, duration_sec=60, distance_m=280, avg_hr=160, avg_pace_sec_km=240),
+        _make_lap(3, duration_sec=60, distance_m=80, avg_hr=145, avg_pace_sec_km=700),
+        _make_lap(4, duration_sec=60, distance_m=282, avg_hr=161, avg_pace_sec_km=238),
+        _make_lap(5, duration_sec=60, distance_m=82, avg_hr=144, avg_pace_sec_km=705),
+        _make_lap(6, duration_sec=60, distance_m=285, avg_hr=162, avg_pace_sec_km=236),
+        _make_lap(7, duration_sec=60, distance_m=78, avg_hr=143, avg_pace_sec_km=710),
+        _make_lap(8, duration_sec=60, distance_m=284, avg_hr=163, avg_pace_sec_km=235),
+        _make_lap(9, duration_sec=60, distance_m=80, avg_hr=142, avg_pace_sec_km=715),
+        _make_lap(10, duration_sec=327, distance_m=900, avg_hr=138, avg_pace_sec_km=363),
+    ]
+    context = _make_context(steps, laps)
+    context.planned_session.expected_distance_km = None
+    context.activity.duration_sec = 3267
+    context.activity.distance_m = 9470
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["session_target_basis"] == "duration"
+    assert metrics["distance_is_informational"] is True
+    assert metrics["compliance"]["distance_score"] is None
+    assert metrics["derived_flags"]["distance_informational_flag"] is True
+    assert metrics["derived_flags"]["distance_over_target_flag"] is False
+
+
+def test_duration_within_tolerance_does_not_raise_strong_flag():
+    steps = [_make_step(1, target_type="hr", target_hr_min=126, target_hr_max=145, duration_sec=3180)]
+    laps = [_make_lap(1, duration_sec=3269, distance_m=9000, avg_hr=140, avg_pace_sec_km=363)]
+    context = _make_context(steps, laps)
+    context.planned_session.expected_duration_min = 53
+    context.activity.duration_sec = 3269
+
+    metrics = compute_session_metrics(context)
+
+    assert round(metrics["planned_vs_actual"]["duration"]["delta_pct"], 1) == 2.8
+    assert metrics["derived_flags"]["duration_within_tolerance_flag"] is True
+    assert metrics["derived_flags"]["duration_over_target_flag"] is False
+
+
+def test_technical_stride_is_detected_and_softened():
+    steps = [_make_step(1, target_type="pace", target_pace_min=260, target_pace_max=290, duration_sec=60)]
+    laps = [_make_lap(1, duration_sec=60, distance_m=300, avg_hr=160, avg_pace_sec_km=240)]
+    context = _make_context(steps, laps)
+    context.planned_session.title = "Aerobico con tecnica"
+    context.planned_session.session_type = "aerobic"
+
+    metrics = compute_session_metrics(context)
+
+    block = metrics["block_analysis"][0]
+    assert block["block_subtype"] in {"technical_stride", "progressive_technical"}
+    assert block["status_detail"] == "faster_than_target"
+    assert block["short_note"] == "progresivo algo intenso"
+    assert metrics["derived_flags"]["technical_stride_intensity_flag"] is True
+    assert metrics["derived_flags"]["work_block_over_target_flag"] is False
+
+
+def test_pace_direction_labels_are_explicit():
+    steps = [
+        _make_step(1, target_type="pace", target_pace_min=260, target_pace_max=290, distance_m=1000),
+        _make_step(2, target_type="pace", target_pace_min=260, target_pace_max=290, distance_m=1000),
+    ]
+    laps = [
+        _make_lap(1, duration_sec=240, distance_m=1000, avg_hr=160, avg_pace_sec_km=240),
+        _make_lap(2, duration_sec=310, distance_m=1000, avg_hr=150, avg_pace_sec_km=310),
+    ]
+    context = _make_context(steps, laps)
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["block_analysis"][0]["status_detail"] == "faster_than_target"
+    assert metrics["block_analysis"][0]["intensity_interpretation"] == "mas exigente"
+    assert metrics["block_analysis"][1]["status_detail"] == "slower_than_target"
+    assert metrics["block_analysis"][1]["intensity_interpretation"] == "por debajo del objetivo"
+
+
+def test_fatigue_evidence_requires_objective_support():
+    steps = [_make_step(1, target_type="hr", target_hr_min=126, target_hr_max=145, duration_sec=2400)]
+    laps = [_make_lap(1, duration_sec=2400, distance_m=6500, avg_hr=146, avg_pace_sec_km=369)]
+    context = _make_context(steps, laps)
+
+    metrics = compute_session_metrics(context)
+    narrative = _build_fallback_output(context, metrics)
+
+    assert metrics["derived_flags"]["fatigue_evidence_level"] == "none"
+    assert metrics["derived_flags"]["fatigue_evidence_reasons"] == []
+    assert "fatiga previa evidente" not in narrative.analysis_natural.lower()
+
+
+def test_fatigue_evidence_supported_when_health_markers_are_low():
+    steps = [_make_step(1, target_type="hr", target_hr_min=126, target_hr_max=145, duration_sec=2400)]
+    laps = [_make_lap(1, duration_sec=2400, distance_m=6500, avg_hr=146, avg_pace_sec_km=369)]
+    context = _make_context(steps, laps)
+    context.health = type(
+        "HealthStub",
+        (),
+        {
+            "sleep_hours": 5.4,
+            "sleep_score": 58,
+            "hrv_status": "low",
+            "stress_avg": 46,
+            "body_battery_start": 30,
+            "recovery_time_hours": 26.0,
+        },
+    )()
+
+    metrics = compute_session_metrics(context)
+
+    assert metrics["derived_flags"]["fatigue_evidence_level"] in {"supported", "strong"}
+    assert metrics["derived_flags"]["fatigue_evidence_reasons"]

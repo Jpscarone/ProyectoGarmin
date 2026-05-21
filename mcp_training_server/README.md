@@ -16,8 +16,12 @@ No modifica el estado del sistema.
 - `get_health_summary(athlete_id: int)`
 - `get_latest_weekly_analysis(athlete_id: int)`
 - `get_training_status(athlete_id: int)`
+- `get_day_plan(athlete_id: int, date: str)` planificacion exacta por fecha
+- `get_week_plan(athlete_id: int, week_start_date: str | None = None, include_completed: bool = True)` planificacion semanal exacta
 - `get_day_overview(athlete_id: int, date: str)`
 - `identify_me(access_code: str)`
+- `get_my_day_plan(access_code: str, date: str)` planificacion exacta por fecha para el atleta resuelto por clave
+- `get_my_week_plan(access_code: str, week_start_date: str | None = None, include_completed: bool = True)` planificacion semanal exacta para el atleta resuelto por clave
 - `get_my_day_overview(access_code: str, date: str)`
 - `get_my_recent_activities(access_code: str, limit: int = 10)` solo Garmin
 - `get_my_health_summary(access_code: str)`
@@ -39,7 +43,8 @@ Ademas de las tools admin/coach basadas en `athlete_id`, existe una capa experim
 - Las tools `my_*` solo aceptan `access_code`.
 - La API resuelve internamente el atleta y nunca permite consultar otro `athlete_id`.
 - Todo sigue siendo read-only.
-- Si el atleta pregunta por una fecha concreta, conviene usar `get_my_day_overview` para responder con la planificacion y las actividades exactas de ese dia.
+- Para preguntas de planificacion exacta como `Manana que sesion tengo` o `Que sesiones tengo esta semana`, conviene usar `get_my_day_plan` y `get_my_week_plan`.
+- Si el atleta pregunta por una fecha concreta y queres mezclar planificacion + actividades Garmin del mismo dia, conviene usar `get_my_day_overview`.
 
 Creacion de codigo:
 
@@ -75,6 +80,42 @@ Advertencias de seguridad:
 ## Nueva tool comparativa
 
 ## Nueva tool de dia exacto
+
+`get_day_plan` y `get_my_day_plan` consultan `GET /api/mcp/training/day-plan` y `GET /api/mcp/me/day-plan`.
+
+Devuelven un JSON read-only con:
+
+- atleta, fecha y plan relevante
+- `training_day` de la fecha exacta si existe
+- `planned_sessions` del dia exacto
+- `status` derivado por sesion: `planned`, `completed`, `no_activity`, `matched_with_activity`, `skipped` o `cancelled`
+- `matched_activity` solo cuando existe una vinculacion explicita
+- `summary` con mensaje claro cuando no hay nada programado
+
+Reglas importantes:
+
+- No reemplaza la fecha consultada por la proxima sesion pendiente.
+- No mezcla una actividad Garmin cercana cuando la consulta pide una fecha exacta.
+- Acepta `YYYY-MM-DD` y tambien `DD-MM-YYYY`.
+- Si hay una sesion planificada sin actividad asociada, devuelve igualmente la planificacion del dia.
+
+Prompt ejemplo:
+
+- `Soy Pablo Scarone, mi clave de atleta es XXXX. Manana que sesion tengo?`
+- `Que tengo el 20-05-2026?`
+
+`get_week_plan` y `get_my_week_plan` consultan `GET /api/mcp/training/week-plan` y `GET /api/mcp/me/week-plan`.
+
+Devuelven una vista read-only de 7 dias con:
+
+- semana resuelta con `start_date` y `end_date`
+- cada dia con `training_day`, `planned_sessions` y `summary`
+- contadores de sesiones visibles, completadas y pendientes
+
+Prompt ejemplo:
+
+- `Que sesiones tengo esta semana`
+- `Mostrame la semana que arranca el 2026-05-18`
 
 `get_day_overview` y `get_my_day_overview` consultan `GET /api/mcp/training/day-overview` y `GET /api/mcp/me/day-overview`.
 
@@ -288,6 +329,11 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&date=2026-05-13"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&activity_id=123"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/compare/planned-vs-done?athlete_id=1&planned_session_id=456"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=2026-05-20"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-plan?athlete_id=1&date=20-05-2026"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1&week_start_date=2026-05-18"
+curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/week-plan?athlete_id=1&week_start_date=2026-05-18&include_completed=false"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-overview?athlete_id=1&date=2026-05-19"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/day-overview?athlete_id=1&date=19-05-2026"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/training/next-session-recommendation?athlete_id=1"

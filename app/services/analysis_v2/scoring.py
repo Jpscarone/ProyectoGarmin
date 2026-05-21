@@ -122,3 +122,39 @@ def enrich_hr_target_evaluation(
         }
     )
     return result
+
+
+def enrich_pace_target_evaluation(
+    evaluation: dict[str, float | str | bool | None],
+    value: float | int | None,
+    minimum: float | int | None,
+    maximum: float | int | None,
+) -> dict[str, float | str | bool | None]:
+    """Add explicit pace direction while preserving legacy status fields."""
+    result = dict(evaluation)
+
+    if value is None or (minimum is None and maximum is None):
+        status_detail = str(result.get("status") or "not_evaluable")
+        direction_label = "no evaluable"
+        intensity_interpretation = "sin datos suficientes"
+    elif minimum is not None and value < minimum:
+        status_detail = "faster_than_target"
+        direction_label = "mas rapido"
+        intensity_interpretation = "mas exigente"
+    elif maximum is not None and value > maximum:
+        status_detail = "slower_than_target"
+        direction_label = "mas lento"
+        intensity_interpretation = "por debajo del objetivo"
+    else:
+        status_detail = "within_pace_range"
+        direction_label = "dentro de rango"
+        intensity_interpretation = "ajustado al objetivo"
+
+    result.update(
+        {
+            "status_detail": status_detail,
+            "direction_label": direction_label,
+            "intensity_interpretation": intensity_interpretation,
+        }
+    )
+    return result

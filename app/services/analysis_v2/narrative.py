@@ -71,6 +71,9 @@ Reglas para HR personalizada:
 - Si hay rangos HR_MIN/HR_MAX del plan, usalos como referencia principal; las zonas Garmin son solo contexto secundario.
 - No conviertas una superacion aislada de hasta 2 bpm en una conclusion global de intensidad excesiva.
 - Si hay deriva cardiaca relevante, podes usarla para matizar un ultimo bloque apenas por encima del rango.
+- En recuperaciones cortas de 90 segundos o menos, no uses solo la FC promedio para decir que la recuperacion fue mala si el bloque fue suave.
+- Si la sesion esta basada en tiempo, no trates la distancia como fallo principal salvo que el plan la haya pedido explicitamente.
+- No uses frases como "fatiga previa evidente" si el contexto no trae evidencia objetiva suficiente.
 """.strip()
 
 
@@ -484,7 +487,7 @@ def build_weather_context_summary(weather: Any, metrics: Mapping[str, Any]) -> d
 
 def build_health_context_summary(health: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
     if health is None:
-        return {"relevant": False, "summary": None, "signals": []}
+        return {"relevant": False, "summary": None, "signals": [], "fatigue_evidence_level": "none", "fatigue_evidence_reasons": []}
 
     signals: list[str] = []
     critical = False
@@ -543,7 +546,7 @@ def build_health_context_summary(health: Any, metrics: Mapping[str, Any]) -> dic
 
     relevant = critical or moderate_signals >= 2
     if not relevant:
-        return {"relevant": False, "summary": None, "signals": []}
+        return {"relevant": False, "summary": None, "signals": [], "fatigue_evidence_level": "none", "fatigue_evidence_reasons": []}
 
     scores = metrics.get("scores", {}) if isinstance(metrics, Mapping) else {}
     control_score = scores.get("control_score")
@@ -556,11 +559,18 @@ def build_health_context_summary(health: Any, metrics: Mapping[str, Any]) -> dic
     if not effect_parts:
         effect_parts.append("puede haber condicionado la disponibilidad del dia")
 
+    fatigue_evidence_level = "strong" if critical and moderate_signals >= 2 else "supported"
     summary = (
-        f"El atleta llegaba con señales de fatiga o recuperacion incompleta ({', '.join(signals)}), "
+        f"Habia evidencia de fatiga o carga acumulada ({', '.join(signals)}), "
         f"lo que {' y '.join(effect_parts)}."
     )
-    return {"relevant": True, "summary": summary, "signals": signals}
+    return {
+        "relevant": True,
+        "summary": summary,
+        "signals": signals,
+        "fatigue_evidence_level": fatigue_evidence_level,
+        "fatigue_evidence_reasons": signals,
+    }
 
 
 def build_relevant_context_for_llm(context: Any, metrics: Mapping[str, Any]) -> dict[str, Any]:
@@ -603,16 +613,24 @@ def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> Narrativ
 
     duration_ratio = _ratio_to_pct(planned_vs_actual.get("duration", {}).get("actual_to_planned_ratio"))
     distance_ratio = _ratio_to_pct(planned_vs_actual.get("distance", {}).get("actual_to_planned_ratio"))
+    duration_delta_pct = (planned_vs_actual.get("duration") or {}).get("delta_pct")
+    distance_is_informational = bool(planned_vs_actual.get("distance_is_informational"))
+    fatigue_evidence_level = flags.get("fatigue_evidence_level") or "none"
+    fatigue_evidence_reasons = list(flags.get("fatigue_evidence_reasons") or [])
 
     if duration_ratio is not None:
-        if 90 <= duration_ratio <= 110:
+        if duration_delta_pct is not None and abs(duration_delta_pct) <= 5:
+            positives.append("La duracion quedo dentro de tolerancia.")
+        elif 90 <= duration_ratio <= 110:
             positives.append("La duracion quedo cerca de lo planificado.")
         elif duration_ratio < 85:
             risks.append("La duracion quedo claramente por debajo de lo previsto.")
         elif duration_ratio > 115:
             risks.append("La duracion se fue por encima de lo planificado.")
 
-    if distance_ratio is not None:
+    if distance_is_informational:
+        positives.append("La distancia se toma solo como referencia porque la sesion estaba basada en tiempo.")
+    elif distance_ratio is not None:
         if 90 <= distance_ratio <= 110:
             positives.append("La distancia estuvo alineada con el objetivo.")
         elif distance_ratio < 85:
@@ -628,6 +646,9 @@ def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> Narrativ
         risks.insert(0, "Las recuperaciones quedaron altas y no permitieron volver a la zona objetivo.")
         recommendations.insert(0, "Bajar la intensidad en las recuperaciones para asegurar el regreso a Z2.")
         tags.append("recuperacion_alta")
+    elif flags.get("short_recovery_hr_lag_flag"):
+        positives.append("Las recuperaciones cortas fueron suaves, aunque la FC promedio quedo alta por demora fisiologica normal.")
+        recommendations.append("Evaluar las recuperaciones cortas por FC final o por los ultimos segundos del bloque, no solo por la FC promedio.")
     if flags.get("work_block_under_target_flag"):
         risks.insert(0, "Los bloques de trabajo quedaron por debajo del objetivo planificado.")
         recommendations.insert(0, "Buscar sostener el ritmo objetivo en los bloques de trabajo.")
@@ -642,6 +663,9 @@ def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> Narrativ
         risks.insert(0, "Los bloques de trabajo quedaron por encima del objetivo planificado.")
         recommendations.insert(0, "Controlar el ritmo para no exceder la zona objetivo en los bloques clave.")
         tags.append("trabajo_alto")
+    elif flags.get("technical_stride_intensity_flag"):
+        positives.append("Los progresivos tecnicos fueron algo mas intensos de lo previsto, sin cambiar por si solos el caracter aerobico de la sesion.")
+        recommendations.append("Mantener los progresivos como activacion tecnica, sin convertirlos en el foco principal de carga.")
     if flags.get("pace_instability_flag"):
         risks.append("El ritmo mostro variabilidad relevante entre laps.")
         recommendations.append("Buscar una ejecucion mas estable si la sesion apuntaba a control aerobico o tempo sostenido.")
@@ -678,6 +702,11 @@ def _build_fallback_output(context: Any, metrics: Mapping[str, Any]) -> Narrativ
         positives.append("No hay desajustes graves evidentes en los datos disponibles.")
     if not risks:
         risks.append("No aparecen riesgos claros con los datos disponibles, aunque faltan algunas capas de contexto.")
+    elif fatigue_evidence_level == "none":
+        risks = [risk.replace("fatiga previa evidente", "posible carga acumulada") for risk in risks]
+
+    if fatigue_evidence_level in {"supported", "strong"} and fatigue_evidence_reasons:
+        positives.append(f"Hay evidencia objetiva para contextualizar la recuperacion ({', '.join(fatigue_evidence_reasons[:3])}).")
 
     summary_short = _build_summary_short(context, planned_vs_actual, overall_assessment)
     analysis_natural = _build_analysis_natural(
@@ -753,9 +782,15 @@ def _build_summary_short(context: Any, planned_vs_actual: Mapping[str, Any], ove
 
     duration_ratio = _ratio_to_pct(planned_vs_actual.get("duration", {}).get("actual_to_planned_ratio"))
     distance_ratio = _ratio_to_pct(planned_vs_actual.get("distance", {}).get("actual_to_planned_ratio"))
+    duration_delta_pct = (planned_vs_actual.get("duration") or {}).get("delta_pct")
     if duration_ratio is not None:
-        bits.append(f"duracion al {round(duration_ratio)}%")
-    if distance_ratio is not None:
+        if duration_delta_pct is not None and abs(duration_delta_pct) <= 5:
+            bits.append("duracion dentro de tolerancia")
+        else:
+            bits.append(f"duracion al {round(duration_ratio)}%")
+    if planned_vs_actual.get("distance_is_informational"):
+        bits.append("distancia informativa")
+    elif distance_ratio is not None:
         bits.append(f"distancia al {round(distance_ratio)}%")
     elif (planned_vs_actual.get("distance") or {}).get("note"):
         bits.append(str((planned_vs_actual.get("distance") or {}).get("note")))
@@ -785,9 +820,15 @@ def _build_analysis_natural(
 
     duration_ratio = _ratio_to_pct(planned_vs_actual.get("duration", {}).get("actual_to_planned_ratio"))
     distance_ratio = _ratio_to_pct(planned_vs_actual.get("distance", {}).get("actual_to_planned_ratio"))
+    duration_delta_pct = (planned_vs_actual.get("duration") or {}).get("delta_pct")
     if duration_ratio is not None or distance_ratio is not None:
-        duration_text = f"duracion al {round(duration_ratio)}%" if duration_ratio is not None else "duracion no evaluable"
-        if distance_ratio is not None:
+        if duration_ratio is not None and duration_delta_pct is not None and abs(duration_delta_pct) <= 5:
+            duration_text = "duracion dentro de tolerancia"
+        else:
+            duration_text = f"duracion al {round(duration_ratio)}%" if duration_ratio is not None else "duracion no evaluable"
+        if planned_vs_actual.get("distance_is_informational"):
+            distance_text = "distancia tomada como referencia por tratarse de una sesion basada en tiempo"
+        elif distance_ratio is not None:
             distance_text = f"distancia al {round(distance_ratio)}%"
         else:
             distance_text = str((planned_vs_actual.get("distance") or {}).get("note") or "distancia no evaluable")
@@ -1047,6 +1088,8 @@ def _quick_takeaway_caution(
         if flags.get("recovery_block_too_fast_flag"):
             return "Las pausas quedaron demasiado vivas y eso hizo que la recuperacion no cumpliera del todo su funcion."
         return "Las recuperaciones no terminaron de bajar la intensidad como convenia, y eso cambia bastante la lectura del bloque."
+    if flags.get("short_recovery_hr_lag_flag"):
+        return "Las recuperaciones fueron suaves, pero la FC promedio quedo algo alta por la demora normal en bajar en pausas tan cortas."
     if dominant_issue == "work_over_target":
         block = _first_block_by_status(block_analysis, "above_range")
         if block:
@@ -1077,6 +1120,8 @@ def _quick_takeaway_caution(
         return "La frecuencia cardiaca quedo un poco mas alta de lo esperable para esta lectura."
     if flags.get("pace_instability_flag") and pace.get("stability_cv") is not None:
         return "El ritmo tuvo mas variacion de la ideal para leer la sesion como totalmente limpia."
+    if flags.get("technical_stride_intensity_flag"):
+        return "Los progresivos tecnicos salieron algo mas intensos de lo previsto, aunque sin cambiar por si solos la naturaleza aerobica de la sesion."
     if fatigue is not None and fatigue >= 78:
         return "El costo fisiologico fue alto y eso matiza bastante la lectura final."
     if heart_rate and heart_rate.get("cardiac_drift_ratio") is not None and heart_rate["cardiac_drift_ratio"] >= 0.05:
