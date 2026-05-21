@@ -28,6 +28,12 @@ from app.services.health_readiness_service import (
     build_health_training_context,
     evaluate_health_readiness,
 )
+from app.services.session_completion_service import (
+    completed_duration_sec,
+    completed_strength_focus,
+    completed_strength_rpe,
+    is_manually_completed_strength_session,
+)
 from app.utils.datetime_utils import today_local
 
 
@@ -75,7 +81,7 @@ def build_week_context_payload(
     metrics = compute_week_metrics(context)
     weekly_analysis = _get_latest_weekly_analysis(db, athlete.id, context.week_start_date)
     planned_sessions = _get_sessions_in_range(db, athlete.id, context.week_start_date, context.week_end_date, training_plan)
-    activities = _get_activities_in_range(db, athlete.id, context.week_start_date, context.week_end_date)
+    completed_activities = [_serialize_completed_activity(item) for item in context.activities]
     readiness_summary = _build_readiness_summary_payload(db, athlete.id, context.week_end_date)
     derived_flags = metrics.get("derived_flags", {})
     recommendation = (
@@ -91,7 +97,7 @@ def build_week_context_payload(
         "week_end_date": context.week_end_date.isoformat(),
         "current_goal": _serialize_goal(_resolve_current_goal(training_plan, planned_sessions[0] if planned_sessions else None)),
         "planned_sessions": [_serialize_planned_session(item) for item in planned_sessions],
-        "completed_activities": [_serialize_activity(item) for item in activities],
+        "completed_activities": completed_activities,
         "weekly_load_summary": _build_weekly_load_summary(metrics),
         "intensity_distribution": metrics.get("distribution", {}).get("intensity_zone_summary"),
         "readiness_summary": readiness_summary,
@@ -218,6 +224,35 @@ def _get_activity_for_date(
 ) -> GarminActivity | None:
     if planned_session and planned_session.activity_match and planned_session.activity_match.garmin_activity:
         return planned_session.activity_match.garmin_activity
+
+    if planned_session is not None and is_manually_completed_strength_session(planned_session) and not planned_session.activity_match:
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            id=-(planned_session.id),
+            garmin_activity_id=0,
+            activity_name=planned_session.name,
+            sport_type="strength",
+            modality=planned_session.modality,
+            start_time=None,
+            duration_sec=completed_duration_sec(planned_session),
+            distance_m=None,
+            elevation_gain_m=None,
+            avg_hr=None,
+            max_hr=None,
+            avg_power=None,
+            normalized_power=None,
+            avg_cadence=None,
+            training_load=None,
+            training_effect_aerobic=None,
+            training_effect_anaerobic=None,
+            calories=None,
+            laps=[],
+            weather=None,
+            activity_match=None,
+            source="manual",
+            matched_planned_session_id=planned_session.id,            strength_rpe=completed_strength_rpe(planned_session),
+            strength_focus=completed_strength_focus(planned_session),        )
 
     activities = _get_activities_in_range(db, athlete_id, target_date, target_date)
     if not activities:
@@ -511,26 +546,85 @@ def _serialize_planned_session(session: PlannedSession | None) -> dict[str, Any]
     }
 
 
+def _serialize_completed_activity(activity: Any) -> dict[str, Any] | None:
+    if activity is None:
+        return None
+    source = getattr(activity, "source", None) or ("manual" if getattr(activity, "garmin_activity_id", None) in (0, None) else "garmin")
+    linked_planned_session_id = None
+    if hasattr(activity, "activity_match") and getattr(activity, "activity_match", None) is not None:
+        linked_planned_session_id = getattr(activity.activity_match, "planned_session_id_fk", None)
+    elif hasattr(activity, "matched_planned_session_id"):
+        linked_planned_session_id = getattr(activity, "matched_planned_session_id", None)
+
+    activity_date = getattr(activity, "activity_date", None)
+    if activity_date is None and getattr(activity, "start_time", None) is not None:
+        activity_date = _activity_local_date(activity)
+
+    start_time_value = getattr(activity, "start_time", None)
+    if isinstance(start_time_value, str):
+        start_time_serialized = start_time_value
+    else:
+        start_time_serialized = start_time_value.isoformat() if start_time_value else None
+
+    return {
+        "id": getattr(activity, "id", None),
+        "garmin_activity_id": getattr(activity, "garmin_activity_id", None),
+        "date": activity_date.isoformat() if activity_date is not None else None,
+        "start_time": start_time_serialized,
+        "name": getattr(activity, "activity_name", None) or getattr(activity, "title", None),
+        "sport_type": getattr(activity, "sport_type", None),
+        "duration_sec": getattr(activity, "duration_sec", None),
+        "distance_m": getattr(activity, "distance_m", None),
+        "elevation_gain_m": getattr(activity, "elevation_gain_m", None),
+        "avg_hr": getattr(activity, "avg_hr", None),
+        "avg_power": getattr(activity, "avg_power", None),
+        "avg_pace_sec_km": getattr(activity, "avg_pace_sec_km", None),
+        "training_load": getattr(activity, "training_load", None),
+        "training_effect_aerobic": getattr(activity, "training_effect_aerobic", None),
+        "training_effect_anaerobic": getattr(activity, "training_effect_anaerobic", None),
+        "linked_planned_session_id": linked_planned_session_id,
+        "source": source,
+        "planned_session_id": getattr(activity, "matched_planned_session_id", None),
+        "strength_rpe": getattr(activity, "strength_rpe", None),
+        "strength_focus": getattr(activity, "strength_focus", None),
+    }
+
+
 def _serialize_activity(activity: GarminActivity | None) -> dict[str, Any] | None:
     if activity is None:
         return None
+    start_time_value = getattr(activity, "start_time", None)
+    if isinstance(start_time_value, str):
+        start_time_serialized = start_time_value
+    else:
+        start_time_serialized = start_time_value.isoformat() if start_time_value else None
+    linked_planned_session_id = None
+    activity_match = getattr(activity, "activity_match", None)
+    if activity_match is not None:
+        linked_planned_session_id = getattr(activity_match, "planned_session_id_fk", None)
+    source = getattr(activity, "source", None) or ("manual" if getattr(activity, "garmin_activity_id", None) in (0, None) else "garmin")
+    planned_session_id = getattr(activity, "matched_planned_session_id", None)
     return {
-        "id": activity.id,
-        "garmin_activity_id": activity.garmin_activity_id,
+        "id": getattr(activity, "id", None),
+        "garmin_activity_id": getattr(activity, "garmin_activity_id", None),
         "date": _activity_local_date(activity).isoformat() if _activity_local_date(activity) else None,
-        "start_time": activity.start_time.isoformat() if activity.start_time else None,
-        "name": activity.activity_name,
-        "sport_type": activity.sport_type,
-        "duration_sec": activity.duration_sec,
-        "distance_m": activity.distance_m,
-        "elevation_gain_m": activity.elevation_gain_m,
-        "avg_hr": activity.avg_hr,
-        "avg_power": activity.avg_power,
-        "avg_pace_sec_km": activity.avg_pace_sec_km,
-        "training_load": activity.training_load,
-        "training_effect_aerobic": activity.training_effect_aerobic,
-        "training_effect_anaerobic": activity.training_effect_anaerobic,
-        "linked_planned_session_id": activity.activity_match.planned_session_id_fk if activity.activity_match else None,
+        "start_time": start_time_serialized,
+        "name": getattr(activity, "activity_name", None),
+        "sport_type": getattr(activity, "sport_type", None),
+        "duration_sec": getattr(activity, "duration_sec", None),
+        "distance_m": getattr(activity, "distance_m", None),
+        "elevation_gain_m": getattr(activity, "elevation_gain_m", None),
+        "avg_hr": getattr(activity, "avg_hr", None),
+        "avg_power": getattr(activity, "avg_power", None),
+        "avg_pace_sec_km": getattr(activity, "avg_pace_sec_km", None),
+        "training_load": getattr(activity, "training_load", None),
+        "training_effect_aerobic": getattr(activity, "training_effect_aerobic", None),
+        "training_effect_anaerobic": getattr(activity, "training_effect_anaerobic", None),
+        "linked_planned_session_id": linked_planned_session_id,
+        "source": source,
+        "planned_session_id": planned_session_id,
+        "strength_rpe": getattr(activity, "strength_rpe", None),
+        "strength_focus": getattr(activity, "strength_focus", None),
     }
 
 
@@ -556,7 +650,7 @@ def _serialize_session_analysis(analysis: SessionAnalysis | None) -> dict[str, A
 def _activity_local_date(activity: GarminActivity) -> date | None:
     from app.utils.datetime_utils import to_local_date
 
-    return to_local_date(activity.start_time, athlete=activity.athlete)
+    return to_local_date(getattr(activity, "start_time", None), athlete=getattr(activity, "athlete", None))
 
 
 def _normalized(value: str | None) -> str:

@@ -79,6 +79,9 @@ class WeeklyActivityContext:
     session_execution_score: float | None
     session_control_score: float | None
     session_fatigue_score: float | None
+    source: str | None
+    strength_focus: str | None
+    strength_rpe: int | None
 
 
 @dataclass(slots=True)
@@ -186,23 +189,14 @@ def build_week_context(db: Session, athlete_id: int, reference_date: date | str 
     if athlete is None:
         raise ValueError(f"No se encontro Athlete #{athlete_id}.")
 
-    all_activities = list(
-        db.scalars(
-            select(GarminActivity)
-            .where(
-                GarminActivity.athlete_id == athlete_id,
-                GarminActivity.start_time.is_not(None),
-            )
-            .options(
-                selectinload(GarminActivity.activity_match).selectinload(ActivitySessionMatch.planned_session),
-                selectinload(GarminActivity.session_analyses),
-            )
-            .order_by(GarminActivity.start_time.asc(), GarminActivity.id.asc())
-        ).all()
+    from app.services.activity_service import get_completed_activities_for_period
+
+    all_garmin_activities, manual_strength_sessions = get_completed_activities_for_period(
+        db, athlete_id, history_start, week_end_date
     )
     history_activities = [
         activity
-        for activity in all_activities
+        for activity in all_garmin_activities
         if _activity_local_date(activity) is not None and history_start <= _activity_local_date(activity) <= week_end_date
     ]
     weekly_activities = [
@@ -210,6 +204,9 @@ def build_week_context(db: Session, athlete_id: int, reference_date: date | str 
         for activity in history_activities
         if week_start_date <= _activity_local_date(activity) <= week_end_date
     ]
+
+    # Include manually completed strength sessions as activity-like items
+    # We will add them as synthetic WeeklyActivityContext entries later to the context.activities
 
     all_planned_sessions = list(
         db.scalars(
@@ -283,6 +280,48 @@ def build_week_context(db: Session, athlete_id: int, reference_date: date | str 
         health_days=[_build_weekly_health_context(item) for item in weekly_health_days],
         previous_weeks=_build_previous_week_summaries(history_activities, all_planned_sessions, week_start_date),
     )
+    # Append manual strength sessions as activities (deduplicated if already matched to a Garmin activity)
+    for session in weekly_planned_sessions:
+        try:
+            sport = _normalized(session.sport_type)
+        except Exception:
+            sport = None
+        if sport != "strength":
+            continue
+        if not is_session_completed(session):
+            continue
+        # if session already has a linked activity, prefer the Garmin activity and skip synthetic entry
+        if has_linked_activity(session):
+            continue
+        # create synthetic WeeklyActivityContext for manual strength session
+        synthetic = WeeklyActivityContext(
+            activity_id=-(session.id),
+            garmin_activity_id=0,
+            activity_date=session.training_day.day_date if session.training_day else None,
+            start_time=None,
+            title=session.name,
+            sport_type="strength",
+            discipline_variant=None,
+            duration_sec=int(completed_duration_sec(session) or 0),
+            distance_m=None,
+            elevation_gain_m=None,
+            avg_hr=None,
+            avg_pace_sec_km=None,
+            avg_power=None,
+            avg_cadence=None,
+            matched_planned_session_id=session.id,
+            planned_session_title=session.name,
+            session_analysis_id=None,
+            session_analysis_summary=None,
+            session_compliance_score=None,
+            session_execution_score=None,
+            session_control_score=None,
+            session_fatigue_score=None,
+            source="manual",
+            strength_focus=completed_strength_focus(session),
+            strength_rpe=completed_strength_rpe(session),
+        )
+        context.activities.append(synthetic)
     logger.info(
         "WeeklyContext built athlete_id=%s activities=%s planned_sessions=%s session_analyses=%s previous_weeks=%s",
         athlete_id,
@@ -640,6 +679,9 @@ def _build_weekly_activity_context(
         session_execution_score=analysis.execution_score if analysis else None,
         session_control_score=analysis.control_score if analysis else None,
         session_fatigue_score=analysis.fatigue_score if analysis else None,
+        source="garmin",
+        strength_focus=None,
+        strength_rpe=None,
     )
 
 
@@ -732,7 +774,7 @@ def _build_previous_week_summaries(
             PreviousWeekSummaryContext(
                 week_start_date=week_start,
                 week_end_date=week_end,
-                activity_count=len(week_activities),
+                activity_count=len(week_activities) + sum(1 for item in week_planned if is_manually_completed_strength_session(item) and item.training_day and week_start <= item.training_day.day_date <= week_end and not has_linked_activity(item)),
                 total_duration_sec=sum(item.duration_sec or 0 for item in week_activities) + manual_strength_duration_sec,
                 total_distance_m=round(sum(item.distance_m or 0.0 for item in week_activities), 2),
                 total_elevation_gain_m=round(sum(item.elevation_gain_m or 0.0 for item in week_activities), 2),
@@ -756,22 +798,10 @@ def _build_week_totals(context: WeeklyContext) -> dict[str, Any]:
         daily_duration_sec[key] = daily_duration_sec.get(key, 0) + (activity.duration_sec or 0)
         daily_distance_m[key] = round(daily_distance_m.get(key, 0.0) + (activity.distance_m or 0.0), 2)
         daily_elevation_m[key] = round(daily_elevation_m.get(key, 0.0) + (activity.elevation_gain_m or 0.0), 2)
-
-    for session in context.planned_sessions:
-        if not session.manual_completed or session.session_date is None:
-            continue
-        key = session.session_date.isoformat()
-        daily_duration_sec[key] = daily_duration_sec.get(key, 0) + int(session.completed_duration_sec or 0)
-
     strength_metrics = _build_strength_metrics(context)
-    total_manual_strength_duration_sec = sum(
-        int(item.completed_duration_sec or 0)
-        for item in context.planned_sessions
-        if item.manual_completed
-    )
     return {
         "activity_count": len(context.activities),
-        "total_duration_sec": sum(activity.duration_sec or 0 for activity in context.activities) + total_manual_strength_duration_sec,
+        "total_duration_sec": sum(activity.duration_sec or 0 for activity in context.activities),
         "total_distance_m": round(sum(activity.distance_m or 0.0 for activity in context.activities), 2),
         "total_elevation_gain_m": round(sum(activity.elevation_gain_m or 0.0 for activity in context.activities), 2),
         "daily_duration_sec": daily_duration_sec,
@@ -818,10 +848,17 @@ def _build_week_distribution(context: WeeklyContext) -> dict[str, Any]:
                 except (TypeError, ValueError):
                     continue
 
+    # Also include planned strength sessions that were completed but do not have a linked Garmin activity.
+    # Avoid double counting by checking if an activity already references the planned session.
+    existing_matched_planned_ids = {item.matched_planned_session_id for item in context.activities if item.matched_planned_session_id}
     for planned_session in context.planned_sessions:
-        if _normalized(planned_session.sport_type) != "strength" or planned_session.matched:
+        if _normalized(planned_session.sport_type) != "strength":
+            continue
+        if planned_session.matched:
             continue
         if not planned_session.completed:
+            continue
+        if planned_session.planned_session_id in existing_matched_planned_ids:
             continue
         sport_counts["strength"] = sport_counts.get("strength", 0) + 1
         sport_duration_sec["strength"] = sport_duration_sec.get("strength", 0) + int(planned_session.completed_duration_sec or 0)

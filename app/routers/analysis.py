@@ -564,7 +564,7 @@ def _build_weekly_technical_view(
                 "title": item.get("title") or "-",
                 "sport": item.get("sport_type") or "-",
                 "duration": _duration_seconds_label(item.get("duration_sec")),
-                "distance": _distance_m_label(item.get("distance_m")),
+                "distance": "" if item.get("sport_type") == "strength" else _distance_m_label(item.get("distance_m")),
                 "avg_hr": _value_or_dash(item.get("avg_hr")),
             }
             for item in activities

@@ -280,6 +280,30 @@ class DashboardServiceTests(unittest.TestCase):
         self.assertIn("Actividad sin vincular", context["today_session"]["status_badges"])
         self.assertEqual(context["today_activity"]["link_status_label"], "Sin vincular")
 
+    def test_dashboard_shows_manual_strength_today_activity_when_no_garmin(self) -> None:
+        plan = self._plan()
+        today_session = self._session(plan=plan, day_date=date(2026, 5, 2), name="Fuerza gimnasio", session_type="strength")
+        today_session.sport_type = "strength"
+        today_session.completion_source = "manual"
+        today_session.manual_duration_sec = 3300
+        today_session.manual_strength_rpe = 7
+        today_session.manual_strength_focus = "upper_body"
+        today_session.completed_at = datetime(2026, 5, 2, 18, 0, tzinfo=timezone.utc)
+        self.db.add(today_session)
+        self.db.commit()
+
+        context = build_dashboard_context(
+            self.db,
+            self.athlete,
+            plan,
+            selected_date=date(2026, 5, 2),
+        )
+
+        self.assertIsNotNone(context["today_activity"]["activity"])
+        self.assertEqual(context["today_activity"]["link_status_label"], "Pendiente")
+        self.assertEqual(context["today_activity"]["analysis_status_label"], "Análisis pendiente")
+        self.assertEqual(context["today_activity"]["detail_items"], [])
+
     def test_dashboard_uses_specific_decision_when_next_session_is_smooth(self) -> None:
         plan = self._plan()
         today_session = self._session(plan=plan, day_date=date(2026, 5, 2), name="Fondo controlado", session_type="tempo")

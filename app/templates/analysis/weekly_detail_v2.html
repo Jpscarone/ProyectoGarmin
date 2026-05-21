@@ -247,10 +247,10 @@
                             {% for row in view_model.technical.activities %}
                             <tr>
                                 <td>{{ row.date }}</td>
-                                <td>{{ row.title }}</td>
+                                <td>{% if row.sport == 'strength' %}🏋️ {% endif %}{{ row.title }}</td>
                                 <td>{{ row.sport }}</td>
                                 <td>{{ row.duration }}</td>
-                                <td>{{ row.distance }}</td>
+                                <td>{% if row.sport == 'strength' %}-{% else %}{{ row.distance }}{% endif %}</td>
                                 <td>{{ row.avg_hr }}</td>
                             </tr>
                             {% endfor %}

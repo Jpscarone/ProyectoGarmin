@@ -13,6 +13,8 @@ from app.db.models.analysis_report import AnalysisReport
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.planned_session import PlannedSession
+from types import SimpleNamespace
+from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session
 
 
 @dataclass
@@ -27,8 +29,39 @@ def build_bundle_for_session(db: Session, planned_session_id: int) -> AnalysisBu
     planned_session = _get_session_bundle_source(db, planned_session_id)
     if planned_session is None:
         raise ValueError("Sesion planificada no encontrada.")
-
     activity = planned_session.activity_match.garmin_activity if planned_session.activity_match else None
+    # If no Garmin activity but session is strength and manually completed, build a synthetic activity representation
+    if activity is None and is_manually_completed_strength_session(planned_session):
+        duration = int(completed_duration_sec(planned_session) or 0)
+        activity = SimpleNamespace(
+            id=-(planned_session.id),
+            garmin_activity_id=0,
+            activity_name=planned_session.name,
+            sport_type="strength",
+            modality=None,
+            start_time=None,
+            duration_sec=duration,
+            distance_m=None,
+            elevation_gain_m=None,
+            elevation_loss_m=None,
+            avg_hr=None,
+            max_hr=None,
+            avg_power=None,
+            max_power=None,
+            normalized_power=None,
+            avg_speed_mps=None,
+            avg_pace_sec_km=None,
+            avg_cadence=None,
+            max_cadence=None,
+            training_effect_aerobic=None,
+            training_effect_anaerobic=None,
+            training_load=None,
+            calories=None,
+            laps=[],
+            weather=None,
+            activity_match=None,
+            session_analyses=[],
+        )
     report = _latest_session_report(db, planned_session.id)
     health_metric = _health_for_session(db, planned_session)
 

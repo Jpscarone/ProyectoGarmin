@@ -77,16 +77,16 @@ class McpContextServiceTests(unittest.TestCase):
         self.db.commit()
         self.db.refresh(self.plan)
 
-        day_1 = TrainingDay(athlete_id=self.athlete.id, training_plan_id=self.plan.id, day_date=date(2026, 5, 6))
-        day_2 = TrainingDay(athlete_id=self.athlete.id, training_plan_id=self.plan.id, day_date=date(2026, 5, 7))
-        self.db.add_all([day_1, day_2])
+        self.day_1 = TrainingDay(athlete_id=self.athlete.id, training_plan_id=self.plan.id, day_date=date(2026, 5, 6))
+        self.day_2 = TrainingDay(athlete_id=self.athlete.id, training_plan_id=self.plan.id, day_date=date(2026, 5, 7))
+        self.db.add_all([self.day_1, self.day_2])
         self.db.commit()
-        self.db.refresh(day_1)
-        self.db.refresh(day_2)
+        self.db.refresh(self.day_1)
+        self.db.refresh(self.day_2)
 
         self.session = PlannedSession(
             athlete_id=self.athlete.id,
-            training_day_id=day_1.id,
+            training_day_id=self.day_1.id,
             name="Series 5x1000",
             sport_type="running",
             session_type="intervals",
@@ -96,7 +96,7 @@ class McpContextServiceTests(unittest.TestCase):
         )
         self.next_session = PlannedSession(
             athlete_id=self.athlete.id,
-            training_day_id=day_2.id,
+            training_day_id=self.day_2.id,
             name="Rodaje suave",
             sport_type="running",
             session_type="easy",
@@ -188,6 +188,84 @@ class McpContextServiceTests(unittest.TestCase):
         self.assertEqual(payload["schema_version"], "mcp_week_context_v1")
         self.assertIn("weekly_load_summary", payload)
         self.assertIn("planned_sessions", payload)
+
+    def test_build_week_context_payload_includes_manual_strength_activity(self) -> None:
+        manual_day = TrainingDay(athlete_id=self.athlete.id, training_plan_id=self.plan.id, day_date=date(2026, 5, 8))
+        self.db.add(manual_day)
+        self.db.commit()
+        self.db.refresh(manual_day)
+
+        manual_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=manual_day.id,
+            name="Fuerza gimnasio",
+            sport_type="strength",
+            session_type="strength",
+            expected_duration_min=50,
+            completion_source="manual",
+            manual_duration_sec=3000,
+            manual_strength_rpe=8,
+            manual_strength_focus="upper_body",
+            completed_at=datetime(2026, 5, 8, 18, 0, tzinfo=timezone.utc),
+        )
+        self.db.add(manual_session)
+        self.db.commit()
+        self.db.refresh(manual_session)
+
+        payload = build_week_context_payload(
+            self.db,
+            athlete=self.athlete,
+            training_plan=self.plan,
+            reference_date=date(2026, 5, 8),
+        )
+
+        manual_activities = [
+            item for item in payload["completed_activities"] if item.get("source") == "manual"
+        ]
+        self.assertEqual(len(manual_activities), 1)
+        self.assertEqual(manual_activities[0]["sport_type"], "strength")
+        self.assertEqual(manual_activities[0]["planned_session_id"], manual_session.id)
+        self.assertEqual(manual_activities[0]["duration_sec"], 3000)
+        self.assertEqual(manual_activities[0]["distance_m"], None)
+        self.assertEqual(manual_activities[0]["strength_rpe"], 8)
+        self.assertEqual(manual_activities[0]["strength_focus"], "upper_body")
+
+    def test_build_session_feedback_payload_returns_manual_strength_activity(self) -> None:
+        manual_day = TrainingDay(athlete_id=self.athlete.id, training_plan_id=self.plan.id, day_date=date(2026, 5, 8))
+        self.db.add(manual_day)
+        self.db.commit()
+        self.db.refresh(manual_day)
+
+        manual_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=manual_day.id,
+            name="Fuerza gimnasio",
+            sport_type="strength",
+            session_type="strength",
+            expected_duration_min=50,
+            completion_source="manual",
+            manual_duration_sec=3000,
+            manual_strength_rpe=8,
+            manual_strength_focus="upper_body",
+            completed_at=datetime(2026, 5, 8, 18, 0, tzinfo=timezone.utc),
+        )
+        self.db.add(manual_session)
+        self.db.commit()
+        self.db.refresh(manual_session)
+
+        payload = build_session_feedback_payload(
+            self.db,
+            athlete=self.athlete,
+            training_plan=self.plan,
+            target_date=date(2026, 5, 8),
+        )
+
+        self.assertEqual(payload["completed_activity"]["sport_type"], "strength")
+        self.assertEqual(payload["completed_activity"]["source"], "manual")
+        self.assertEqual(payload["completed_activity"]["planned_session_id"], manual_session.id)
+        self.assertEqual(payload["completed_activity"]["duration_sec"], 3000)
+        self.assertEqual(payload["completed_activity"]["strength_rpe"], 8)
+        self.assertEqual(payload["completed_activity"]["strength_focus"], "upper_body")
 
     def test_build_last_activity_feedback_payload_handles_missing_activity(self) -> None:
         self.db.delete(self.activity)

@@ -697,6 +697,58 @@ def _get_today_activity(
 ) -> dict[str, Any]:
     activities = _get_activities_in_range(db, athlete_id, reference_date, reference_date)
     if not activities:
+        # If there is a planned strength session completed manually for today, synthesize an activity-like object
+        if today_session is not None and is_manually_completed_strength_session(today_session) and not today_session.activity_match:
+            from types import SimpleNamespace
+
+            synthetic = SimpleNamespace(
+                id=-(today_session.id),
+                garmin_activity_id=0,
+                activity_name=today_session.name,
+                sport_type="strength",
+                modality=None,
+                start_time=None,
+                duration_sec=int(completed_duration_sec(today_session) or 0),
+                distance_m=None,
+                elevation_gain_m=None,
+                elevation_loss_m=None,
+                avg_hr=None,
+                max_hr=None,
+                avg_power=None,
+                max_power=None,
+                normalized_power=None,
+                avg_speed_mps=None,
+                avg_pace_sec_km=None,
+                avg_cadence=None,
+                max_cadence=None,
+                training_effect_aerobic=None,
+                training_effect_anaerobic=None,
+                training_load=None,
+                calories=None,
+                laps=[],
+                weather=None,
+                activity_match=None,
+                session_analyses=[],
+            )
+            selected = synthetic
+            completed_analysis = None
+            has_analysis = False
+            linked = False
+            analysis_url = None
+            linked_session_name = None
+            summary = _build_activity_summary(selected, linked=linked, has_analysis=has_analysis, analysis=None, linked_session_name=linked_session_name)
+            return {
+                "activity": selected,
+                "is_linked": linked,
+                "has_analysis": has_analysis,
+                "summary": summary,
+                "analysis_url": analysis_url,
+                "detail_items": [],
+                "link_status_label": "Vinculada" if linked else "Pendiente",
+                "analysis_status_label": "Analizada" if has_analysis else "Análisis pendiente",
+                "execution_score_pct": None,
+            }
+
         return {
             "activity": None,
             "is_linked": False,
