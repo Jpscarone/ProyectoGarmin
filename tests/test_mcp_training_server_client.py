@@ -158,6 +158,18 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["adherence_percent"], 80.0)
 
+    async def test_get_today_coach_briefing_passes_optional_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/today-coach-briefing")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            return httpx.Response(200, json={"date": "2026-05-25", "decision": {"overall": "green"}})
+
+        client = _build_client(handler)
+        payload = await client.get_today_coach_briefing(athlete_id=1, reference_date="2026-05-25")
+
+        self.assertEqual(payload["decision"]["overall"], "green")
+
     async def test_get_week_comparison_passes_optional_query_params(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/week-comparison")
@@ -518,6 +530,19 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(payload["adherence_percent"], 75.0)
+
+    async def test_get_my_today_coach_briefing_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/my/today-coach-briefing")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"date": "2026-05-25", "decision": {"overall": "yellow"}})
+
+        client = _build_client(handler)
+        payload = await client.get_my_today_coach_briefing(access_code="CARO-7K92-XP31", reference_date="2026-05-25")
+
+        self.assertEqual(payload["decision"]["overall"], "yellow")
 
     async def test_get_my_week_comparison_only_sends_access_code_and_week_start_date(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

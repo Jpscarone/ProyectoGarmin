@@ -350,6 +350,23 @@ def get_my_week_adherence(
     )
 
 
+@router.get("/me/today-coach-briefing")
+@router.get("/my/today-coach-briefing")
+def get_my_today_coach_briefing(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_today_coach_briefing(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
 @router.get("/me/week-comparison")
 def get_my_week_comparison(
     request: Request,
@@ -1227,6 +1244,17 @@ def get_week_comparison(
         "summary": _build_week_comparison_summary(delta),
         "warnings": warnings,
     }
+
+
+@router.get("/today-coach-briefing")
+def get_today_coach_briefing(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_today_coach_briefing_payload(db, athlete, target_date)
 
 
 @router.get("/training-load-trend")
@@ -3190,6 +3218,254 @@ def _build_dashboard_messages(
         "El panorama general aparece estable y con continuidad de entrenamiento.",
         "Mantener el foco en la proxima sesion y en completar lo que queda de la semana.",
     )
+
+
+def _build_today_coach_briefing_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+) -> dict[str, Any]:
+    week_start_date = _week_start_from_date(reference_date)
+    readiness_payload, readiness_evaluation, readiness_warnings = _build_readiness_snapshot(db, athlete.id, reference_date)
+    readiness = _build_today_briefing_readiness_payload(readiness_payload, readiness_evaluation, readiness_warnings)
+    fatigue_risk = _build_fatigue_risk_payload(db, athlete, reference_date)
+    remaining_week = get_remaining_week_plan(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date.isoformat(),
+        db=db,
+    )
+    week_adherence = get_week_adherence(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date.isoformat(),
+        db=db,
+    )
+    next_session = get_next_planned_session(
+        athlete_id=athlete.id,
+        reference_date=reference_date.isoformat(),
+        db=db,
+    )
+    next_session_decision = _build_next_session_decision_payload(
+        db,
+        athlete,
+        reference_date,
+        planned_session_id=None,
+    )
+    today_sessions = _build_today_sessions_payload(db, athlete, reference_date)
+    decision = _build_today_briefing_decision(
+        readiness=readiness,
+        fatigue_risk=fatigue_risk,
+        today_sessions=today_sessions,
+        remaining_week=remaining_week,
+        next_session=next_session,
+        next_session_decision=next_session_decision,
+    )
+    suggested_questions = _build_today_briefing_questions(
+        today_sessions=today_sessions,
+        fatigue_risk=fatigue_risk,
+        next_session=next_session,
+    )
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "date": reference_date.isoformat(),
+        "readiness": readiness,
+        "today_sessions": today_sessions,
+        "next_session": next_session,
+        "fatigue_risk": {
+            "risk_level": fatigue_risk.get("risk_level"),
+            "reasons": fatigue_risk.get("reasons", []),
+            "recommendation": fatigue_risk.get("recommendation"),
+        },
+        "week_context": {
+            "week_start_date": week_start_date.isoformat(),
+            "remaining_required_count": int(remaining_week.get("required_sessions") or remaining_week.get("remaining_sessions") or 0),
+            "remaining_optional_count": int(remaining_week.get("optional_sessions") or 0),
+            "required_minutes_remaining": int(remaining_week.get("total_remaining_minutes_required") or remaining_week.get("remaining_volume_minutes") or 0),
+            "optional_minutes_remaining": int(remaining_week.get("total_remaining_minutes_optional") or 0),
+            "adherence_percent": float(week_adherence.get("adherence_percent") or 0),
+        },
+        "decision": decision,
+        "suggested_questions": suggested_questions,
+    }
+
+
+def _build_today_briefing_readiness_payload(
+    readiness_payload: dict[str, Any],
+    readiness_evaluation: Any | None,
+    readiness_warnings: list[str],
+) -> dict[str, Any]:
+    summary = "No hay datos de salud recientes; la decision se basa en planificacion y carga."
+    if readiness_payload.get("available") and readiness_evaluation is not None:
+        readiness_label = getattr(readiness_evaluation, "readiness_label", None) or "sin etiqueta"
+        readiness_score = getattr(readiness_evaluation, "readiness_score", None)
+        if readiness_score is not None:
+            summary = f"Readiness {readiness_label} ({readiness_score})."
+        else:
+            summary = f"Readiness {readiness_label}."
+        main_limiter = getattr(readiness_evaluation, "main_limiter", None)
+        if main_limiter:
+            summary = f"{summary} Limitante principal: {main_limiter}."
+    elif readiness_warnings:
+        summary = readiness_warnings[0]
+    return {
+        "available": bool(readiness_payload.get("available")),
+        "summary": summary,
+        "sleep_score": readiness_payload.get("sleep_score"),
+        "hrv_status": readiness_payload.get("hrv_status"),
+        "body_battery": readiness_payload.get("body_battery"),
+        "resting_hr": readiness_payload.get("resting_hr"),
+        "stress": readiness_payload.get("stress"),
+    }
+
+
+def _build_today_sessions_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+) -> dict[str, list[dict[str, Any]]]:
+    sessions = _get_planned_sessions_for_date(db, athlete.id, reference_date)
+    completed: list[dict[str, Any]] = []
+    remaining_required: list[dict[str, Any]] = []
+    remaining_optional: list[dict[str, Any]] = []
+    recovery: list[dict[str, Any]] = []
+    for session in sessions:
+        if _is_completed_or_matched_session(session):
+            completed.append(_serialize_conversational_session_detail(session))
+            continue
+        if _is_cancelled_session(session) or _is_skipped_session(session):
+            continue
+        if _is_recovery_session(session):
+            recovery.append(_serialize_conversational_session_detail(session))
+        elif _is_optional_session(session):
+            remaining_optional.append(_serialize_conversational_session_detail(session))
+        else:
+            remaining_required.append(_serialize_conversational_session_detail(session))
+    return {
+        "completed": completed,
+        "remaining_required": remaining_required,
+        "remaining_optional": remaining_optional,
+        "recovery": recovery,
+    }
+
+
+def _build_today_briefing_decision(
+    *,
+    readiness: dict[str, Any],
+    fatigue_risk: dict[str, Any],
+    today_sessions: dict[str, list[dict[str, Any]]],
+    remaining_week: dict[str, Any],
+    next_session: dict[str, Any],
+    next_session_decision: dict[str, Any],
+) -> dict[str, Any]:
+    risk_level = fatigue_risk.get("risk_level")
+    decision_name = next_session_decision.get("decision")
+    has_required_today = bool(today_sessions.get("remaining_required"))
+    many_required_left = int(remaining_week.get("required_sessions") or remaining_week.get("remaining_sessions") or 0) >= 3
+    next_session_payload = next_session_decision.get("session") if isinstance(next_session_decision.get("session"), dict) else None
+    next_is_intense = bool(next_session_payload and _serialized_session_looks_intense(next_session_payload))
+    watchouts = _build_today_briefing_watchouts(
+        readiness=readiness,
+        fatigue_risk=fatigue_risk,
+        next_session_decision=next_session_decision,
+        many_required_left=many_required_left,
+    )
+
+    if risk_level == "high" or decision_name in {"postpone", "replace_easy"}:
+        overall = "red"
+        summary = "Hoy conviene priorizar recuperar antes de sostener una carga exigente."
+        recommended_focus = next_session_decision.get("recommended_execution") or fatigue_risk.get("recommendation") or "Bajar carga y evitar intensidad."
+    elif risk_level == "moderate" or decision_name in {"reduce", "cancel_optional"} or next_is_intense or many_required_left:
+        overall = "yellow"
+        summary = "El dia permite entrenar, pero conviene controlar mejor la carga y la ejecucion."
+        recommended_focus = next_session_decision.get("recommended_execution") or fatigue_risk.get("recommendation") or "Controlar intensidad y volumen."
+    elif risk_level == "low" and (has_required_today or next_session.get("date")):
+        overall = "green"
+        summary = "El contexto general de hoy es compatible con sostener el plan."
+        recommended_focus = next_session_decision.get("recommended_execution") or "Ejecutar la sesion prevista y monitorear sensaciones."
+    else:
+        overall = "unknown"
+        summary = "Hay planificacion disponible, pero faltan datos para una lectura completa del dia."
+        recommended_focus = "Seguir la planificacion con prudencia y usar sensaciones como control principal."
+
+    return {
+        "overall": overall,
+        "summary": summary,
+        "recommended_focus": recommended_focus,
+        "watchouts": watchouts,
+    }
+
+
+def _build_today_briefing_watchouts(
+    *,
+    readiness: dict[str, Any],
+    fatigue_risk: dict[str, Any],
+    next_session_decision: dict[str, Any],
+    many_required_left: bool,
+) -> list[str]:
+    watchouts: list[str] = []
+    if not readiness.get("available"):
+        watchouts.append("No hay datos de salud recientes.")
+    if (readiness.get("sleep_score") or 100) < 60:
+        watchouts.append("El sleep score reciente es bajo.")
+    if _normalize_text_value(readiness.get("hrv_status")) in {"low", "unbalanced"}:
+        watchouts.append("La HRV reciente aparece baja o desbalanceada.")
+    if (readiness.get("body_battery") or 100) < 35:
+        watchouts.append("El Body Battery reciente es bajo.")
+    if fatigue_risk.get("risk_level") in {"moderate", "high"}:
+        watchouts.extend(str(item) for item in fatigue_risk.get("reasons", [])[:2])
+    for item in next_session_decision.get("watchouts", []) or []:
+        watchouts.append(str(item))
+    if many_required_left:
+        watchouts.append("Quedan varias sesiones exigibles acumuladas en la semana.")
+    return _dedupe_text_items(watchouts)
+
+
+def _build_today_briefing_questions(
+    *,
+    today_sessions: dict[str, list[dict[str, Any]]],
+    fatigue_risk: dict[str, Any],
+    next_session: dict[str, Any],
+) -> list[str]:
+    questions: list[str] = []
+    has_pending_today = any(today_sessions.get(key) for key in ("remaining_required", "remaining_optional", "recovery"))
+    if has_pending_today:
+        questions.extend([
+            "¿Mantengo la sesión de hoy?",
+            "¿Cómo ejecuto la sesión de hoy?",
+        ])
+    if fatigue_risk.get("risk_level") in {"moderate", "high"}:
+        questions.extend([
+            "¿Qué modificarías?",
+            "¿Conviene cancelar alguna opcional?",
+        ])
+    if not has_pending_today:
+        questions.extend([
+            "¿Qué me queda esta semana?",
+            "¿Cómo viene la carga?",
+        ])
+    if next_session.get("date") and not next_session.get("message"):
+        questions.append("¿Qué hago con la próxima sesión?")
+    return _dedupe_text_items(questions)
+
+
+def _serialized_session_looks_intense(session: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(item).lower()
+        for item in (session.get("name"), session.get("notes"), session.get("session_type"))
+        if item
+    )
+    return any(token in text for token in ("z4", "z5", "interval", "series", "tempo", "threshold", "umbral", "vo2", "intenso", "hard", "fondo"))
+
+
+def _dedupe_text_items(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        deduped.append(normalized)
+    return deduped
 
 
 def _get_activities_in_date_range(db: Session, athlete_id: int, start_date: date, end_date: date) -> list[GarminActivity]:

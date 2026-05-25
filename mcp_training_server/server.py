@@ -306,6 +306,18 @@ async def get_week_adherence(
 
 
 @mcp.tool()
+async def get_today_coach_briefing(
+    athlete_id: int,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Compone un briefing diario read-only con readiness, sesiones de hoy, riesgo y foco recomendado."""
+    return await CLIENT.get_today_coach_briefing(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
 async def get_my_week_adherence(
     access_code: str,
     week_start_date: str | None = None,
@@ -314,6 +326,18 @@ async def get_my_week_adherence(
     return await CLIENT.get_my_week_adherence(
         access_code=access_code,
         week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_my_today_coach_briefing(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Compone el briefing diario del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_today_coach_briefing(
+        access_code=access_code,
+        reference_date=reference_date,
     )
 
 

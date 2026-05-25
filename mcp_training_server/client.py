@@ -260,6 +260,17 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def get_today_coach_briefing(
+        self,
+        *,
+        athlete_id: int,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/today-coach-briefing", params=params)
+
     async def get_week_comparison(
         self,
         *,
@@ -511,6 +522,17 @@ class TrainingAppApiClient:
             "/api/mcp/me/training/week-adherence",
             params=params,
         )
+
+    async def get_my_today_coach_briefing(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/my/today-coach-briefing", params=params)
 
     async def get_my_week_comparison(
         self,

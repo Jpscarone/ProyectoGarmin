@@ -41,6 +41,8 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 - `get_my_today_remaining_sessions(access_code: str)` sesiones pendientes de hoy por clave
 - `get_week_adherence(athlete_id: int, week_start_date: str | None = None)` cumplimiento semanal
 - `get_my_week_adherence(access_code: str, week_start_date: str | None = None)` cumplimiento semanal por clave
+- `get_today_coach_briefing(athlete_id: int, reference_date: str | None = None)` briefing diario compuesto
+- `get_my_today_coach_briefing(access_code: str, reference_date: str | None = None)` briefing diario por clave
 - `get_week_comparison(athlete_id: int, week_start_date: str | None = None)` comparacion de semana contra semana previa
 - `get_my_week_comparison(access_code: str, week_start_date: str | None = None)` comparacion semanal por clave
 - `get_training_load_trend(athlete_id: int, weeks: int = 4)` tendencia reciente de carga
@@ -314,6 +316,16 @@ Regla:
 Prompt ejemplo:
 
 - `Cumpli la semana?`
+
+`get_today_coach_briefing` y `get_my_today_coach_briefing` consultan `GET /api/mcp/today-coach-briefing` y `GET /api/mcp/my/today-coach-briefing`.
+
+Sirven para preguntas como:
+
+- `Como estoy hoy?`
+- `Dame el briefing del dia.`
+- `Que tengo que hacer hoy?`
+- `Me conviene entrenar?`
+- `Que deberia mirar antes de entrenar?`
 
 ## Conversational V3B
 
