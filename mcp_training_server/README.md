@@ -5,8 +5,7 @@
 Este servidor MCP remoto consume la API interna read-only de ProyectoGarmin bajo `/api/mcp` y expone tools para consultar atletas, actividades, salud, estado de entrenamiento y comparaciones entre sesion programada y actividad realizada.
 
 No se conecta directo a PostgreSQL.
-No escribe datos.
-No modifica el estado del sistema.
+Solo escribe datos mediante las tools V2 de importacion de planificacion, protegidas con token de escritura.
 
 ## Tools expuestas
 
@@ -34,6 +33,8 @@ No modifica el estado del sistema.
 - `get_my_week_load_summary(access_code: str, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
 - `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 - `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+- `preview_plan_import(import_text: str)`
+- `commit_plan_import(import_text: str, confirmation: str)`
 
 ## Acceso experimental por atleta
 
@@ -42,7 +43,7 @@ Ademas de las tools admin/coach basadas en `athlete_id`, existe una capa experim
 - El atleta no necesita conocer `athlete_id`.
 - Las tools `my_*` solo aceptan `access_code`.
 - La API resuelve internamente el atleta y nunca permite consultar otro `athlete_id`.
-- Todo sigue siendo read-only.
+- Todo sigue siendo read-only salvo las tools explicitas de plan import V2.
 - Para preguntas de planificacion exacta como `Manana que sesion tengo` o `Que sesiones tengo esta semana`, conviene usar `get_my_day_plan` y `get_my_week_plan`.
 - Si el atleta pregunta por una fecha concreta y queres mezclar planificacion + actividades Garmin del mismo dia, conviene usar `get_my_day_overview`.
 
@@ -242,6 +243,7 @@ Ejemplo:
 ```env
 TRAINING_APP_BASE_URL=http://127.0.0.1:8000
 TRAINING_APP_MCP_TOKEN=change-me
+TRAINING_API_WRITE_TOKEN=change-me-write
 
 MCP_TRANSPORT=http
 MCP_HOST=127.0.0.1
@@ -255,6 +257,7 @@ Variables:
 
 - `TRAINING_APP_BASE_URL`: URL base de la app principal.
 - `TRAINING_APP_MCP_TOKEN`: token bearer que la app principal exige para `/api/mcp/*`.
+- `TRAINING_API_WRITE_TOKEN`: token bearer de escritura usado solo por `commit_plan_import`.
 - `MCP_TRANSPORT`: `stdio`, `http` o `sse`.
 - `MCP_HOST`: host del servidor MCP remoto.
 - `MCP_PORT`: puerto del servidor MCP remoto.
@@ -349,6 +352,14 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysi
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1&activity_id=123"
 curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysis/session-payload?athlete_id=1&date=2026-05-15"
 ```
+
+### Plan import V2
+
+`preview_plan_import` consulta `POST /api/mcp/plan-import/preview` y no escribe en DB.
+
+`commit_plan_import` consulta `POST /api/mcp/plan-import/commit`, exige `TRAINING_API_WRITE_TOKEN` y requiere `confirmation="APLICAR"`.
+
+La importacion soporta `create`, `update`, `upsert` y `cancel`. Cancelar no borra fisicamente; marca la sesion como cancelada en la app principal.
 
 ### Smoke test remoto MCP
 

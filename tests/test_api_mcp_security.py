@@ -19,6 +19,7 @@ from app.db.models.athlete import Athlete
 class ApiMcpSecurityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.previous_token = os.environ.get("MCP_API_TOKEN")
+        self.previous_write_token = os.environ.get("MCP_WRITE_API_TOKEN")
         self.engine = create_engine(
             "sqlite://",
             future=True,
@@ -44,6 +45,10 @@ class ApiMcpSecurityTests(unittest.TestCase):
             os.environ.pop("MCP_API_TOKEN", None)
         else:
             os.environ["MCP_API_TOKEN"] = self.previous_token
+        if self.previous_write_token is None:
+            os.environ.pop("MCP_WRITE_API_TOKEN", None)
+        else:
+            os.environ["MCP_WRITE_API_TOKEN"] = self.previous_write_token
         get_settings.cache_clear()
         app.dependency_overrides.clear()
         self.db.close()
@@ -81,6 +86,7 @@ class ApiMcpSecurityTests(unittest.TestCase):
 
     def test_missing_env_token_returns_503(self) -> None:
         os.environ["MCP_API_TOKEN"] = ""
+        os.environ["MCP_WRITE_API_TOKEN"] = ""
         get_settings.cache_clear()
 
         response = self.client.get(
@@ -89,3 +95,15 @@ class ApiMcpSecurityTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 503)
+
+    def test_write_token_can_authenticate_preview_layer(self) -> None:
+        os.environ["MCP_API_TOKEN"] = "secret-token"
+        os.environ["MCP_WRITE_API_TOKEN"] = "write-secret"
+        get_settings.cache_clear()
+
+        response = self.client.get(
+            "/api/mcp/ping",
+            headers={"Authorization": "Bearer write-secret"},
+        )
+
+        self.assertEqual(response.status_code, 200)

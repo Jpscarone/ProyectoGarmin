@@ -253,6 +253,18 @@ async def get_my_session_analysis_payload(
     )
 
 
+@mcp.tool()
+async def preview_plan_import(import_text: str) -> dict[str, Any]:
+    """Previsualiza una importacion semanal o individual de planificacion sin escribir en la base."""
+    return await CLIENT.preview_plan_import(import_text=import_text)
+
+
+@mcp.tool()
+async def commit_plan_import(import_text: str, confirmation: str) -> dict[str, Any]:
+    """Aplica una importacion de planificacion. Requiere confirmation='APLICAR' y token de escritura."""
+    return await CLIENT.commit_plan_import(import_text=import_text, confirmation=confirmation)
+
+
 def main() -> None:
     transport = SETTINGS.mcp_transport
     if transport == "http":

@@ -19,6 +19,7 @@ SupportedTransport = Literal["stdio", "http", "sse"]
 class Settings:
     training_app_base_url: str
     training_app_mcp_token: str | None
+    training_api_write_token: str | None
     mcp_transport: SupportedTransport
     mcp_host: str
     mcp_port: int
@@ -61,10 +62,12 @@ def get_settings() -> Settings:
         or os.getenv("TRAINING_API_TOKEN")
         or ""
     ).strip() or None
+    write_token = (os.getenv("TRAINING_API_WRITE_TOKEN") or "").strip() or None
 
     return Settings(
         training_app_base_url=base_url.rstrip("/"),
         training_app_mcp_token=token,
+        training_api_write_token=write_token,
         mcp_transport=_normalize_transport(os.getenv("MCP_TRANSPORT")),
         mcp_host=(os.getenv("MCP_HOST") or "127.0.0.1").strip() or "127.0.0.1",
         mcp_port=int((os.getenv("MCP_PORT") or "9000").strip() or "9000"),

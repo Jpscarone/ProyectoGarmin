@@ -245,6 +245,31 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["week"]["start_date"], "2026-05-12")
 
+    async def test_preview_plan_import_posts_with_read_token(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/plan-import/preview")
+            self.assertEqual(request.headers.get("Authorization"), "Bearer token-123")
+            self.assertEqual(request.method, "POST")
+            self.assertEqual(request.read().decode(), '{"import_text":"SESSION\\nEND"}')
+            return httpx.Response(200, json={"valid": True, "operations": []})
+
+        client = _build_client(handler)
+        payload = await client.preview_plan_import(import_text="SESSION\nEND")
+
+        self.assertTrue(payload["valid"])
+
+    async def test_commit_plan_import_posts_with_write_token(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/plan-import/commit")
+            self.assertEqual(request.headers.get("Authorization"), "Bearer write-token-123")
+            self.assertEqual(request.method, "POST")
+            return httpx.Response(200, json={"created": 1, "affected_session_ids": [10]})
+
+        client = _build_client(handler)
+        payload = await client.commit_plan_import(import_text="SESSION\nEND", confirmation="APLICAR")
+
+        self.assertEqual(payload["created"], 1)
+
     async def test_compare_my_planned_vs_done_only_sends_access_code_and_date(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/me/compare/planned-vs-done")
@@ -305,6 +330,7 @@ def _build_client(handler) -> TrainingAppApiClient:
     settings = Settings(
         training_app_base_url="http://testserver",
         training_app_mcp_token="token-123",
+        training_api_write_token="write-token-123",
         mcp_transport="http",
         mcp_host="127.0.0.1",
         mcp_port=9000,

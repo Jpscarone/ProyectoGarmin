@@ -292,6 +292,20 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def preview_plan_import(self, *, import_text: str) -> dict[str, Any]:
+        return await self._post_json(
+            "/api/mcp/plan-import/preview",
+            json_payload={"import_text": import_text},
+            token_kind="read",
+        )
+
+    async def commit_plan_import(self, *, import_text: str, confirmation: str) -> dict[str, Any]:
+        return await self._post_json(
+            "/api/mcp/plan-import/commit",
+            json_payload={"import_text": import_text, "confirmation": confirmation},
+            token_kind="write",
+        )
+
     async def _get_json(self, path: str, *, params: dict[str, str] | None = None) -> dict[str, Any] | list[dict[str, Any]]:
         base_url, token = self._require_config()
         headers = {"Authorization": f"Bearer {token}"}
@@ -328,13 +342,56 @@ class TrainingAppApiClient:
             raise ToolError("La API interna respondio con un formato inesperado.")
         return payload
 
-    def _require_config(self) -> tuple[str, str]:
+    async def _post_json(
+        self,
+        path: str,
+        *,
+        json_payload: dict[str, Any],
+        token_kind: str,
+    ) -> dict[str, Any]:
+        base_url, token = self._require_config(token_kind=token_kind)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            async with self.async_client_factory(
+                base_url=base_url,
+                headers=headers,
+                timeout=20.0,
+            ) as client:
+                response = await client.post(path, json=json_payload)
+        except httpx.RequestError as exc:
+            raise ToolError(
+                "No se pudo conectar a la API interna de ProyectoGarmin. Verifica que la app principal este disponible."
+            ) from exc
+
+        if response.status_code == 401:
+            token_name = "TRAINING_API_WRITE_TOKEN" if token_kind == "write" else "TRAINING_APP_MCP_TOKEN"
+            raise ToolError(f"La API interna rechazo la autenticacion. Revisa {token_name}.")
+        if response.status_code == 404:
+            raise ToolError(f"La API interna devolvio 404: {self._extract_error_detail(response)}")
+        if response.status_code == 503:
+            raise ToolError(f"La API interna no esta lista para MCP: {self._extract_error_detail(response)}")
+        if response.status_code >= 500:
+            raise ToolError(f"La API interna devolvio {response.status_code}: {self._extract_error_detail(response)}")
+        if response.status_code >= 400:
+            raise ToolError(f"La API interna devolvio {response.status_code}: {self._extract_error_detail(response)}")
+
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise ToolError("La API interna respondio con un payload no JSON.") from exc
+        if not isinstance(payload, dict):
+            raise ToolError("La API interna respondio con un formato inesperado.")
+        return payload
+
+    def _require_config(self, *, token_kind: str = "read") -> tuple[str, str]:
         base_url = self.settings.training_app_base_url
-        token = self.settings.training_app_mcp_token
+        token = self.settings.training_api_write_token if token_kind == "write" else self.settings.training_app_mcp_token
         if not base_url:
             raise ToolError("TRAINING_APP_BASE_URL no esta configurado.")
         if not token:
-            raise ToolError("TRAINING_APP_MCP_TOKEN no esta configurado.")
+            token_name = "TRAINING_API_WRITE_TOKEN" if token_kind == "write" else "TRAINING_APP_MCP_TOKEN"
+            raise ToolError(f"{token_name} no esta configurado.")
         return base_url, token
 
     @staticmethod

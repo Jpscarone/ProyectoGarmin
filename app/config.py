@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://training_user:TU_PASSWORD@localhost/training_app"
     app_timezone: str = "America/Argentina/Buenos_Aires"
     mcp_api_token: str | None = None
+    mcp_write_api_token: str | None = None
     garmin_enabled: bool = False
     garmin_email: str | None = None
     garmin_password: str | None = None

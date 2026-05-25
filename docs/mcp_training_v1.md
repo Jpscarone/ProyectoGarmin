@@ -90,3 +90,8 @@ curl -H "Authorization: Bearer $MCP_API_TOKEN" \
 - Solo lectura
 - Reutiliza datos ya guardados en la app
 - Tolerante a faltantes: campos como actividad, analisis o readiness pueden volver `null`
+
+## V2 escritura controlada
+
+La importacion de planificacion por MCP esta documentada en `docs/mcp_plan_import_v2.md`.
+V2 mantiene V1 de lectura intacta y agrega endpoints separados bajo `/api/mcp/plan-import/*` con token de escritura para commit.

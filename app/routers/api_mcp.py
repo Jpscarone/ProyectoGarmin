@@ -4,6 +4,7 @@ from datetime import date
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import selectinload
@@ -33,11 +34,19 @@ from app.services.mcp_context_service import (
     build_week_context_payload,
 )
 from app.services.athlete_access_code_service import resolve_athlete_by_access_code
-from app.services.mcp_security import verify_mcp_bearer_token
+from app.services.mcp_security import verify_mcp_bearer_token, verify_mcp_write_bearer_token
+from app.services.plan_import_parser import PlanImportParseError, parse_plan_import
+from app.services.plan_import_service import commit_plan_import, preview_plan_import
 from app.services.training_plan_service import select_default_training_plan
 from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 from app.utils.datetime_utils import today_local
 from app.routers.planned_sessions import _build_technical_view, _get_preferred_session_analysis
+
+
+class PlanImportRequest(BaseModel):
+    import_text: str
+    confirmation: str | None = None
+    athlete_id: int | None = None
 
 
 router = APIRouter(
@@ -54,6 +63,40 @@ def read_mcp_ping() -> dict[str, str]:
         "status": "ok",
         "app": settings.app_name,
     }
+
+
+@router.post("/plan-import/preview")
+def preview_mcp_plan_import(
+    request: Request,
+    body: PlanImportRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _resolve_plan_import_athlete(request, db, body.athlete_id)
+    try:
+        payload = parse_plan_import(body.import_text)
+    except PlanImportParseError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    result = preview_plan_import(db, athlete.id, payload)
+    result["athlete"] = _serialize_athlete_min(athlete)
+    return result
+
+
+@router.post("/plan-import/commit", dependencies=[Depends(verify_mcp_write_bearer_token)])
+def commit_mcp_plan_import(
+    request: Request,
+    body: PlanImportRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if body.confirmation != "APLICAR":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='confirmation debe ser "APLICAR".')
+    athlete = _resolve_plan_import_athlete(request, db, body.athlete_id)
+    try:
+        payload = parse_plan_import(body.import_text)
+    except PlanImportParseError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    result = commit_plan_import(db, athlete.id, payload)
+    result["athlete"] = _serialize_athlete_min(athlete)
+    return result
 
 
 @router.get("/athletes")
@@ -824,6 +867,29 @@ def _resolve_context_athlete(request: Request, db: Session, *, athlete_id: int |
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Athlete not found")
         return athlete
     return get_current_athlete(request, db)
+
+
+def _resolve_plan_import_athlete(request: Request, db: Session, athlete_id: int | None) -> Athlete:
+    if athlete_id is not None:
+        return _get_athlete_or_404(db, athlete_id)
+    try:
+        athlete = get_current_athlete(request, db)
+    except HTTPException:
+        athlete = None
+    if athlete is not None:
+        return athlete
+    athletes = list(
+        db.scalars(
+            select(Athlete)
+            .where(Athlete.status == "active")
+            .order_by(Athlete.id.asc())
+        ).all()
+    )
+    if len(athletes) == 1:
+        return athletes[0]
+    if not athletes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No hay atleta disponible para importar plan.")
+    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Hay mas de un atleta; envia athlete_id en el body.")
 
 
 def _get_athlete_or_404(db: Session, athlete_id: int) -> Athlete:
