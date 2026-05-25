@@ -31,6 +31,16 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 - `get_my_next_session_recommendation(access_code: str, reference_date: str | None = None)`
 - `get_week_load_summary(athlete_id: int, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
 - `get_my_week_load_summary(access_code: str, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
+- `get_remaining_week_plan(athlete_id: int, week_start_date: str | None = None)` lo pendiente de la semana
+- `get_my_remaining_week_plan(access_code: str, week_start_date: str | None = None)` lo pendiente de la semana para atleta por clave
+- `get_previous_week_summary(athlete_id: int)` resumen deterministico de la semana pasada
+- `get_my_previous_week_summary(access_code: str)` resumen deterministico de la semana pasada por clave
+- `get_next_planned_session(athlete_id: int, reference_date: str | None = None)` proxima sesion pendiente
+- `get_my_next_planned_session(access_code: str, reference_date: str | None = None)` proxima sesion pendiente por clave
+- `get_today_remaining_sessions(athlete_id: int)` sesiones pendientes de hoy
+- `get_my_today_remaining_sessions(access_code: str)` sesiones pendientes de hoy por clave
+- `get_week_adherence(athlete_id: int, week_start_date: str | None = None)` cumplimiento semanal
+- `get_my_week_adherence(access_code: str, week_start_date: str | None = None)` cumplimiento semanal por clave
 - `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 - `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `preview_plan_import(import_text: str)`
@@ -204,6 +214,76 @@ La tool esta pensada para prompts como:
 - `Estoy acumulando demasiada intensidad`
 - `Dame un resumen de carga semanal del atleta 1`
 - `Cuantas sesiones de gimnasio hice la semana pasada`
+
+## Conversational V3
+
+Las tools V3 agregan respuestas deterministicas para preguntas naturales sin obligar a navegar la UI. No usan IA generativa: solo derivan datos reales de `planned_sessions`, matches Garmin, sesiones manuales y estado de cancelacion.
+
+`get_remaining_week_plan` y `get_my_remaining_week_plan` consultan `GET /api/mcp/training/remaining-week-plan` y `GET /api/mcp/me/training/remaining-week-plan`.
+
+Devuelven:
+
+- `week_start_date` y `today`
+- cantidad de `completed_sessions`
+- cantidad de `remaining_sessions`
+- cantidad de `optional_sessions`
+- `remaining_volume_minutes`
+- `sessions` pendientes
+
+Prompt ejemplo:
+
+- `Que me queda esta semana?`
+
+`get_previous_week_summary` y `get_my_previous_week_summary` consultan `GET /api/mcp/training/previous-week-summary` y `GET /api/mcp/me/training/previous-week-summary`.
+
+Devuelven:
+
+- sesiones realizadas por deporte
+- `total_sessions`
+- `total_duration_minutes`
+- `adherence_percent`
+- `completed_vs_planned`
+- `highlights`
+
+Prompt ejemplo:
+
+- `Que hice la semana pasada?`
+
+`get_next_planned_session` y `get_my_next_planned_session` consultan `GET /api/mcp/training/next-planned-session` y `GET /api/mcp/me/training/next-planned-session`.
+
+Devuelven la proxima sesion pendiente ignorando canceladas y completadas, con `date`, `sport`, `name`, `duration_minutes`, `notes` y `blocks`.
+
+Prompt ejemplo:
+
+- `Que tengo manana?`
+- `Que me toca despues?`
+
+`get_today_remaining_sessions` y `get_my_today_remaining_sessions` consultan `GET /api/mcp/training/today-remaining-sessions` y `GET /api/mcp/me/training/today-remaining-sessions`.
+
+Devuelven solo lo pendiente del dia actual del servidor.
+
+Prompt ejemplo:
+
+- `Me queda algo hoy?`
+
+`get_week_adherence` y `get_my_week_adherence` consultan `GET /api/mcp/training/week-adherence` y `GET /api/mcp/me/training/week-adherence`.
+
+Devuelven:
+
+- `planned_sessions`
+- `completed_sessions`
+- `cancelled_sessions`
+- `missed_sessions`
+- `adherence_percent`
+- `summary`
+
+Regla:
+
+- `adherence_percent = completed_sessions / (planned_sessions - cancelled_sessions)`
+
+Prompt ejemplo:
+
+- `Cumpli la semana?`
 
 ## Nueva tool de payload tecnico
 

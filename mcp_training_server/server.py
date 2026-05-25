@@ -222,6 +222,102 @@ async def get_my_week_load_summary(
 
 
 @mcp.tool()
+async def get_remaining_week_plan(
+    athlete_id: int,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve lo que todavia queda pendiente en la semana actual o consultada, separado entre exigible y opcional."""
+    return await CLIENT.get_remaining_week_plan(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_my_remaining_week_plan(
+    access_code: str,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve lo que queda pendiente en la semana para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_remaining_week_plan(
+        access_code=access_code,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_previous_week_summary(athlete_id: int) -> dict[str, Any]:
+    """Devuelve un resumen simple, deterministico y read-only de lo realizado la semana pasada."""
+    return await CLIENT.get_previous_week_summary(athlete_id=athlete_id)
+
+
+@mcp.tool()
+async def get_my_previous_week_summary(access_code: str) -> dict[str, Any]:
+    """Devuelve el resumen de la semana pasada solo para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_previous_week_summary(access_code=access_code)
+
+
+@mcp.tool()
+async def get_next_planned_session(
+    athlete_id: int,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve la proxima sesion pendiente, ignorando canceladas y completadas."""
+    return await CLIENT.get_next_planned_session(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_my_next_planned_session(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve la proxima sesion pendiente del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_next_planned_session(
+        access_code=access_code,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_today_remaining_sessions(athlete_id: int) -> dict[str, Any]:
+    """Devuelve solo las sesiones pendientes de hoy, sin incluir canceladas ni completadas."""
+    return await CLIENT.get_today_remaining_sessions(athlete_id=athlete_id)
+
+
+@mcp.tool()
+async def get_my_today_remaining_sessions(access_code: str) -> dict[str, Any]:
+    """Devuelve las sesiones pendientes de hoy solo para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_today_remaining_sessions(access_code=access_code)
+
+
+@mcp.tool()
+async def get_week_adherence(
+    athlete_id: int,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve cumplimiento semanal read-only usando la formula completed / (planned - cancelled)."""
+    return await CLIENT.get_week_adherence(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_my_week_adherence(
+    access_code: str,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve el cumplimiento semanal del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_week_adherence(
+        access_code=access_code,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
 async def get_session_analysis_payload(
     athlete_id: int,
     planned_session_id: int | None = None,

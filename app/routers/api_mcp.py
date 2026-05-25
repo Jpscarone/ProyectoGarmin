@@ -256,6 +256,82 @@ def get_my_week_load_summary(
     )
 
 
+@router.get("/me/training/remaining-week-plan")
+def get_my_remaining_week_plan(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_remaining_week_plan(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        db=db,
+    )
+
+
+@router.get("/me/training/previous-week-summary")
+def get_my_previous_week_summary(
+    request: Request,
+    access_code: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_previous_week_summary(
+        athlete_id=athlete.id,
+        db=db,
+    )
+
+
+@router.get("/me/training/next-planned-session")
+def get_my_next_planned_session(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_next_planned_session(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
+@router.get("/me/training/today-remaining-sessions")
+def get_my_today_remaining_sessions(
+    request: Request,
+    access_code: str = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_today_remaining_sessions(
+        athlete_id=athlete.id,
+        db=db,
+    )
+
+
+@router.get("/me/training/week-adherence")
+def get_my_week_adherence(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_week_adherence(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        db=db,
+    )
+
+
 @router.get("/me/analysis/session-payload")
 def get_my_session_analysis_payload(
     request: Request,
@@ -745,6 +821,175 @@ def get_week_load_summary(
         "previous_week": previous_payload,
         "recommendation": recommendation,
         "data_quality": data_quality,
+    }
+
+
+@router.get("/training/remaining-week-plan")
+def get_remaining_week_plan(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    selected_start = (
+        _parse_iso_date(week_start_date, "week_start_date")
+        if week_start_date else _week_start_from_date(today_local(athlete=athlete))
+    )
+    today = today_local(athlete=athlete)
+    sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=selected_start)
+
+    completed_sessions = [item for item in sessions if _is_completed_or_matched_session(item)]
+    pending_sessions = [
+        item
+        for item in sessions
+        if _is_pending_session(item, reference_date=today)
+    ]
+    optional_sessions = [item for item in pending_sessions if _is_optional_session(item)]
+    required_remaining_sessions = [item for item in pending_sessions if not _is_optional_session(item)]
+    remaining_payload = [_serialize_conversational_session(item) for item in required_remaining_sessions + optional_sessions]
+    remaining_volume_minutes = sum(
+        _planned_session_duration_minutes(item)
+        for item in required_remaining_sessions
+    )
+
+    payload = {
+        "athlete": _serialize_athlete_min(athlete),
+        "week_start_date": selected_start.isoformat(),
+        "today": today.isoformat(),
+        "completed_sessions": len(completed_sessions),
+        "remaining_sessions": len(required_remaining_sessions),
+        "optional_sessions": len(optional_sessions),
+        "remaining_volume_minutes": remaining_volume_minutes,
+        "sessions": remaining_payload,
+    }
+    if not required_remaining_sessions and not optional_sessions:
+        payload["message"] = "No quedan sesiones pendientes esta semana."
+    return payload
+
+
+@router.get("/training/previous-week-summary")
+def get_previous_week_summary(
+    athlete_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    current_week_start = _week_start_from_date(today_local(athlete=athlete))
+    selected_start = current_week_start - (7 * date.resolution)
+    context = build_week_context(db, athlete.id, selected_start)
+    sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=selected_start)
+    adherence = _build_week_adherence_stats(
+        sessions,
+        today=today_local(athlete=athlete),
+        week_end_date=_week_end_from_start(selected_start),
+    )
+
+    running_sessions = sum(1 for item in context.activities if _sport_bucket(getattr(item, "sport_type", None)) == "running")
+    strength_sessions = sum(1 for item in context.activities if _sport_bucket(getattr(item, "sport_type", None)) == "strength")
+    cycling_sessions = sum(1 for item in context.activities if _sport_bucket(getattr(item, "sport_type", None)) == "cycling")
+    total_sessions = len(context.activities)
+    total_duration_minutes = int(round(sum(int(getattr(item, "duration_sec", 0) or 0) for item in context.activities) / 60))
+
+    highlights: list[str] = []
+    if total_sessions == 0:
+        highlights.append("No se registraron entrenamientos completados la semana pasada.")
+    else:
+        highlights.append(
+            f"Completaste {adherence['completed_sessions']} de {adherence['planned_sessions'] - adherence['cancelled_sessions']} sesiones exigibles."
+        )
+        top_sport_counts = {
+            "running": running_sessions,
+            "strength": strength_sessions,
+            "cycling": cycling_sessions,
+        }
+        top_sport, top_count = max(top_sport_counts.items(), key=lambda item: item[1])
+        if top_count > 0:
+            highlights.append(f"Deporte dominante: {top_sport} ({top_count} sesiones).")
+        if total_duration_minutes > 0:
+            highlights.append(f"Acumulaste {total_duration_minutes} minutos totales de entrenamiento.")
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "week_start_date": selected_start.isoformat(),
+        "running_sessions": running_sessions,
+        "strength_sessions": strength_sessions,
+        "cycling_sessions": cycling_sessions,
+        "total_sessions": total_sessions,
+        "total_duration_minutes": total_duration_minutes,
+        "adherence_percent": adherence["adherence_percent"],
+        "completed_vs_planned": f"{adherence['completed_sessions']}/{max(adherence['planned_sessions'] - adherence['cancelled_sessions'], 0)}",
+        "highlights": highlights,
+    }
+
+
+@router.get("/training/next-planned-session")
+def get_next_planned_session(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    session = _find_next_pending_session(db, athlete=athlete, reference_date=target_date)
+    if session is None:
+        return {
+            "athlete": _serialize_athlete_min(athlete),
+            "reference_date": target_date.isoformat(),
+            "message": "No hay sesiones pendientes.",
+        }
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": target_date.isoformat(),
+        **_serialize_conversational_session_detail(session),
+    }
+
+
+@router.get("/training/today-remaining-sessions")
+def get_today_remaining_sessions(
+    athlete_id: int = Query(...),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    today = today_local(athlete=athlete)
+    sessions = _get_planned_sessions_for_date(db, athlete.id, today)
+    remaining_sessions = [item for item in sessions if _is_pending_session(item, reference_date=today)]
+    payload = {
+        "athlete": _serialize_athlete_min(athlete),
+        "date": today.isoformat(),
+        "remaining_count": len(remaining_sessions),
+        "sessions": [_serialize_conversational_session_detail(item) for item in remaining_sessions],
+    }
+    if not remaining_sessions:
+        payload["message"] = "No quedan sesiones pendientes hoy."
+    return payload
+
+
+@router.get("/training/week-adherence")
+def get_week_adherence(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    selected_start = (
+        _parse_iso_date(week_start_date, "week_start_date")
+        if week_start_date else _week_start_from_date(today_local(athlete=athlete))
+    )
+    today = today_local(athlete=athlete)
+    sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=selected_start)
+    stats = _build_week_adherence_stats(
+        sessions,
+        today=today,
+        week_end_date=_week_end_from_start(selected_start),
+    )
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "week_start_date": selected_start.isoformat(),
+        "planned_sessions": stats["planned_sessions"],
+        "completed_sessions": stats["completed_sessions"],
+        "cancelled_sessions": stats["cancelled_sessions"],
+        "missed_sessions": stats["missed_sessions"],
+        "adherence_percent": stats["adherence_percent"],
+        "summary": stats["summary"],
     }
 
 
@@ -1891,6 +2136,170 @@ def _build_week_plan_summary_message(
     )
 
 
+def _get_week_planned_sessions(
+    db: Session,
+    *,
+    athlete: Athlete,
+    week_start_date: date,
+) -> list[PlannedSession]:
+    week_end_date = _week_end_from_start(week_start_date)
+    plan = _resolve_relevant_plan_for_date(db, athlete.id, week_start_date)
+    training_days = _get_training_days_in_range(
+        db,
+        athlete.id,
+        week_start_date,
+        week_end_date,
+        plan=plan,
+    )
+    sessions: list[PlannedSession] = []
+    for training_day in training_days:
+        sessions.extend(
+            sorted(
+                list(training_day.planned_sessions or []),
+                key=lambda item: (item.session_order or 0, item.id or 0),
+            )
+        )
+    return sessions
+
+
+def _is_cancelled_session(session: PlannedSession) -> bool:
+    source = (session.completion_source or "").strip().lower()
+    return source in {"cancelled", "canceled"}
+
+
+def _is_skipped_session(session: PlannedSession) -> bool:
+    return (session.completion_source or "").strip().lower() == "skipped"
+
+
+def _is_completed_or_matched_session(session: PlannedSession) -> bool:
+    return bool(
+        session.activity_match is not None and getattr(session.activity_match, "garmin_activity", None) is not None
+    ) or is_session_completed(session)
+
+
+def _is_optional_session(session: PlannedSession) -> bool:
+    session_type = (session.session_type or "").strip().lower()
+    return session_type in {"optional", "opcional"}
+
+
+def _planned_session_duration_minutes(session: PlannedSession) -> int:
+    metrics = derive_session_metrics(session)
+    if metrics.duration_sec:
+        return int(round(metrics.duration_sec / 60))
+    return int(session.expected_duration_min or 0)
+
+
+def _serialize_conversational_session(session: PlannedSession) -> dict[str, Any]:
+    return {
+        "id": session.id,
+        "date": session.training_day.day_date.isoformat() if session.training_day and session.training_day.day_date else None,
+        "sport": _normalize_sport_value(session.sport_type) or session.sport_type,
+        "name": session.name,
+        "duration_minutes": _planned_session_duration_minutes(session),
+        "optional": _is_optional_session(session),
+        "notes": _build_planned_target_summary(session),
+    }
+
+
+def _serialize_conversational_session_detail(session: PlannedSession) -> dict[str, Any]:
+    payload = _serialize_conversational_session(session)
+    payload["blocks"] = [_serialize_planned_step(item) for item in session.planned_session_steps]
+    return payload
+
+
+def _is_pending_session(session: PlannedSession, *, reference_date: date) -> bool:
+    session_date = _planned_session_date(session)
+    if session_date is None:
+        return False
+    if _is_cancelled_session(session) or _is_skipped_session(session):
+        return False
+    if _is_completed_or_matched_session(session):
+        return False
+    return session_date >= reference_date
+
+
+def _find_next_pending_session(
+    db: Session,
+    *,
+    athlete: Athlete,
+    reference_date: date,
+) -> PlannedSession | None:
+    plan = _resolve_relevant_plan_for_date(db, athlete.id, reference_date)
+
+    def _query(plan_filter: TrainingPlan | None) -> list[PlannedSession]:
+        statement = (
+            select(PlannedSession)
+            .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+            .where(
+                PlannedSession.athlete_id == athlete.id,
+                TrainingDay.day_date >= reference_date,
+            )
+            .order_by(TrainingDay.day_date.asc(), PlannedSession.session_order.asc(), PlannedSession.id.asc())
+            .options(*_planned_compare_loader_options())
+        )
+        if plan_filter is not None:
+            statement = statement.where(TrainingDay.training_plan_id == plan_filter.id)
+        return list(db.scalars(statement).all())
+
+    for candidate in _query(plan):
+        if _is_pending_session(candidate, reference_date=reference_date):
+            return candidate
+    if plan is None:
+        return None
+    for candidate in _query(None):
+        if _is_pending_session(candidate, reference_date=reference_date):
+            return candidate
+    return None
+
+
+def _build_week_adherence_stats(
+    sessions: list[PlannedSession],
+    *,
+    today: date,
+    week_end_date: date,
+) -> dict[str, Any]:
+    cancelled_sessions = sum(1 for item in sessions if _is_cancelled_session(item))
+    completed_sessions = sum(1 for item in sessions if _is_completed_or_matched_session(item))
+    planned_sessions = len(sessions)
+    denominator = max(planned_sessions - cancelled_sessions, 0)
+    due_cutoff = today if today < week_end_date else week_end_date
+    missed_sessions = sum(
+        1
+        for item in sessions
+        if not _is_cancelled_session(item)
+        and not _is_completed_or_matched_session(item)
+        and not _is_pending_session(item, reference_date=due_cutoff + date.resolution)
+    )
+    future_pending = sum(
+        1
+        for item in sessions
+        if not _is_cancelled_session(item)
+        and not _is_completed_or_matched_session(item)
+        and _is_pending_session(item, reference_date=due_cutoff + date.resolution)
+    )
+    adherence_percent = round((completed_sessions / denominator) * 100.0, 1) if denominator > 0 else 0.0
+
+    if denominator == 0:
+        summary = "No hubo sesiones exigibles esta semana."
+    elif future_pending > 0 and today <= week_end_date:
+        summary = (
+            f"Semana en curso: {completed_sessions}/{denominator} completadas, "
+            f"{missed_sessions} vencidas y {future_pending} pendientes."
+        )
+    else:
+        summary = f"Cumplimiento semanal: {completed_sessions}/{denominator} sesiones completadas."
+
+    return {
+        "planned_sessions": planned_sessions,
+        "completed_sessions": completed_sessions,
+        "cancelled_sessions": cancelled_sessions,
+        "missed_sessions": missed_sessions,
+        "future_pending_sessions": future_pending,
+        "adherence_percent": adherence_percent,
+        "summary": summary,
+    }
+
+
 def _planned_session_day_status(session: PlannedSession, matches: list[dict[str, Any]]) -> str:
     linked_match = next((item for item in matches if item.get("planned_session_id") == session.id and item.get("activity_id") is not None), None)
     if linked_match is not None:
@@ -2570,7 +2979,7 @@ def _build_week_load_week_payload(
         activities,
         list(getattr(context, "planned_sessions", []) or []),
     )
-    garmin_activities_count = len(activities)
+    garmin_activities_count = sum(1 for item in activities if getattr(item, "source", "garmin") == "garmin")
     completed_manual_sessions_count = len(manual_sessions)
     completed_strength_sessions_count = _count_completed_strength_sessions(
         activities,
@@ -2628,6 +3037,8 @@ def _sports_breakdown(activities: list[Any], planned_sessions: list[Any]) -> dic
         current = buckets[bucket]
         current["planned_count"] += 1
     for activity in activities:
+        if getattr(activity, "source", "garmin") != "garmin":
+            continue
         bucket = _sport_bucket(getattr(activity, "sport_type", None))
         current = buckets[bucket]
         current["activities_count"] += 1
@@ -2674,7 +3085,12 @@ def _serialize_manual_week_sessions(context: Any) -> list[dict[str, Any]]:
 
 
 def _count_completed_strength_sessions(activities: list[Any], planned_sessions: list[Any]) -> int:
-    count = sum(1 for activity in activities if _sport_bucket(getattr(activity, "sport_type", None)) == "strength")
+    count = sum(
+        1
+        for activity in activities
+        if _sport_bucket(getattr(activity, "sport_type", None)) == "strength"
+        and getattr(activity, "source", "garmin") == "garmin"
+    )
     count += sum(
         1
         for session in planned_sessions

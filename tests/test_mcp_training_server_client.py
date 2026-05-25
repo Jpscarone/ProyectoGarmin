@@ -91,6 +91,73 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["recommendation"]["status"], "balanced")
 
+    async def test_get_remaining_week_plan_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/remaining-week-plan")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-25")
+            return httpx.Response(200, json={"week_start_date": "2026-05-25", "remaining_sessions": 2})
+
+        client = _build_client(handler)
+        payload = await client.get_remaining_week_plan(
+            athlete_id=1,
+            week_start_date="2026-05-25",
+        )
+
+        self.assertEqual(payload["remaining_sessions"], 2)
+
+    async def test_get_previous_week_summary_sends_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/previous-week-summary")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            return httpx.Response(200, json={"week_start_date": "2026-05-18", "total_sessions": 3})
+
+        client = _build_client(handler)
+        payload = await client.get_previous_week_summary(athlete_id=1)
+
+        self.assertEqual(payload["total_sessions"], 3)
+
+    async def test_get_next_planned_session_passes_optional_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/next-planned-session")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            return httpx.Response(200, json={"date": "2026-05-26", "name": "Series"})
+
+        client = _build_client(handler)
+        payload = await client.get_next_planned_session(
+            athlete_id=1,
+            reference_date="2026-05-25",
+        )
+
+        self.assertEqual(payload["name"], "Series")
+
+    async def test_get_today_remaining_sessions_sends_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/today-remaining-sessions")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            return httpx.Response(200, json={"date": "2026-05-25", "remaining_count": 1})
+
+        client = _build_client(handler)
+        payload = await client.get_today_remaining_sessions(athlete_id=1)
+
+        self.assertEqual(payload["remaining_count"], 1)
+
+    async def test_get_week_adherence_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training/week-adherence")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-18")
+            return httpx.Response(200, json={"week_start_date": "2026-05-18", "adherence_percent": 80.0})
+
+        client = _build_client(handler)
+        payload = await client.get_week_adherence(
+            athlete_id=1,
+            week_start_date="2026-05-18",
+        )
+
+        self.assertEqual(payload["adherence_percent"], 80.0)
+
     async def test_get_session_analysis_payload_passes_optional_query_params(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/analysis/session-payload")
@@ -245,6 +312,78 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["week"]["start_date"], "2026-05-12")
 
+    async def test_get_my_remaining_week_plan_does_not_send_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/remaining-week-plan")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"week_start_date": "2026-05-25", "remaining_sessions": 1})
+
+        client = _build_client(handler)
+        payload = await client.get_my_remaining_week_plan(
+            access_code="CARO-7K92-XP31",
+            week_start_date="2026-05-25",
+        )
+
+        self.assertEqual(payload["remaining_sessions"], 1)
+
+    async def test_get_my_previous_week_summary_does_not_send_athlete_id(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/previous-week-summary")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"week_start_date": "2026-05-18", "total_sessions": 2})
+
+        client = _build_client(handler)
+        payload = await client.get_my_previous_week_summary(access_code="CARO-7K92-XP31")
+
+        self.assertEqual(payload["total_sessions"], 2)
+
+    async def test_get_my_next_planned_session_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/next-planned-session")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"date": "2026-05-26", "name": "Tempo"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_next_planned_session(
+            access_code="CARO-7K92-XP31",
+            reference_date="2026-05-25",
+        )
+
+        self.assertEqual(payload["name"], "Tempo")
+
+    async def test_get_my_today_remaining_sessions_only_sends_access_code(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/today-remaining-sessions")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"date": "2026-05-25", "remaining_count": 2})
+
+        client = _build_client(handler)
+        payload = await client.get_my_today_remaining_sessions(access_code="CARO-7K92-XP31")
+
+        self.assertEqual(payload["remaining_count"], 2)
+
+    async def test_get_my_week_adherence_only_sends_access_code_and_week_start_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training/week-adherence")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-18")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"week_start_date": "2026-05-18", "adherence_percent": 75.0})
+
+        client = _build_client(handler)
+        payload = await client.get_my_week_adherence(
+            access_code="CARO-7K92-XP31",
+            week_start_date="2026-05-18",
+        )
+
+        self.assertEqual(payload["adherence_percent"], 75.0)
+
     async def test_preview_plan_import_posts_with_read_token(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/plan-import/preview")
@@ -331,6 +470,11 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
             "compare_my_planned_vs_done": inspect.signature(mcp_server.compare_my_planned_vs_done),
             "get_my_next_session_recommendation": inspect.signature(mcp_server.get_my_next_session_recommendation),
             "get_my_week_load_summary": inspect.signature(mcp_server.get_my_week_load_summary),
+            "get_my_remaining_week_plan": inspect.signature(mcp_server.get_my_remaining_week_plan),
+            "get_my_previous_week_summary": inspect.signature(mcp_server.get_my_previous_week_summary),
+            "get_my_next_planned_session": inspect.signature(mcp_server.get_my_next_planned_session),
+            "get_my_today_remaining_sessions": inspect.signature(mcp_server.get_my_today_remaining_sessions),
+            "get_my_week_adherence": inspect.signature(mcp_server.get_my_week_adherence),
             "get_my_session_analysis_payload": inspect.signature(mcp_server.get_my_session_analysis_payload),
         }
 
