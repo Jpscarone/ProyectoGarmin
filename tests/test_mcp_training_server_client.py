@@ -270,6 +270,18 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["created"], 1)
 
+    async def test_training_api_athlete_id_is_sent_only_as_fallback(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/plan-import/preview")
+            self.assertEqual(request.headers.get("Authorization"), "Bearer token-123")
+            self.assertEqual(request.read().decode(), '{"import_text":"WEEK\\nATHLETE_ID: 2\\nEND","athlete_id":1}')
+            return httpx.Response(200, json={"athlete": {"id": 2}, "valid": True, "operations": []})
+
+        client = _build_client(handler, training_api_athlete_id=1)
+        payload = await client.preview_plan_import(import_text="WEEK\nATHLETE_ID: 2\nEND")
+
+        self.assertEqual(payload["athlete"]["id"], 2)
+
     async def test_compare_my_planned_vs_done_only_sends_access_code_and_date(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/me/compare/planned-vs-done")
@@ -326,11 +338,12 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("athlete_id", signature.parameters, tool_name)
 
 
-def _build_client(handler) -> TrainingAppApiClient:
+def _build_client(handler, *, training_api_athlete_id: int | None = None) -> TrainingAppApiClient:
     settings = Settings(
         training_app_base_url="http://testserver",
         training_app_mcp_token="token-123",
         training_api_write_token="write-token-123",
+        training_api_athlete_id=training_api_athlete_id,
         mcp_transport="http",
         mcp_host="127.0.0.1",
         mcp_port=9000,

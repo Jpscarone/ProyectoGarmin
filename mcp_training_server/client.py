@@ -293,16 +293,22 @@ class TrainingAppApiClient:
         )
 
     async def preview_plan_import(self, *, import_text: str) -> dict[str, Any]:
+        json_payload: dict[str, Any] = {"import_text": import_text}
+        if self.settings.training_api_athlete_id is not None:
+            json_payload["athlete_id"] = self.settings.training_api_athlete_id
         return await self._post_json(
             "/api/mcp/plan-import/preview",
-            json_payload={"import_text": import_text},
+            json_payload=json_payload,
             token_kind="read",
         )
 
     async def commit_plan_import(self, *, import_text: str, confirmation: str) -> dict[str, Any]:
+        json_payload: dict[str, Any] = {"import_text": import_text, "confirmation": confirmation}
+        if self.settings.training_api_athlete_id is not None:
+            json_payload["athlete_id"] = self.settings.training_api_athlete_id
         return await self._post_json(
             "/api/mcp/plan-import/commit",
-            json_payload={"import_text": import_text, "confirmation": confirmation},
+            json_payload=json_payload,
             token_kind="write",
         )
 

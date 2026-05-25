@@ -24,6 +24,8 @@ from app.services.plan_import_service import commit_plan_import, preview_plan_im
 
 
 WEEK_TEXT = """WEEK
+ATHLETE_ID: 1
+ATHLETE_NAME: Pablo
 START_DATE: 2026-05-25
 END_DATE: 2026-05-31
 MODE: preview
@@ -59,6 +61,8 @@ class PlanImportParserTests(unittest.TestCase):
         payload = parse_plan_import(WEEK_TEXT)
 
         self.assertEqual(payload.start_date, date(2026, 5, 25))
+        self.assertEqual(payload.athlete_id, 1)
+        self.assertEqual(payload.athlete_name, "Pablo")
         self.assertEqual(payload.end_date, date(2026, 5, 31))
         self.assertEqual(payload.mode, "preview")
         self.assertEqual(len(payload.sessions), 2)
@@ -66,6 +70,46 @@ class PlanImportParserTests(unittest.TestCase):
         self.assertEqual(payload.sessions[0].blocks[0].value, 45)
         self.assertEqual(payload.sessions[1].action, "cancel")
         self.assertEqual(payload.sessions[1].reason, "fatiga alta")
+
+    def test_parser_with_athlete_id(self) -> None:
+        payload = parse_plan_import(
+            """WEEK
+ATHLETE_ID: 7
+
+SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Rodaje
+
+BLOCK
+VALUE: 30
+UNIT: min
+
+END
+"""
+        )
+
+        self.assertEqual(payload.athlete_id, 7)
+        self.assertIsNone(payload.athlete_name)
+
+    def test_parser_with_athlete_id_and_name(self) -> None:
+        payload = parse_plan_import(
+            """WEEK
+ATHLETE_ID: 7
+ATHLETE_NAME: Pablo
+
+SESSION
+ACTION: cancel
+DATE: 2026-05-26
+SPORT: running
+
+END
+"""
+        )
+
+        self.assertEqual(payload.athlete_id, 7)
+        self.assertEqual(payload.athlete_name, "Pablo")
 
     def test_parser_single_session_without_week(self) -> None:
         payload = parse_plan_import(
@@ -122,6 +166,10 @@ class PlanImportServiceAndRouteTests(unittest.TestCase):
         self.db.add(self.athlete)
         self.db.commit()
         self.db.refresh(self.athlete)
+        self.other_athlete = Athlete(name="Otro Atleta")
+        self.db.add(self.other_athlete)
+        self.db.commit()
+        self.db.refresh(self.other_athlete)
         self.plan = TrainingPlan(
             athlete_id=self.athlete.id,
             name="Plan Import",
@@ -249,7 +297,7 @@ END
         response = self.client.post(
             "/api/mcp/plan-import/commit",
             headers={"Authorization": "Bearer write-token"},
-            json={"import_text": _create_text(), "confirmation": "NO"},
+            json={"import_text": _create_text(self.athlete.id), "confirmation": "NO"},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -258,10 +306,68 @@ END
         response = self.client.post(
             "/api/mcp/plan-import/commit",
             headers={"Authorization": "Bearer read-token"},
-            json={"import_text": _create_text(), "confirmation": "APLICAR"},
+            json={"import_text": _create_text(self.athlete.id), "confirmation": "APLICAR"},
         )
 
         self.assertEqual(response.status_code, 401)
+
+    def test_preview_endpoint_uses_athlete_id_from_block(self) -> None:
+        response = self.client.post(
+            "/api/mcp/plan-import/preview",
+            headers={"Authorization": "Bearer read-token"},
+            json={"import_text": _create_text(self.other_athlete.id), "athlete_id": self.athlete.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.other_athlete.id)
+        self.assertTrue(payload["valid"])
+
+    def test_preview_endpoint_fails_without_athlete_id_when_multiple_athletes(self) -> None:
+        response = self.client.post(
+            "/api/mcp/plan-import/preview",
+            headers={"Authorization": "Bearer read-token"},
+            json={"import_text": _create_text()},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "El bloque importable debe incluir ATHLETE_ID en WEEK.")
+
+    def test_commit_endpoint_uses_athlete_id_from_block(self) -> None:
+        other_plan = TrainingPlan(
+            athlete_id=self.other_athlete.id,
+            name="Plan otro",
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            status="active",
+        )
+        self.db.add(other_plan)
+        self.db.commit()
+
+        response = self.client.post(
+            "/api/mcp/plan-import/commit",
+            headers={"Authorization": "Bearer write-token"},
+            json={
+                "import_text": _create_text(self.other_athlete.id),
+                "athlete_id": self.athlete.id,
+                "confirmation": "APLICAR",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["athlete"]["id"], self.other_athlete.id)
+        session = self.db.scalar(select(PlannedSession).where(PlannedSession.athlete_id == self.other_athlete.id))
+        self.assertIsNotNone(session)
+
+    def test_preview_warns_if_athlete_name_mismatch(self) -> None:
+        response = self.client.post(
+            "/api/mcp/plan-import/preview",
+            headers={"Authorization": "Bearer read-token"},
+            json={"import_text": _create_text(self.athlete.id, athlete_name="Nombre incorrecto")},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("ATHLETE_NAME no coincide", " ".join(response.json()["warnings"]))
 
     def test_rollback_if_one_operation_fails(self) -> None:
         payload = parse_plan_import(
@@ -329,8 +435,14 @@ END
         return session
 
 
-def _create_text() -> str:
-    return """SESSION
+def _create_text(athlete_id: int | None = None, athlete_name: str | None = None) -> str:
+    week_lines = ""
+    if athlete_id is not None:
+        week_lines = f"WEEK\nATHLETE_ID: {athlete_id}\n"
+        if athlete_name is not None:
+            week_lines += f"ATHLETE_NAME: {athlete_name}\n"
+        week_lines += "\n"
+    return f"""{week_lines}SESSION
 ACTION: create
 DATE: 2026-05-26
 SPORT: running

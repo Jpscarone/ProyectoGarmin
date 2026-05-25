@@ -71,13 +71,14 @@ def preview_mcp_plan_import(
     body: PlanImportRequest,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    athlete = _resolve_plan_import_athlete(request, db, body.athlete_id)
     try:
         payload = parse_plan_import(body.import_text)
     except PlanImportParseError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    athlete = _resolve_plan_import_athlete(request, db, payload, body.athlete_id)
     result = preview_plan_import(db, athlete.id, payload)
     result["athlete"] = _serialize_athlete_min(athlete)
+    _append_plan_import_warnings(result, athlete, payload)
     return result
 
 
@@ -89,13 +90,14 @@ def commit_mcp_plan_import(
 ) -> dict[str, Any]:
     if body.confirmation != "APLICAR":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='confirmation debe ser "APLICAR".')
-    athlete = _resolve_plan_import_athlete(request, db, body.athlete_id)
     try:
         payload = parse_plan_import(body.import_text)
     except PlanImportParseError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    athlete = _resolve_plan_import_athlete(request, db, payload, body.athlete_id)
     result = commit_plan_import(db, athlete.id, payload)
     result["athlete"] = _serialize_athlete_min(athlete)
+    _append_plan_import_warnings(result, athlete, payload)
     return result
 
 
@@ -869,9 +871,10 @@ def _resolve_context_athlete(request: Request, db: Session, *, athlete_id: int |
     return get_current_athlete(request, db)
 
 
-def _resolve_plan_import_athlete(request: Request, db: Session, athlete_id: int | None) -> Athlete:
-    if athlete_id is not None:
-        return _get_athlete_or_404(db, athlete_id)
+def _resolve_plan_import_athlete(request: Request, db: Session, payload: Any, body_athlete_id: int | None) -> Athlete:
+    resolved_athlete_id = getattr(payload, "athlete_id", None) or body_athlete_id
+    if resolved_athlete_id is not None:
+        return _get_athlete_or_404(db, int(resolved_athlete_id))
     try:
         athlete = get_current_athlete(request, db)
     except HTTPException:
@@ -889,7 +892,18 @@ def _resolve_plan_import_athlete(request: Request, db: Session, athlete_id: int 
         return athletes[0]
     if not athletes:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No hay atleta disponible para importar plan.")
-    raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Hay mas de un atleta; envia athlete_id en el body.")
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="El bloque importable debe incluir ATHLETE_ID en WEEK.",
+    )
+
+
+def _append_plan_import_warnings(result: dict[str, Any], athlete: Athlete, payload: Any) -> None:
+    warnings = list(result.get("warnings") or [])
+    athlete_name = (getattr(payload, "athlete_name", None) or "").strip()
+    if athlete_name and athlete_name.casefold() != (athlete.name or "").strip().casefold():
+        warnings.append("ATHLETE_NAME no coincide con el atleta encontrado para ATHLETE_ID.")
+    result["warnings"] = warnings
 
 
 def _get_athlete_or_404(db: Session, athlete_id: int) -> Athlete:

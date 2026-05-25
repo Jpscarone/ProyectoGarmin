@@ -26,7 +26,7 @@ Body:
 
 ```json
 {
-  "import_text": "SESSION\nACTION: create\nDATE: 2026-05-26\nSPORT: running\nNAME: Rodaje suave\n\nBLOCK\nVALUE: 30\nUNIT: min\n\nEND"
+  "import_text": "WEEK\nATHLETE_ID: 1\nATHLETE_NAME: Pablo\n\nSESSION\nACTION: create\nDATE: 2026-05-26\nSPORT: running\nNAME: Rodaje suave\n\nBLOCK\nVALUE: 30\nUNIT: min\n\nEND"
 }
 ```
 
@@ -53,6 +53,8 @@ Respuesta: `created`, `updated`, `cancelled`, `skipped`, `errors`, `affected_ses
 
 ```text
 WEEK
+ATHLETE_ID: 1
+ATHLETE_NAME: Pablo
 START_DATE: 2026-05-25
 END_DATE: 2026-05-31
 MODE: preview
@@ -82,7 +84,13 @@ REASON: fatiga alta
 END
 ```
 
-`WEEK`, `START_DATE`, `END_DATE` y `MODE` son opcionales. `END` es obligatorio.
+`WEEK`, `START_DATE`, `END_DATE` y `MODE` son opcionales. `ATHLETE_ID` debe incluirse para uso MCP multiatleta; `ATHLETE_NAME` es opcional y se usa como control humano. `END` es obligatorio.
+
+Si `ATHLETE_NAME` no coincide con el nombre real del `ATHLETE_ID`, preview devuelve el warning:
+
+```text
+ATHLETE_NAME no coincide con el atleta encontrado para ATHLETE_ID.
+```
 
 ## Semantica
 
@@ -92,3 +100,5 @@ END
 - `cancel`: marca `completion_source="cancelled"` y guarda `REASON` en notas disponibles.
 
 Si hay mas de una coincidencia por `DATE + SPORT`, preview devuelve `conflict` y commit no aplica.
+
+`ATHLETE_ID` dentro del bloque tiene prioridad sobre cualquier `athlete_id` enviado en el body.

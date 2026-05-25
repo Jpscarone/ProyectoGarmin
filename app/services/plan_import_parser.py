@@ -42,6 +42,8 @@ class PlanImportSession:
 
 @dataclass(slots=True)
 class PlanImportPayload:
+    athlete_id: int | None = None
+    athlete_name: str | None = None
     start_date: date | None = None
     end_date: date | None = None
     mode: str | None = None
@@ -122,7 +124,13 @@ def _parse_key_value(line: str, line_number: int) -> tuple[str, str]:
 
 
 def _apply_week_field(payload: PlanImportPayload, key: str, value: str, line_number: int) -> None:
-    if key == "START_DATE":
+    if key == "ATHLETE_ID":
+        payload.athlete_id = _parse_optional_int(value, key, line_number)
+        if payload.athlete_id is None:
+            raise PlanImportParseError(f"Linea {line_number}: ATHLETE_ID es obligatorio y debe ser entero.")
+    elif key == "ATHLETE_NAME":
+        payload.athlete_name = _optional_text(value)
+    elif key == "START_DATE":
         payload.start_date = _parse_date(value, key, line_number)
     elif key == "END_DATE":
         payload.end_date = _parse_date(value, key, line_number)

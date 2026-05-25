@@ -244,6 +244,7 @@ Ejemplo:
 TRAINING_APP_BASE_URL=http://127.0.0.1:8000
 TRAINING_APP_MCP_TOKEN=change-me
 TRAINING_API_WRITE_TOKEN=change-me-write
+TRAINING_API_ATHLETE_ID=
 
 MCP_TRANSPORT=http
 MCP_HOST=127.0.0.1
@@ -258,6 +259,7 @@ Variables:
 - `TRAINING_APP_BASE_URL`: URL base de la app principal.
 - `TRAINING_APP_MCP_TOKEN`: token bearer que la app principal exige para `/api/mcp/*`.
 - `TRAINING_API_WRITE_TOKEN`: token bearer de escritura usado solo por `commit_plan_import`.
+- `TRAINING_API_ATHLETE_ID`: fallback opcional. No pisa el `ATHLETE_ID` incluido en el bloque importable.
 - `MCP_TRANSPORT`: `stdio`, `http` o `sse`.
 - `MCP_HOST`: host del servidor MCP remoto.
 - `MCP_PORT`: puerto del servidor MCP remoto.
@@ -360,6 +362,29 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysi
 `commit_plan_import` consulta `POST /api/mcp/plan-import/commit`, exige `TRAINING_API_WRITE_TOKEN` y requiere `confirmation="APLICAR"`.
 
 La importacion soporta `create`, `update`, `upsert` y `cancel`. Cancelar no borra fisicamente; marca la sesion como cancelada en la app principal.
+
+Los bloques semanales deben incluir `ATHLETE_ID`; `ATHLETE_NAME` es opcional:
+
+```text
+WEEK
+ATHLETE_ID: 1
+ATHLETE_NAME: Pablo
+START_DATE: 2026-05-25
+END_DATE: 2026-05-31
+MODE: preview
+
+SESSION
+ACTION: upsert
+DATE: 2026-05-26
+SPORT: strength
+NAME: Gimnasio suave
+
+BLOCK
+VALUE: 45
+UNIT: min
+
+END
+```
 
 ### Smoke test remoto MCP
 
