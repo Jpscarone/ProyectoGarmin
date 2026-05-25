@@ -20,7 +20,7 @@ from app.db.models.training_plan import TrainingPlan
 from app.db.session import get_db
 from app.main import app
 from app.services.plan_import_parser import parse_plan_import
-from app.services.plan_import_service import commit_plan_import, preview_plan_import
+from app.services.plan_import_service import commit_plan_import, preview_plan_import, verify_plan_import
 
 
 WEEK_TEXT = """WEEK
@@ -145,6 +145,43 @@ END
         self.assertEqual(payload.sessions[0].session_id, 10)
         self.assertEqual(payload.sessions[0].reason, "viaje")
 
+    def test_parser_accepts_session_type_optional(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: cycling
+SESSION_TYPE: optional
+NAME: Bici suave
+
+BLOCK
+VALUE: 45
+UNIT: min
+
+END
+"""
+        )
+
+        self.assertEqual(payload.sessions[0].session_type, "optional")
+
+    def test_parser_session_type_defaults_in_service_to_required(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Rodaje
+
+BLOCK
+VALUE: 30
+UNIT: min
+
+END
+"""
+        )
+
+        self.assertIsNone(payload.sessions[0].session_type)
+
 
 class PlanImportServiceAndRouteTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -248,7 +285,55 @@ END
         assert session is not None
         self.assertEqual(session.name, "Rodaje suave")
         self.assertEqual(session.expected_duration_min, 30)
+        self.assertEqual(session.session_type, "required")
         self.assertEqual(len(session.planned_session_steps), 1)
+
+    def test_commit_create_persists_formal_session_type(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: cycling
+SESSION_TYPE: optional
+NAME: Bici suave
+
+BLOCK
+VALUE: 50
+UNIT: min
+
+END
+"""
+        )
+
+        result = commit_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertEqual(result["created"], 1)
+        session = self.db.scalar(select(PlannedSession).where(PlannedSession.athlete_id == self.athlete.id))
+        assert session is not None
+        self.assertEqual(session.session_type, "optional")
+
+    def test_preview_warns_when_optional_is_inferred_from_notes(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: cycling
+NAME: Bici suave
+NOTES: bici opcional pre fondo
+
+BLOCK
+VALUE: 40
+UNIT: min
+
+END
+"""
+        )
+
+        result = preview_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertTrue(result["valid"])
+        self.assertIn("Se detecto opcional por notas", " ".join(result["warnings"]))
+        self.assertEqual(payload.sessions[0].session_type, "optional")
 
     def test_commit_upsert_update_existing(self) -> None:
         existing = self._add_session(date(2026, 5, 26), "running", "Viejo")
@@ -368,6 +453,201 @@ END
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("ATHLETE_NAME no coincide", " ".join(response.json()["warnings"]))
+
+    def test_verify_ok_after_commit(self) -> None:
+        import_text = """WEEK
+ATHLETE_ID: 1
+ATHLETE_NAME: Atleta Plan Import
+START_DATE: 2026-05-25
+END_DATE: 2026-05-31
+MODE: preview
+
+SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: cycling
+SESSION_TYPE: optional
+MODALITY: outdoor
+NAME: Bici suave
+
+BLOCK
+VALUE: 45
+UNIT: min
+
+END
+"""
+        payload = parse_plan_import(import_text)
+        commit_result = commit_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertEqual(commit_result["created"], 1)
+
+        verify_payload = parse_plan_import(import_text)
+        result = verify_plan_import(self.db, self.athlete.id, verify_payload)
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["expected_sessions"], 1)
+        self.assertEqual(result["matched_sessions"], 1)
+        self.assertEqual(result["missing_sessions"], [])
+        self.assertEqual(result["different_sessions"], [])
+        self.assertEqual(result["extra_sessions_same_week"], [])
+
+    def test_verify_marks_missing_session(self) -> None:
+        payload = parse_plan_import(_create_text(self.athlete.id))
+
+        result = verify_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["matched_sessions"], 0)
+        self.assertEqual(len(result["missing_sessions"]), 1)
+
+    def test_verify_detects_different_duration(self) -> None:
+        session = self._add_session(date(2026, 5, 26), "running", "Rodaje suave")
+        session.expected_duration_min = 40
+        self.db.add(session)
+        self.db.commit()
+        payload = parse_plan_import(_create_text(self.athlete.id))
+
+        result = verify_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["matched_sessions"], 0)
+        self.assertIn("duration_minutes", result["different_sessions"][0]["fields"])
+
+    def test_verify_detects_different_session_type(self) -> None:
+        session = self._add_session(date(2026, 5, 26), "running", "Rodaje suave")
+        session.session_type = "optional"
+        self.db.add(session)
+        self.db.commit()
+        payload = parse_plan_import(_create_text(self.athlete.id))
+
+        result = verify_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertFalse(result["valid"])
+        self.assertIn("session_type", result["different_sessions"][0]["fields"])
+
+    def test_verify_detects_different_block_count(self) -> None:
+        payload = parse_plan_import(_create_text(self.athlete.id))
+        commit_plan_import(self.db, self.athlete.id, payload)
+        session = self.db.scalar(select(PlannedSession).where(PlannedSession.athlete_id == self.athlete.id))
+        assert session is not None
+        self.db.add(session)
+        self.db.commit()
+
+        verify_payload = parse_plan_import(
+            """WEEK
+ATHLETE_ID: 1
+SESSION
+ACTION: update
+SESSION_ID: %d
+DATE: 2026-05-26
+SPORT: running
+NAME: Rodaje suave
+
+BLOCK
+VALUE: 15
+UNIT: min
+
+BLOCK
+VALUE: 15
+UNIT: min
+
+END
+""" % session.id
+        )
+
+        result = verify_plan_import(self.db, self.athlete.id, verify_payload)
+
+        self.assertFalse(result["valid"])
+        self.assertIn("blocks_count", result["different_sessions"][0]["fields"])
+
+    def test_verify_reports_extra_session_in_same_week_as_warning(self) -> None:
+        payload = parse_plan_import(_create_text(self.athlete.id))
+        commit_plan_import(self.db, self.athlete.id, payload)
+        self._add_session(date(2026, 5, 27), "strength", "Extra")
+
+        verify_payload = parse_plan_import(_create_text(self.athlete.id))
+        result = verify_plan_import(self.db, self.athlete.id, verify_payload)
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["matched_sessions"], 1)
+        self.assertEqual(len(result["extra_sessions_same_week"]), 1)
+        self.assertIn("sesiones extra", " ".join(result["warnings"]).lower())
+
+    def test_verify_multiathlete_without_athlete_id_returns_clear_error(self) -> None:
+        response = self.client.post(
+            "/api/mcp/plan-import/verify",
+            headers={"Authorization": "Bearer read-token"},
+            json={"import_text": _create_text()},
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["detail"], "El bloque importable debe incluir ATHLETE_ID en WEEK.")
+
+    def test_verify_endpoint_does_not_write_db(self) -> None:
+        before_sessions = list(self.db.scalars(select(PlannedSession)).all())
+        response = self.client.post(
+            "/api/mcp/plan-import/verify",
+            headers={"Authorization": "Bearer read-token"},
+            json={"import_text": _create_text(self.athlete.id)},
+        )
+        after_sessions = list(self.db.scalars(select(PlannedSession)).all())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(before_sessions), len(after_sessions))
+        self.assertFalse(response.json()["valid"])
+
+    def test_verify_endpoint_uses_block_athlete_id(self) -> None:
+        other_plan = TrainingPlan(
+            athlete_id=self.other_athlete.id,
+            name="Plan otro",
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            status="active",
+        )
+        self.db.add(other_plan)
+        self.db.commit()
+        other_day = TrainingDay(
+            athlete_id=self.other_athlete.id,
+            training_plan_id=other_plan.id,
+            day_date=date(2026, 5, 26),
+            day_type="running",
+        )
+        self.db.add(other_day)
+        self.db.commit()
+        self.db.refresh(other_day)
+        self.db.add(
+            PlannedSession(
+                athlete_id=self.other_athlete.id,
+                training_day_id=other_day.id,
+                name="Rodaje suave",
+                sport_type="running",
+                session_type="required",
+                expected_duration_min=30,
+                session_order=1,
+            )
+        )
+        self.db.commit()
+        other_session = self.db.scalar(select(PlannedSession).where(PlannedSession.athlete_id == self.other_athlete.id))
+        assert other_session is not None
+        self.db.add(
+            models.PlannedSessionStep(
+                planned_session_id=other_session.id,
+                step_order=1,
+                step_type="steady",
+                duration_sec=1800,
+            )
+        )
+        self.db.commit()
+
+        response = self.client.post(
+            "/api/mcp/plan-import/verify",
+            headers={"Authorization": "Bearer read-token"},
+            json={"import_text": _create_text(self.other_athlete.id), "athlete_id": self.athlete.id},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["athlete"]["id"], self.other_athlete.id)
+        self.assertTrue(response.json()["valid"])
 
     def test_rollback_if_one_operation_fails(self) -> None:
         payload = parse_plan_import(

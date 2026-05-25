@@ -99,10 +99,11 @@ class McpConversationalV3Tests(unittest.TestCase):
         self.db.close()
         self.engine.dispose()
 
-    def test_remaining_week_plan_splits_completed_remaining_optional_and_excludes_cancelled(self) -> None:
+    def test_remaining_week_plan_splits_required_optional_recovery_and_excludes_cancelled(self) -> None:
         completed_day = self._create_day(self.plan, self.athlete, date(2026, 5, 25), "running")
         remaining_day = self._create_day(self.plan, self.athlete, date(2026, 5, 27), "running")
         optional_day = self._create_day(self.plan, self.athlete, date(2026, 5, 29), "strength")
+        recovery_day = self._create_day(self.plan, self.athlete, date(2026, 5, 28), "mobility")
         cancelled_day = self._create_day(self.plan, self.athlete, date(2026, 5, 30), "running")
 
         completed = self._create_session(completed_day, self.athlete, "Rodaje cumplido", sport_type="running", expected_duration_min=45)
@@ -115,6 +116,14 @@ class McpConversationalV3Tests(unittest.TestCase):
             sport_type="strength",
             session_type="optional",
             expected_duration_min=40,
+        )
+        self._create_session(
+            recovery_day,
+            self.athlete,
+            "Movilidad",
+            sport_type="mobility",
+            session_type="recovery",
+            expected_duration_min=20,
         )
         self._create_session(
             cancelled_day,
@@ -135,9 +144,13 @@ class McpConversationalV3Tests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["completed_sessions"], 1)
         self.assertEqual(payload["remaining_sessions"], 1)
+        self.assertEqual(payload["required_sessions"], 1)
         self.assertEqual(payload["optional_sessions"], 1)
+        self.assertEqual(payload["recovery_sessions"], 1)
         self.assertEqual(payload["remaining_volume_minutes"], 60)
-        self.assertEqual([item["name"] for item in payload["sessions"]], ["Series 5x1000", "Gym opcional"])
+        self.assertEqual(payload["total_remaining_minutes_required"], 60)
+        self.assertEqual(payload["total_remaining_minutes_optional"], 40)
+        self.assertEqual([item["name"] for item in payload["sessions"]], ["Series 5x1000", "Gym opcional", "Movilidad"])
 
     def test_remaining_week_plan_returns_empty_message(self) -> None:
         response = self.client.get(
@@ -149,6 +162,7 @@ class McpConversationalV3Tests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["remaining_sessions"], 0)
         self.assertEqual(payload["optional_sessions"], 0)
+        self.assertEqual(payload["recovery_sessions"], 0)
         self.assertEqual(payload["message"], "No quedan sesiones pendientes esta semana.")
 
     def test_previous_week_summary_aggregates_garmin_and_manual_strength_without_duplicates(self) -> None:
@@ -263,11 +277,13 @@ class McpConversationalV3Tests(unittest.TestCase):
         self.assertEqual(payload["remaining_count"], 1)
         self.assertEqual([item["name"] for item in payload["sessions"]], ["Pendiente hoy"])
 
-    def test_week_adherence_counts_cancelled_and_missed_sessions(self) -> None:
+    def test_week_adherence_ignores_optional_and_recovery_in_denominator(self) -> None:
         completed_day_one = self._create_day(self.plan, self.athlete, date(2026, 5, 18), "running")
         completed_day_two = self._create_day(self.plan, self.athlete, date(2026, 5, 19), "strength")
         cancelled_day = self._create_day(self.plan, self.athlete, date(2026, 5, 20), "running")
         missed_day = self._create_day(self.plan, self.athlete, date(2026, 5, 21), "cycling")
+        optional_day = self._create_day(self.plan, self.athlete, date(2026, 5, 22), "cycling")
+        recovery_day = self._create_day(self.plan, self.athlete, date(2026, 5, 23), "mobility")
 
         completed_one = self._create_session(completed_day_one, self.athlete, "Completada 1", sport_type="running", expected_duration_min=40)
         self._create_activity_match(completed_one, "Completada 1", datetime(2026, 5, 18, 7, 0, 0), 2400)
@@ -290,6 +306,8 @@ class McpConversationalV3Tests(unittest.TestCase):
             completion_source="cancelled",
         )
         self._create_session(missed_day, self.athlete, "Perdida", sport_type="cycling", expected_duration_min=50)
+        self._create_session(optional_day, self.athlete, "Bici opcional", sport_type="cycling", expected_duration_min=40, session_type="optional")
+        self._create_session(recovery_day, self.athlete, "Movilidad", sport_type="mobility", expected_duration_min=20, session_type="recovery")
         self.db.commit()
 
         response = self.client.get(
@@ -299,7 +317,10 @@ class McpConversationalV3Tests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertEqual(payload["planned_sessions"], 4)
+        self.assertEqual(payload["planned_sessions"], 6)
+        self.assertEqual(payload["required_sessions"], 3)
+        self.assertEqual(payload["optional_sessions"], 1)
+        self.assertEqual(payload["recovery_sessions"], 1)
         self.assertEqual(payload["completed_sessions"], 2)
         self.assertEqual(payload["cancelled_sessions"], 1)
         self.assertEqual(payload["missed_sessions"], 1)

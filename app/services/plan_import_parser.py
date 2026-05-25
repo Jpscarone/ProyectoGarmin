@@ -6,6 +6,8 @@ from typing import Literal
 
 
 PlanImportAction = Literal["create", "update", "upsert", "cancel"]
+PlanImportSessionType = Literal["required", "optional", "recovery", "race", "test"]
+SUPPORTED_SESSION_TYPES = {"required", "optional", "recovery", "race", "test"}
 
 
 class PlanImportParseError(ValueError):
@@ -33,6 +35,7 @@ class PlanImportSession:
     session_id: int | None = None
     date: date | None = None
     sport: str | None = None
+    session_type: PlanImportSessionType | None = None
     modality: str | None = None
     name: str | None = None
     notes: str | None = None
@@ -188,16 +191,22 @@ def _finish_session(
     if current_session is None:
         return None
     fields = current_session.fields
-    allowed = {"ACTION", "SESSION_ID", "DATE", "SPORT", "MODALITY", "NAME", "NOTES", "REASON"}
+    allowed = {"ACTION", "SESSION_ID", "DATE", "SPORT", "SESSION_TYPE", "MODALITY", "NAME", "NOTES", "REASON"}
     _reject_unknown(fields, allowed, "SESSION", line_number)
     raw_action = (fields.get("ACTION") or "").strip().lower()
     if raw_action not in {"create", "update", "upsert", "cancel"}:
         raise PlanImportParseError(f"Linea {current_session.line_number}: ACTION debe ser create, update, upsert o cancel.")
+    raw_session_type = _optional_text(fields.get("SESSION_TYPE"), lower=True)
+    if raw_session_type and raw_session_type not in SUPPORTED_SESSION_TYPES:
+        raise PlanImportParseError(
+            f"Linea {current_session.line_number}: SESSION_TYPE debe ser required, optional, recovery, race o test."
+        )
     session = PlanImportSession(
         action=raw_action,  # type: ignore[arg-type]
         session_id=_parse_optional_int(fields.get("SESSION_ID"), "SESSION_ID", line_number),
         date=_parse_date(fields["DATE"], "DATE", line_number) if fields.get("DATE") else None,
         sport=_optional_text(fields.get("SPORT"), lower=True),
+        session_type=raw_session_type,  # type: ignore[arg-type]
         modality=_optional_text(fields.get("MODALITY"), lower=True),
         name=_optional_text(fields.get("NAME")),
         notes=_optional_text(fields.get("NOTES")),

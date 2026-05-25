@@ -15,6 +15,12 @@ Todo el resultado es deterministico y se deriva de:
 
 V1 y V2 siguen intactas.
 
+Desde la formalizacion de `SESSION_TYPE`, V3 distingue:
+
+- `required`, `race` y `test`: cuentan para adherencia.
+- `optional`: no penaliza adherencia si no se completa.
+- `recovery`: no penaliza adherencia y queda separado de la carga principal salvo que se complete.
+
 ## Endpoints
 
 ### `GET /api/mcp/training/remaining-week-plan`
@@ -38,14 +44,18 @@ Respuesta:
 - `today`
 - `completed_sessions`
 - `remaining_sessions`
+- `required_sessions`
 - `optional_sessions`
+- `recovery_sessions`
 - `remaining_volume_minutes`
+- `total_remaining_minutes_required`
+- `total_remaining_minutes_optional`
 - `sessions`
 
 Notas:
 
 - excluye canceladas y skipped
-- separa opcionales solo cuando `session_type` es `optional` u `opcional`
+- usa `SESSION_TYPE` formal y mantiene fallback por texto solo para compatibilidad
 - si no queda nada devuelve `message`
 
 ### `GET /api/mcp/training/previous-week-summary`
@@ -152,6 +162,9 @@ Uso:
 Respuesta:
 
 - `planned_sessions`
+- `required_sessions`
+- `optional_sessions`
+- `recovery_sessions`
 - `completed_sessions`
 - `cancelled_sessions`
 - `missed_sessions`
@@ -160,9 +173,11 @@ Respuesta:
 
 Formula:
 
-- `adherence_percent = completed_sessions / (planned_sessions - cancelled_sessions)`
+- `adherence_percent = completed_sessions / required_sessions`
 
-`missed_sessions` cuenta sesiones no canceladas ni completadas ya vencidas a la fecha de consulta.
+`required_sessions` incluye `required`, `race` y `test`.
+
+`missed_sessions` cuenta solo sesiones exigibles no canceladas ni completadas ya vencidas a la fecha de consulta.
 
 ## Ejemplos
 

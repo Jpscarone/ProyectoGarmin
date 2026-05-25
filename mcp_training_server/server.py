@@ -318,6 +318,270 @@ async def get_my_week_adherence(
 
 
 @mcp.tool()
+async def get_week_comparison(
+    athlete_id: int,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve una comparacion deterministica entre la semana actual o consultada y la semana previa."""
+    return await CLIENT.get_week_comparison(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_my_week_comparison(
+    access_code: str,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve la comparacion semanal para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_week_comparison(
+        access_code=access_code,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_training_load_trend(
+    athlete_id: int,
+    weeks: int = 4,
+) -> dict[str, Any]:
+    """Devuelve la tendencia reciente de carga semanal usando datos reales y duracion como proxy si hace falta."""
+    return await CLIENT.get_training_load_trend(
+        athlete_id=athlete_id,
+        weeks=weeks,
+    )
+
+
+@mcp.tool()
+async def get_my_training_load_trend(
+    access_code: str,
+    weeks: int = 4,
+) -> dict[str, Any]:
+    """Devuelve la tendencia de carga del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_training_load_trend(
+        access_code=access_code,
+        weeks=weeks,
+    )
+
+
+@mcp.tool()
+async def get_fatigue_risk_summary(
+    athlete_id: int,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve un resumen deterministico de riesgo de fatiga segun salud disponible y carga reciente."""
+    return await CLIENT.get_fatigue_risk_summary(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_my_fatigue_risk_summary(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve el resumen de riesgo de fatiga para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_fatigue_risk_summary(
+        access_code=access_code,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_week_strategy_summary(
+    athlete_id: int,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Resume la logica de la semana e infiere una etiqueta simple de estrategia sin usar IA."""
+    return await CLIENT.get_week_strategy_summary(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_my_week_strategy_summary(
+    access_code: str,
+    week_start_date: str | None = None,
+) -> dict[str, Any]:
+    """Resume la estrategia semanal del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_week_strategy_summary(
+        access_code=access_code,
+        week_start_date=week_start_date,
+    )
+
+
+@mcp.tool()
+async def get_training_dashboard(
+    athlete_id: int,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Compone un panorama general read-only con readiness, semana actual, riesgo y proxima sesion."""
+    return await CLIENT.get_training_dashboard(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_my_training_dashboard(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Compone el panorama general del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_training_dashboard(
+        access_code=access_code,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_plan_adjustment_suggestions(
+    athlete_id: int,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve sugerencias read-only de ajuste semanal segun riesgo, sesiones pendientes y estrategia actual."""
+    return await CLIENT.get_plan_adjustment_suggestions(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_my_plan_adjustment_suggestions(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve sugerencias de ajuste para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_plan_adjustment_suggestions(
+        access_code=access_code,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_next_session_decision(
+    athlete_id: int,
+    reference_date: str | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Devuelve una decision read-only sobre la proxima sesion o una sesion objetivo concreta."""
+    return await CLIENT.get_next_session_decision(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+    )
+
+
+@mcp.tool()
+async def get_my_next_session_decision(
+    access_code: str,
+    reference_date: str | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Devuelve la decision sobre la proxima sesion del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_next_session_decision(
+        access_code=access_code,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+    )
+
+
+@mcp.tool()
+async def get_optional_session_impact(
+    athlete_id: int,
+    planned_session_id: int | None = None,
+    date: str | None = None,
+    sport: str | None = None,
+) -> dict[str, Any]:
+    """Evalua el impacto de omitir una sesion objetivo sin modificar el plan."""
+    return await CLIENT.get_optional_session_impact(
+        athlete_id=athlete_id,
+        planned_session_id=planned_session_id,
+        date=date,
+        sport=sport,
+    )
+
+
+@mcp.tool()
+async def get_my_optional_session_impact(
+    access_code: str,
+    planned_session_id: int | None = None,
+    date: str | None = None,
+    sport: str | None = None,
+) -> dict[str, Any]:
+    """Evalua el impacto de omitir una sesion del atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_optional_session_impact(
+        access_code=access_code,
+        planned_session_id=planned_session_id,
+        date=date,
+        sport=sport,
+    )
+
+
+@mcp.tool()
+async def generate_plan_adjustment_import_text(
+    athlete_id: int,
+    adjustment_type: str,
+    reference_date: str | None = None,
+    planned_session_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Genera un bloque importable V2 como texto para preview posterior, sin aplicar cambios."""
+    return await CLIENT.generate_plan_adjustment_import_text(
+        athlete_id=athlete_id,
+        adjustment_type=adjustment_type,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+        reason=reason,
+    )
+
+
+@mcp.tool()
+async def get_my_plan_adjustment_import_text(
+    access_code: str,
+    adjustment_type: str,
+    reference_date: str | None = None,
+    planned_session_id: int | None = None,
+    reason: str | None = None,
+) -> dict[str, Any]:
+    """Genera texto importable V2 para el atleta resuelto por su clave privada, sin aplicar cambios."""
+    return await CLIENT.get_my_plan_adjustment_import_text(
+        access_code=access_code,
+        adjustment_type=adjustment_type,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+        reason=reason,
+    )
+
+
+@mcp.tool()
+async def get_training_decision_context(
+    athlete_id: int,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Compone el contexto clave que conviene mirar antes de tocar el plan."""
+    return await CLIENT.get_training_decision_context(
+        athlete_id=athlete_id,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
+async def get_my_training_decision_context(
+    access_code: str,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Compone el contexto de decision para el atleta resuelto por su clave privada."""
+    return await CLIENT.get_my_training_decision_context(
+        access_code=access_code,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
 async def get_session_analysis_payload(
     athlete_id: int,
     planned_session_id: int | None = None,
@@ -353,6 +617,12 @@ async def get_my_session_analysis_payload(
 async def preview_plan_import(import_text: str) -> dict[str, Any]:
     """Previsualiza una importacion semanal o individual de planificacion sin escribir en la base."""
     return await CLIENT.preview_plan_import(import_text=import_text)
+
+
+@mcp.tool()
+async def verify_plan_import(import_text: str) -> dict[str, Any]:
+    """Verifica en modo read-only que un bloque importable haya quedado reflejado en la base sin aplicar cambios."""
+    return await CLIENT.verify_plan_import(import_text=import_text)
 
 
 @mcp.tool()

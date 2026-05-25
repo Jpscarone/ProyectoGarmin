@@ -16,6 +16,7 @@ from app.db.models.athlete import Athlete
 from app.db.models.daily_health_metric import DailyHealthMetric
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.health_ai_analysis import HealthAiAnalysis
+from app.db.models.goal import Goal
 from app.db.models.planned_session import PlannedSession
 from app.db.models.garmin_activity_lap import GarminActivityLap
 from app.db.models.session_analysis import SessionAnalysis
@@ -24,7 +25,7 @@ from app.db.models.training_plan import TrainingPlan
 from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
 from app.services.analysis_v2.weekly_analysis_service import build_week_context, compute_week_metrics
-from app.services.health_readiness_service import build_health_readiness_summary, evaluate_health_readiness
+from app.services.health_readiness_service import build_health_readiness_summary, build_health_training_context, evaluate_health_readiness
 from app.services.planning.presentation import describe_session_structure_short, derive_session_metrics
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
 from app.services.mcp_context_service import (
@@ -36,7 +37,7 @@ from app.services.mcp_context_service import (
 from app.services.athlete_access_code_service import resolve_athlete_by_access_code
 from app.services.mcp_security import verify_mcp_bearer_token, verify_mcp_write_bearer_token
 from app.services.plan_import_parser import PlanImportParseError, parse_plan_import
-from app.services.plan_import_service import commit_plan_import, preview_plan_import
+from app.services.plan_import_service import commit_plan_import, preview_plan_import, verify_plan_import
 from app.services.training_plan_service import select_default_training_plan
 from app.services.session_completion_service import completed_duration_sec, is_manually_completed_strength_session, is_session_completed
 from app.utils.datetime_utils import today_local
@@ -96,6 +97,23 @@ def commit_mcp_plan_import(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     athlete = _resolve_plan_import_athlete(request, db, payload, body.athlete_id)
     result = commit_plan_import(db, athlete.id, payload)
+    result["athlete"] = _serialize_athlete_min(athlete)
+    _append_plan_import_warnings(result, athlete, payload)
+    return result
+
+
+@router.post("/plan-import/verify")
+def verify_mcp_plan_import(
+    request: Request,
+    body: PlanImportRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        payload = parse_plan_import(body.import_text)
+    except PlanImportParseError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    athlete = _resolve_plan_import_athlete(request, db, payload, body.athlete_id)
+    result = verify_plan_import(db, athlete.id, payload)
     result["athlete"] = _serialize_athlete_min(athlete)
     _append_plan_import_warnings(result, athlete, payload)
     return result
@@ -328,6 +346,178 @@ def get_my_week_adherence(
     return get_week_adherence(
         athlete_id=athlete.id,
         week_start_date=week_start_date,
+        db=db,
+    )
+
+
+@router.get("/me/week-comparison")
+def get_my_week_comparison(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_week_comparison(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        db=db,
+    )
+
+
+@router.get("/me/training-load-trend")
+def get_my_training_load_trend(
+    request: Request,
+    access_code: str = Query(...),
+    weeks: int = Query(default=4, ge=2, le=12),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_training_load_trend(
+        athlete_id=athlete.id,
+        weeks=weeks,
+        db=db,
+    )
+
+
+@router.get("/me/fatigue-risk-summary")
+def get_my_fatigue_risk_summary(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_fatigue_risk_summary(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
+@router.get("/me/week-strategy-summary")
+def get_my_week_strategy_summary(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_week_strategy_summary(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        db=db,
+    )
+
+
+@router.get("/me/training-dashboard")
+def get_my_training_dashboard(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_training_dashboard(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
+@router.get("/me/plan-adjustment-suggestions")
+def get_my_plan_adjustment_suggestions(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_plan_adjustment_suggestions(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
+@router.get("/me/next-session-decision")
+def get_my_next_session_decision(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    planned_session_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_next_session_decision(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+        db=db,
+    )
+
+
+@router.get("/me/optional-session-impact")
+def get_my_optional_session_impact(
+    request: Request,
+    access_code: str = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    sport: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_optional_session_impact(
+        athlete_id=athlete.id,
+        planned_session_id=planned_session_id,
+        date_value=date_value,
+        sport=sport,
+        db=db,
+    )
+
+
+@router.get("/me/generate-plan-adjustment-import-text")
+def get_my_plan_adjustment_import_text(
+    request: Request,
+    access_code: str = Query(...),
+    adjustment_type: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    planned_session_id: int | None = Query(default=None),
+    reason: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return generate_plan_adjustment_import_text(
+        athlete_id=athlete.id,
+        adjustment_type=adjustment_type,
+        reference_date=reference_date,
+        planned_session_id=planned_session_id,
+        reason=reason,
+        db=db,
+    )
+
+
+@router.get("/me/training-decision-context")
+def get_my_training_decision_context(
+    request: Request,
+    access_code: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_training_decision_context(
+        athlete_id=athlete.id,
+        reference_date=reference_date,
         db=db,
     )
 
@@ -844,12 +1034,20 @@ def get_remaining_week_plan(
         for item in sessions
         if _is_pending_session(item, reference_date=today)
     ]
+    required_remaining_sessions = [item for item in pending_sessions if _is_required_for_adherence(item)]
     optional_sessions = [item for item in pending_sessions if _is_optional_session(item)]
-    required_remaining_sessions = [item for item in pending_sessions if not _is_optional_session(item)]
-    remaining_payload = [_serialize_conversational_session(item) for item in required_remaining_sessions + optional_sessions]
+    recovery_sessions = [item for item in pending_sessions if _is_recovery_session(item)]
+    remaining_payload = [
+        _serialize_conversational_session(item)
+        for item in required_remaining_sessions + optional_sessions + recovery_sessions
+    ]
     remaining_volume_minutes = sum(
         _planned_session_duration_minutes(item)
         for item in required_remaining_sessions
+    )
+    optional_volume_minutes = sum(
+        _planned_session_duration_minutes(item)
+        for item in optional_sessions
     )
 
     payload = {
@@ -858,11 +1056,15 @@ def get_remaining_week_plan(
         "today": today.isoformat(),
         "completed_sessions": len(completed_sessions),
         "remaining_sessions": len(required_remaining_sessions),
+        "required_sessions": len(required_remaining_sessions),
         "optional_sessions": len(optional_sessions),
+        "recovery_sessions": len(recovery_sessions),
         "remaining_volume_minutes": remaining_volume_minutes,
+        "total_remaining_minutes_required": remaining_volume_minutes,
+        "total_remaining_minutes_optional": optional_volume_minutes,
         "sessions": remaining_payload,
     }
-    if not required_remaining_sessions and not optional_sessions:
+    if not required_remaining_sessions and not optional_sessions and not recovery_sessions:
         payload["message"] = "No quedan sesiones pendientes esta semana."
     return payload
 
@@ -886,6 +1088,7 @@ def get_previous_week_summary(
     running_sessions = sum(1 for item in context.activities if _sport_bucket(getattr(item, "sport_type", None)) == "running")
     strength_sessions = sum(1 for item in context.activities if _sport_bucket(getattr(item, "sport_type", None)) == "strength")
     cycling_sessions = sum(1 for item in context.activities if _sport_bucket(getattr(item, "sport_type", None)) == "cycling")
+    optional_completed_sessions = sum(1 for item in sessions if _is_completed_or_matched_session(item) and _is_optional_session(item))
     total_sessions = len(context.activities)
     total_duration_minutes = int(round(sum(int(getattr(item, "duration_sec", 0) or 0) for item in context.activities) / 60))
 
@@ -894,7 +1097,7 @@ def get_previous_week_summary(
         highlights.append("No se registraron entrenamientos completados la semana pasada.")
     else:
         highlights.append(
-            f"Completaste {adherence['completed_sessions']} de {adherence['planned_sessions'] - adherence['cancelled_sessions']} sesiones exigibles."
+            f"Completaste {adherence['completed_sessions']} de {adherence['required_sessions']} sesiones exigibles."
         )
         top_sport_counts = {
             "running": running_sessions,
@@ -915,8 +1118,9 @@ def get_previous_week_summary(
         "cycling_sessions": cycling_sessions,
         "total_sessions": total_sessions,
         "total_duration_minutes": total_duration_minutes,
+        "optional_completed_sessions": optional_completed_sessions,
         "adherence_percent": adherence["adherence_percent"],
-        "completed_vs_planned": f"{adherence['completed_sessions']}/{max(adherence['planned_sessions'] - adherence['cancelled_sessions'], 0)}",
+        "completed_vs_planned": f"{adherence['completed_sessions']}/{adherence['required_sessions']}",
         "highlights": highlights,
     }
 
@@ -985,12 +1189,176 @@ def get_week_adherence(
         "athlete": _serialize_athlete_min(athlete),
         "week_start_date": selected_start.isoformat(),
         "planned_sessions": stats["planned_sessions"],
+        "required_sessions": stats["required_sessions"],
+        "optional_sessions": stats["optional_sessions"],
+        "recovery_sessions": stats["recovery_sessions"],
         "completed_sessions": stats["completed_sessions"],
         "cancelled_sessions": stats["cancelled_sessions"],
         "missed_sessions": stats["missed_sessions"],
         "adherence_percent": stats["adherence_percent"],
         "summary": stats["summary"],
     }
+
+
+@router.get("/week-comparison")
+def get_week_comparison(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    selected_start = (
+        _parse_iso_date(week_start_date, "week_start_date")
+        if week_start_date else _week_start_from_date(today_local(athlete=athlete))
+    )
+    previous_start = selected_start - (7 * date.resolution)
+    current_payload, current_warnings = _build_week_snapshot_payload(db, athlete, selected_start)
+    previous_payload, previous_warnings = _build_week_snapshot_payload(db, athlete, previous_start)
+    delta = _build_week_comparison_delta(current_payload, previous_payload)
+    warnings = current_warnings + previous_warnings
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "current_week_start_date": selected_start.isoformat(),
+        "previous_week_start_date": previous_start.isoformat(),
+        "current": current_payload,
+        "previous": previous_payload,
+        "delta": delta,
+        "summary": _build_week_comparison_summary(delta),
+        "warnings": warnings,
+    }
+
+
+@router.get("/training-load-trend")
+def get_training_load_trend(
+    athlete_id: int = Query(...),
+    weeks: int = Query(default=4, ge=2, le=12),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    trend_payload, warnings = _build_training_load_trend_payload(db, athlete, weeks=weeks)
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "weeks": weeks,
+        "trend": trend_payload,
+        "trend_direction": _infer_trend_direction(trend_payload),
+        "summary": _build_training_load_trend_summary(trend_payload),
+        "warnings": warnings,
+    }
+
+
+@router.get("/fatigue-risk-summary")
+def get_fatigue_risk_summary(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_fatigue_risk_payload(db, athlete, target_date)
+
+
+@router.get("/week-strategy-summary")
+def get_week_strategy_summary(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    selected_start = (
+        _parse_iso_date(week_start_date, "week_start_date")
+        if week_start_date else _week_start_from_date(today_local(athlete=athlete))
+    )
+    return _build_week_strategy_summary_payload(db, athlete, selected_start)
+
+
+@router.get("/training-dashboard")
+def get_training_dashboard(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_training_dashboard_payload(db, athlete, target_date)
+
+
+@router.get("/plan-adjustment-suggestions")
+def get_plan_adjustment_suggestions(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_plan_adjustment_suggestions_payload(db, athlete, target_date)
+
+
+@router.get("/next-session-decision")
+def get_next_session_decision(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    planned_session_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_next_session_decision_payload(
+        db,
+        athlete,
+        target_date,
+        planned_session_id=planned_session_id,
+    )
+
+
+@router.get("/optional-session-impact")
+def get_optional_session_impact(
+    athlete_id: int = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    sport: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    return _build_optional_session_impact_payload(
+        db,
+        athlete,
+        planned_session_id=planned_session_id,
+        date_value=date_value,
+        sport=sport,
+    )
+
+
+@router.get("/generate-plan-adjustment-import-text")
+def generate_plan_adjustment_import_text(
+    athlete_id: int = Query(...),
+    adjustment_type: str = Query(...),
+    reference_date: str | None = Query(default=None),
+    planned_session_id: int | None = Query(default=None),
+    reason: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_plan_adjustment_import_text_payload(
+        db,
+        athlete,
+        target_date,
+        adjustment_type=adjustment_type,
+        planned_session_id=planned_session_id,
+        reason=reason,
+    )
+
+
+@router.get("/training-decision-context")
+def get_training_decision_context(
+    athlete_id: int = Query(...),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(reference_date, "reference_date") if reference_date else today_local(athlete=athlete)
+    return _build_training_decision_context_payload(db, athlete, target_date)
 
 
 @router.get("/analysis/session-payload")
@@ -2177,9 +2545,30 @@ def _is_completed_or_matched_session(session: PlannedSession) -> bool:
     ) or is_session_completed(session)
 
 
-def _is_optional_session(session: PlannedSession) -> bool:
+def _normalized_session_type(session: PlannedSession) -> str:
     session_type = (session.session_type or "").strip().lower()
-    return session_type in {"optional", "opcional"}
+    if session_type in {"required", "optional", "recovery", "race", "test"}:
+        return session_type
+    text = " ".join(
+        str(item).lower()
+        for item in (session.name, session.target_notes, session.description_text)
+        if item
+    )
+    if "opcional" in text or "optional" in text:
+        return "optional"
+    return "required"
+
+
+def _is_optional_session(session: PlannedSession) -> bool:
+    return _normalized_session_type(session) == "optional"
+
+
+def _is_recovery_session(session: PlannedSession) -> bool:
+    return _normalized_session_type(session) == "recovery"
+
+
+def _is_required_for_adherence(session: PlannedSession) -> bool:
+    return _normalized_session_type(session) in {"required", "race", "test"}
 
 
 def _planned_session_duration_minutes(session: PlannedSession) -> int:
@@ -2197,6 +2586,7 @@ def _serialize_conversational_session(session: PlannedSession) -> dict[str, Any]
         "name": session.name,
         "duration_minutes": _planned_session_duration_minutes(session),
         "optional": _is_optional_session(session),
+        "session_type": _normalized_session_type(session),
         "notes": _build_planned_target_summary(session),
     }
 
@@ -2259,21 +2649,23 @@ def _build_week_adherence_stats(
     week_end_date: date,
 ) -> dict[str, Any]:
     cancelled_sessions = sum(1 for item in sessions if _is_cancelled_session(item))
-    completed_sessions = sum(1 for item in sessions if _is_completed_or_matched_session(item))
+    completed_sessions = sum(1 for item in sessions if _is_completed_or_matched_session(item) and _is_required_for_adherence(item))
     planned_sessions = len(sessions)
-    denominator = max(planned_sessions - cancelled_sessions, 0)
+    denominator = sum(1 for item in sessions if not _is_cancelled_session(item) and _is_required_for_adherence(item))
     due_cutoff = today if today < week_end_date else week_end_date
     missed_sessions = sum(
         1
         for item in sessions
-        if not _is_cancelled_session(item)
+        if _is_required_for_adherence(item)
+        and not _is_cancelled_session(item)
         and not _is_completed_or_matched_session(item)
         and not _is_pending_session(item, reference_date=due_cutoff + date.resolution)
     )
     future_pending = sum(
         1
         for item in sessions
-        if not _is_cancelled_session(item)
+        if _is_required_for_adherence(item)
+        and not _is_cancelled_session(item)
         and not _is_completed_or_matched_session(item)
         and _is_pending_session(item, reference_date=due_cutoff + date.resolution)
     )
@@ -2291,6 +2683,9 @@ def _build_week_adherence_stats(
 
     return {
         "planned_sessions": planned_sessions,
+        "required_sessions": denominator,
+        "optional_sessions": sum(1 for item in sessions if _is_optional_session(item)),
+        "recovery_sessions": sum(1 for item in sessions if _is_recovery_session(item)),
         "completed_sessions": completed_sessions,
         "cancelled_sessions": cancelled_sessions,
         "missed_sessions": missed_sessions,
@@ -2298,6 +2693,1121 @@ def _build_week_adherence_stats(
         "adherence_percent": adherence_percent,
         "summary": summary,
     }
+
+
+def _build_week_snapshot_payload(
+    db: Session,
+    athlete: Athlete,
+    week_start_date: date,
+) -> tuple[dict[str, Any], list[str]]:
+    context = build_week_context(db, athlete.id, week_start_date)
+    sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=week_start_date)
+    adherence = _build_week_adherence_stats(
+        sessions,
+        today=_week_end_from_start(week_start_date),
+        week_end_date=_week_end_from_start(week_start_date),
+    )
+    warnings: list[str] = []
+    if not sessions:
+        warnings.append(f"No hay sesiones planificadas para la semana {week_start_date.isoformat()}.")
+    if not getattr(context, "activities", None):
+        warnings.append(f"No hay entrenamientos completados para la semana {week_start_date.isoformat()}.")
+
+    return {
+        "total_sessions": len(list(getattr(context, "activities", []) or [])),
+        "total_duration_minutes": int(round(sum(int(getattr(item, "duration_sec", 0) or 0) for item in list(getattr(context, "activities", []) or [])) / 60)),
+        "running_sessions": sum(1 for item in list(getattr(context, "activities", []) or []) if _sport_bucket(getattr(item, "sport_type", None)) == "running"),
+        "strength_sessions": sum(1 for item in list(getattr(context, "activities", []) or []) if _sport_bucket(getattr(item, "sport_type", None)) == "strength"),
+        "cycling_sessions": sum(1 for item in list(getattr(context, "activities", []) or []) if _sport_bucket(getattr(item, "sport_type", None)) == "cycling"),
+        "adherence_percent": adherence["adherence_percent"],
+    }, warnings
+
+
+def _build_week_comparison_delta(current: dict[str, Any], previous: dict[str, Any]) -> dict[str, Any]:
+    previous_duration = int(previous.get("total_duration_minutes") or 0)
+    current_duration = int(current.get("total_duration_minutes") or 0)
+    duration_delta = current_duration - previous_duration
+    return {
+        "sessions": int(current.get("total_sessions") or 0) - int(previous.get("total_sessions") or 0),
+        "duration_minutes": duration_delta,
+        "duration_percent": round((duration_delta / previous_duration) * 100.0, 1) if previous_duration > 0 else None,
+        "running_sessions": int(current.get("running_sessions") or 0) - int(previous.get("running_sessions") or 0),
+        "strength_sessions": int(current.get("strength_sessions") or 0) - int(previous.get("strength_sessions") or 0),
+        "cycling_sessions": int(current.get("cycling_sessions") or 0) - int(previous.get("cycling_sessions") or 0),
+        "adherence_points": round(float(current.get("adherence_percent") or 0.0) - float(previous.get("adherence_percent") or 0.0), 1),
+    }
+
+
+def _build_week_comparison_summary(delta: dict[str, Any]) -> str:
+    session_delta = int(delta.get("sessions") or 0)
+    duration_delta = int(delta.get("duration_minutes") or 0)
+    adherence_delta = float(delta.get("adherence_points") or 0.0)
+
+    session_text = "igual cantidad de sesiones"
+    if session_delta > 0:
+        session_text = f"{session_delta} sesiones mas"
+    elif session_delta < 0:
+        session_text = f"{abs(session_delta)} sesiones menos"
+
+    duration_text = "duracion estable"
+    if duration_delta > 0:
+        duration_text = f"{duration_delta} minutos mas"
+    elif duration_delta < 0:
+        duration_text = f"{abs(duration_delta)} minutos menos"
+
+    adherence_text = "misma adherencia"
+    if adherence_delta > 0:
+        adherence_text = f"{adherence_delta:.1f} puntos mas de adherencia"
+    elif adherence_delta < 0:
+        adherence_text = f"{abs(adherence_delta):.1f} puntos menos de adherencia"
+
+    return f"Contra la semana anterior hiciste {session_text}, con {duration_text} y {adherence_text}."
+
+
+def _build_training_load_trend_payload(
+    db: Session,
+    athlete: Athlete,
+    *,
+    weeks: int,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    current_week_start = _week_start_from_date(today_local(athlete=athlete))
+    trend: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    for offset in range(weeks - 1, -1, -1):
+        week_start = current_week_start - (offset * 7 * date.resolution)
+        context = build_week_context(db, athlete.id, week_start)
+        sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=week_start)
+        activities = list(getattr(context, "activities", []) or [])
+        if not activities:
+            warnings.append(f"La semana {week_start.isoformat()} no tiene entrenamientos completados.")
+        trend.append(
+            {
+                "week_start_date": week_start.isoformat(),
+                "total_sessions": len(activities),
+                "total_duration_minutes": int(round(sum(int(getattr(item, "duration_sec", 0) or 0) for item in activities) / 60)),
+                "running_minutes": _activity_bucket_minutes(activities, "running"),
+                "cycling_minutes": _activity_bucket_minutes(activities, "cycling"),
+                "strength_minutes": _activity_bucket_minutes(activities, "strength"),
+                "total_distance_km_if_available": round(sum(float(getattr(item, "distance_m", 0) or 0) for item in activities) / 1000.0, 1) if any(getattr(item, "distance_m", None) for item in activities) else None,
+                "completed_sessions": sum(1 for item in sessions if _is_completed_or_matched_session(item)),
+            }
+        )
+    return trend, warnings
+
+
+def _activity_bucket_minutes(activities: list[Any], bucket: str) -> int:
+    return int(round(sum(int(getattr(item, "duration_sec", 0) or 0) for item in activities if _sport_bucket(getattr(item, "sport_type", None)) == bucket) / 60))
+
+
+def _infer_trend_direction(trend_payload: list[dict[str, Any]]) -> str:
+    durations = [int(item.get("total_duration_minutes") or 0) for item in trend_payload]
+    if len(durations) < 2:
+        return "stable"
+    deltas = [durations[index + 1] - durations[index] for index in range(len(durations) - 1)]
+    if all(delta == 0 for delta in deltas):
+        return "stable"
+    if all(delta >= 0 for delta in deltas) and durations[-1] > durations[0]:
+        return "up"
+    if all(delta <= 0 for delta in deltas) and durations[-1] < durations[0]:
+        return "down"
+    max_duration = max(durations)
+    min_duration = min(durations)
+    if max_duration == min_duration or (max_duration - min_duration) <= 30:
+        return "stable"
+    return "mixed"
+
+
+def _build_training_load_trend_summary(trend_payload: list[dict[str, Any]]) -> str:
+    if not trend_payload:
+        return "No hay semanas disponibles para analizar la tendencia."
+    trend_direction = _infer_trend_direction(trend_payload)
+    first = trend_payload[0]
+    last = trend_payload[-1]
+    if trend_direction == "up":
+        return (
+            f"La carga viene subiendo: pasaste de {first['total_duration_minutes']} a "
+            f"{last['total_duration_minutes']} minutos semanales."
+        )
+    if trend_direction == "down":
+        return (
+            f"La carga viene bajando: pasaste de {first['total_duration_minutes']} a "
+            f"{last['total_duration_minutes']} minutos semanales."
+        )
+    if trend_direction == "stable":
+        return "La carga de las ultimas semanas se mantiene relativamente estable."
+    return "La carga de las ultimas semanas muestra variaciones mixtas."
+
+
+def _build_fatigue_risk_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+) -> dict[str, Any]:
+    readiness_payload, readiness_evaluation, readiness_warnings = _build_readiness_snapshot(db, athlete.id, reference_date)
+    recent_load = _build_recent_load_summary(db, athlete.id, reference_date)
+    risk_level, reasons, recommendation = _evaluate_fatigue_risk(
+        readiness_payload=readiness_payload,
+        readiness_evaluation=readiness_evaluation,
+        recent_load=recent_load,
+        readiness_warnings=readiness_warnings,
+    )
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": reference_date.isoformat(),
+        "readiness": readiness_payload,
+        "recent_load": recent_load,
+        "risk_level": risk_level,
+        "reasons": reasons,
+        "recommendation": recommendation,
+    }
+
+
+def _build_readiness_snapshot(
+    db: Session,
+    athlete_id: int,
+    reference_date: date,
+) -> tuple[dict[str, Any], Any | None, list[str]]:
+    metric = _get_latest_daily_health_metric_until(db, athlete_id, reference_date)
+    if metric is None:
+        return {
+            "hrv_status": None,
+            "sleep_score": None,
+            "body_battery": None,
+            "resting_hr": None,
+            "stress": None,
+            "available": False,
+        }, None, ["No hay datos de salud disponibles hasta la fecha de referencia."]
+
+    summary = build_health_readiness_summary(db, athlete_id, metric.metric_date)
+    evaluation = evaluate_health_readiness(summary)
+    return {
+        "hrv_status": metric.hrv_status,
+        "sleep_score": metric.sleep_score,
+        "body_battery": metric.body_battery_morning or metric.body_battery_start or metric.body_battery_end,
+        "resting_hr": metric.resting_hr,
+        "stress": metric.stress_avg,
+        "available": True,
+    }, evaluation, []
+
+
+def _build_recent_load_summary(db: Session, athlete_id: int, reference_date: date) -> dict[str, Any]:
+    window_start = reference_date - (6 * date.resolution)
+    activities = _get_activities_in_date_range(db, athlete_id, window_start, reference_date)
+    sessions = _get_planned_sessions_in_date_range(db, athlete_id, window_start, reference_date)
+    garmin_sessions = list(activities)
+    manual_sessions = [
+        item
+        for item in sessions
+        if is_manually_completed_strength_session(item)
+        and not (item.activity_match is not None and getattr(item.activity_match, "garmin_activity", None) is not None)
+    ]
+    last_7_days_sessions = len(garmin_sessions) + len(manual_sessions)
+    last_7_days_duration_minutes = int(
+        round(
+            (
+                sum(int(getattr(item, "duration_sec", 0) or 0) for item in garmin_sessions)
+                + sum(int(completed_duration_sec(item) or 0) for item in manual_sessions)
+            ) / 60
+        )
+    )
+    hard_sessions_last_7_days = sum(1 for item in garmin_sessions if _is_hard_week_activity(item)) + sum(
+        1 for item in manual_sessions if _is_intense_planned_session(item)
+    )
+    long_sessions_last_7_days = sum(1 for item in garmin_sessions if int(getattr(item, "duration_sec", 0) or 0) >= 90 * 60) + sum(
+        1 for item in manual_sessions if int(completed_duration_sec(item) or 0) >= 90 * 60
+    )
+
+    return {
+        "last_7_days_sessions": last_7_days_sessions,
+        "last_7_days_duration_minutes": last_7_days_duration_minutes,
+        "hard_sessions_last_7_days": hard_sessions_last_7_days,
+        "long_sessions_last_7_days": long_sessions_last_7_days,
+    }
+
+
+def _evaluate_fatigue_risk(
+    *,
+    readiness_payload: dict[str, Any],
+    readiness_evaluation: Any | None,
+    recent_load: dict[str, Any],
+    readiness_warnings: list[str],
+) -> tuple[str, list[str], str]:
+    reasons: list[str] = []
+    reasons.extend(readiness_warnings)
+    risk_score = 0
+
+    if readiness_payload.get("available") and readiness_evaluation is not None:
+        readiness_score = getattr(readiness_evaluation, "readiness_score", None)
+        if readiness_score is not None:
+            reasons.append(f"Readiness local: {readiness_score} ({getattr(readiness_evaluation, 'readiness_label', None)}).")
+            if readiness_score < 50:
+                risk_score += 3
+            elif readiness_score < 65:
+                risk_score += 2
+        for reason in getattr(readiness_evaluation, "reasons", []) or []:
+            reasons.append(reason)
+
+        if _normalize_text_value(readiness_payload.get("hrv_status")) in {"low", "unbalanced"}:
+            risk_score += 2
+        if (readiness_payload.get("sleep_score") or 0) and int(readiness_payload["sleep_score"]) < 60:
+            risk_score += 1
+        if (readiness_payload.get("body_battery") or 100) < 35:
+            risk_score += 1
+        if (readiness_payload.get("stress") or 0) >= 45:
+            risk_score += 1
+    else:
+        if int(recent_load.get("last_7_days_duration_minutes") or 0) >= 360:
+            reasons.append("No hay datos de salud; el riesgo se estima solo por la carga reciente.")
+            risk_score += 2
+        else:
+            return "unknown", reasons or ["No hay datos suficientes para estimar fatiga."], "Sin datos de salud suficientes para decidir intensidad con confianza."
+
+    if int(recent_load.get("last_7_days_duration_minutes") or 0) >= 420:
+        risk_score += 2
+        reasons.append("El volumen de los ultimos 7 dias es alto.")
+    elif int(recent_load.get("last_7_days_duration_minutes") or 0) >= 300:
+        risk_score += 1
+        reasons.append("El volumen de los ultimos 7 dias es moderado-alto.")
+
+    if int(recent_load.get("hard_sessions_last_7_days") or 0) >= 3:
+        risk_score += 2
+        reasons.append("Hubo varias sesiones duras en los ultimos 7 dias.")
+    elif int(recent_load.get("hard_sessions_last_7_days") or 0) >= 2:
+        risk_score += 1
+        reasons.append("Hubo al menos dos sesiones duras recientes.")
+
+    if int(recent_load.get("long_sessions_last_7_days") or 0) >= 2:
+        risk_score += 1
+        reasons.append("Se acumularon sesiones largas en la ultima semana.")
+
+    if risk_score >= 6:
+        return "high", reasons, "Conviene bajar carga o evitar intensidad hasta recuperar mejores senales."
+    if risk_score >= 3:
+        return "moderate", reasons, "Se puede entrenar, pero conviene controlar volumen e intensidad."
+    return "low", reasons, "No aparecen senales fuertes de fatiga; si las sensaciones acompanan, se puede sostener el plan."
+
+
+def _build_week_strategy_summary_payload(
+    db: Session,
+    athlete: Athlete,
+    week_start_date: date,
+) -> dict[str, Any]:
+    sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=week_start_date)
+    estimated_total_minutes = sum(_planned_session_duration_minutes(item) for item in sessions)
+    key_sessions = [item for item in sessions if _is_intense_planned_session(item)]
+    optional_sessions = [item for item in sessions if _is_optional_session(item)]
+    easy_sessions = [item for item in sessions if item not in key_sessions and item not in optional_sessions]
+    long_session = _pick_long_session(sessions)
+    goals_in_week = _get_goals_in_range(db, athlete.id, week_start_date, _week_end_from_start(week_start_date))
+    goals_next_14d = _get_goals_in_range(db, athlete.id, week_start_date, week_start_date + (13 * date.resolution))
+    warnings: list[str] = []
+    if not sessions:
+        warnings.append("No hay sesiones planificadas para esta semana.")
+    strategy_label = _infer_week_strategy_label(
+        sessions=sessions,
+        goals_in_week=goals_in_week,
+        goals_next_14d=goals_next_14d,
+        estimated_total_minutes=estimated_total_minutes,
+        key_sessions=key_sessions,
+        easy_sessions=easy_sessions,
+        long_session=long_session,
+    )
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "week_start_date": week_start_date.isoformat(),
+        "sessions_count": len(sessions),
+        "running_sessions": sum(1 for item in sessions if _sport_bucket(item.sport_type) == "running"),
+        "strength_sessions": sum(1 for item in sessions if _sport_bucket(item.sport_type) == "strength"),
+        "cycling_sessions": sum(1 for item in sessions if _sport_bucket(item.sport_type) == "cycling"),
+        "key_sessions": [_serialize_conversational_session(item) for item in key_sessions],
+        "easy_sessions": [_serialize_conversational_session(item) for item in easy_sessions],
+        "optional_sessions": [_serialize_conversational_session(item) for item in optional_sessions],
+        "long_session": _serialize_conversational_session(long_session) if long_session is not None else None,
+        "estimated_total_minutes": estimated_total_minutes,
+        "strategy_label": strategy_label,
+        "summary": _build_week_strategy_summary_text(strategy_label, len(sessions), key_sessions, long_session, optional_sessions),
+        "warnings": warnings,
+    }
+
+
+def _pick_long_session(sessions: list[PlannedSession]) -> PlannedSession | None:
+    if not sessions:
+        return None
+    candidate = max(sessions, key=lambda item: _planned_session_duration_minutes(item))
+    return candidate if _planned_session_duration_minutes(candidate) >= 75 else None
+
+
+def _infer_week_strategy_label(
+    *,
+    sessions: list[PlannedSession],
+    goals_in_week: list[Goal],
+    goals_next_14d: list[Goal],
+    estimated_total_minutes: int,
+    key_sessions: list[PlannedSession],
+    easy_sessions: list[PlannedSession],
+    long_session: PlannedSession | None,
+) -> str:
+    if goals_in_week:
+        return "race_week"
+
+    text = " ".join(
+        str(item).lower()
+        for session in sessions
+        for item in (session.name, session.target_notes, session.description_text)
+        if item
+    )
+    specific_tokens = ("maraton", "marathon", "media", "21k", "42k", "race pace", "umbral")
+    if long_session is not None and len(key_sessions) >= 2 and any(token in text for token in specific_tokens):
+        return "specific"
+
+    if goals_next_14d and estimated_total_minutes <= 180 and len(key_sessions) <= 1:
+        return "taper"
+
+    if estimated_total_minutes <= 120 and len(easy_sessions) >= max(1, len(sessions) - len(key_sessions)) and len(key_sessions) == 0:
+        return "recovery"
+
+    if long_session is not None and estimated_total_minutes >= 240 and len(key_sessions) >= 1:
+        return "build"
+
+    if estimated_total_minutes >= 180 and len(key_sessions) == 0 and len(easy_sessions) >= max(2, len(sessions) // 2):
+        return "base"
+
+    return "mixed"
+
+
+def _build_week_strategy_summary_text(
+    strategy_label: str,
+    sessions_count: int,
+    key_sessions: list[PlannedSession],
+    long_session: PlannedSession | None,
+    optional_sessions: list[PlannedSession],
+) -> str:
+    label_text = {
+        "recovery": "Semana orientada a recuperar y bajar carga.",
+        "base": "Semana orientada a sostener base aeróbica y consistencia.",
+        "build": "Semana orientada a construir carga y estimular sesiones clave.",
+        "specific": "Semana con señales de trabajo especifico hacia un objetivo concreto.",
+        "taper": "Semana de descarga o afinado previo a un objetivo cercano.",
+        "race_week": "Semana de competencia con objetivo dentro de la misma semana.",
+        "mixed": "Semana mixta sin un patron dominante completamente claro.",
+    }.get(strategy_label, "Semana mixta.")
+    extras: list[str] = [f"{sessions_count} sesiones planificadas."]
+    if key_sessions:
+        extras.append(f"{len(key_sessions)} sesiones clave.")
+    if long_session is not None:
+        extras.append(f"Hay un fondo o sesion larga: {long_session.name}.")
+    if optional_sessions:
+        extras.append(f"{len(optional_sessions)} sesiones opcionales.")
+    return f"{label_text} {' '.join(extras)}".strip()
+
+
+def _build_training_dashboard_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+) -> dict[str, Any]:
+    week_start_date = _week_start_from_date(reference_date)
+    fatigue_risk = _build_fatigue_risk_payload(db, athlete, reference_date)
+    remaining_week_plan = get_remaining_week_plan(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date.isoformat(),
+        db=db,
+    )
+    current_week_adherence = get_week_adherence(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date.isoformat(),
+        db=db,
+    )
+    next_session = get_next_planned_session(
+        athlete_id=athlete.id,
+        reference_date=reference_date.isoformat(),
+        db=db,
+    )
+    last_activity = _get_latest_activity_until(db, athlete.id, reference_date)
+    readiness_summary = fatigue_risk["readiness"]
+    current_week_summary = {
+        **current_week_adherence,
+        "week_start_date": week_start_date.isoformat(),
+    }
+    last_activity_summary = _serialize_activity_recent(last_activity) if last_activity is not None else None
+    key_message, recommended_focus = _build_dashboard_messages(
+        fatigue_risk=fatigue_risk,
+        remaining_week_plan=remaining_week_plan,
+        next_session=next_session,
+        current_week_summary=current_week_summary,
+        last_activity_summary=last_activity_summary,
+    )
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": reference_date.isoformat(),
+        "readiness_summary": readiness_summary,
+        "current_week_summary": current_week_summary,
+        "remaining_week_plan": remaining_week_plan,
+        "next_session": next_session,
+        "fatigue_risk": fatigue_risk,
+        "last_activity_summary": last_activity_summary,
+        "key_message": key_message,
+        "recommended_focus": recommended_focus,
+    }
+
+
+def _build_dashboard_messages(
+    *,
+    fatigue_risk: dict[str, Any],
+    remaining_week_plan: dict[str, Any],
+    next_session: dict[str, Any],
+    current_week_summary: dict[str, Any],
+    last_activity_summary: dict[str, Any] | None,
+) -> tuple[str, str]:
+    risk_level = fatigue_risk.get("risk_level")
+    if risk_level == "high":
+        return (
+            "Hoy la prioridad es controlar fatiga antes de seguir sumando intensidad.",
+            "Bajar carga o convertir la proxima sesion en trabajo facil.",
+        )
+    if risk_level == "moderate":
+        return (
+            "El panorama general permite entrenar, pero conviene monitorear la carga acumulada.",
+            "Sostener el plan con prudencia y ajustar si las sensaciones no acompanan.",
+        )
+    if current_week_summary.get("adherence_percent") == 0 and int(remaining_week_plan.get("remaining_sessions") or 0) > 0:
+        return (
+            "La semana todavia no despego y quedan sesiones exigibles por cumplir.",
+            "Ordenar la semana y priorizar la proxima sesion pendiente.",
+        )
+    if next_session.get("message"):
+        return (
+            "No hay una proxima sesion pendiente definida en el plan.",
+            "Revisar el calendario y confirmar el siguiente bloque de entrenamiento.",
+        )
+    if last_activity_summary is None:
+        return (
+            "Falta actividad reciente para leer con contexto como viene el bloque.",
+            "Seguir el plan y registrar el proximo entrenamiento para mejorar la lectura.",
+        )
+    return (
+        "El panorama general aparece estable y con continuidad de entrenamiento.",
+        "Mantener el foco en la proxima sesion y en completar lo que queda de la semana.",
+    )
+
+
+def _get_activities_in_date_range(db: Session, athlete_id: int, start_date: date, end_date: date) -> list[GarminActivity]:
+    return list(
+        db.scalars(
+            select(GarminActivity)
+            .where(
+                GarminActivity.athlete_id == athlete_id,
+                GarminActivity.start_time.is_not(None),
+                func.date(GarminActivity.start_time) >= start_date.isoformat(),
+                func.date(GarminActivity.start_time) <= end_date.isoformat(),
+            )
+            .order_by(GarminActivity.start_time.asc(), GarminActivity.id.asc())
+            .options(*_compare_loader_options())
+        ).all()
+    )
+
+
+def _get_planned_sessions_in_date_range(db: Session, athlete_id: int, start_date: date, end_date: date) -> list[PlannedSession]:
+    return list(
+        db.scalars(
+            select(PlannedSession)
+            .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+            .where(
+                PlannedSession.athlete_id == athlete_id,
+                TrainingDay.day_date >= start_date,
+                TrainingDay.day_date <= end_date,
+            )
+            .order_by(TrainingDay.day_date.asc(), PlannedSession.session_order.asc(), PlannedSession.id.asc())
+            .options(*_planned_compare_loader_options())
+        ).all()
+    )
+
+
+def _get_goals_in_range(db: Session, athlete_id: int, start_date: date, end_date: date) -> list[Goal]:
+    return list(
+        db.scalars(
+            select(Goal)
+            .where(
+                Goal.athlete_id == athlete_id,
+                Goal.event_date.is_not(None),
+                Goal.event_date >= start_date,
+                Goal.event_date <= end_date,
+            )
+            .order_by(Goal.event_date.asc(), Goal.id.asc())
+        ).all()
+    )
+
+
+def _normalize_text_value(value: Any) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _build_plan_adjustment_suggestions_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+) -> dict[str, Any]:
+    fatigue = _build_fatigue_risk_payload(db, athlete, reference_date)
+    week_start = _week_start_from_date(reference_date)
+    remaining = get_remaining_week_plan(
+        athlete_id=athlete.id,
+        week_start_date=week_start.isoformat(),
+        db=db,
+    )
+    strategy = _build_week_strategy_summary_payload(db, athlete, week_start)
+    adherence = get_week_adherence(
+        athlete_id=athlete.id,
+        week_start_date=week_start.isoformat(),
+        db=db,
+    )
+
+    sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=week_start)
+    suggestions: list[dict[str, Any]] = []
+    risk_level = fatigue.get("risk_level", "unknown")
+
+    remaining_by_id = {
+        item.id: item
+        for item in sessions
+        if _is_pending_session(item, reference_date=reference_date)
+    }
+
+    if risk_level == "low":
+        for session in remaining_by_id.values():
+            suggestions.append(
+                _make_adjustment_suggestion(
+                    "keep",
+                    session,
+                    reason="No aparecen senales fuertes de fatiga ni de sobrecarga.",
+                    suggested_change="Mantener la sesion segun lo planificado.",
+                    priority="low",
+                )
+            )
+    elif risk_level == "moderate":
+        for session in remaining_by_id.values():
+            if _is_optionalish_session(session):
+                suggestions.append(
+                    _make_adjustment_suggestion(
+                        "cancel_optional",
+                        session,
+                        reason="Con riesgo moderado conviene empezar ajustando la carga opcional.",
+                        suggested_change="Si hace falta recortar, saltear o acortar esta sesion opcional.",
+                        priority="medium",
+                    )
+                )
+            elif _is_intense_planned_session(session):
+                suggestions.append(
+                    _make_adjustment_suggestion(
+                        "reduce",
+                        session,
+                        reason="La sesion exige intensidad y el contexto sugiere prudencia.",
+                        suggested_change="Bajar volumen o intensidad y monitorear sensaciones.",
+                        priority="medium",
+                    )
+                )
+            else:
+                suggestions.append(
+                    _make_adjustment_suggestion(
+                        "monitor",
+                        session,
+                        reason="La carga no obliga a cambiar todo, pero conviene vigilar la respuesta.",
+                        suggested_change="Mantener con control de sensaciones y opcion de acortar.",
+                        priority="low",
+                    )
+                )
+    elif risk_level == "high":
+        for session in remaining_by_id.values():
+            if _is_optionalish_session(session):
+                suggestions.append(
+                    _make_adjustment_suggestion(
+                        "cancel_optional",
+                        session,
+                        reason="El riesgo alto hace prioritario recortar carga no esencial.",
+                        suggested_change="Cancelar esta sesion opcional.",
+                        priority="high",
+                    )
+                )
+            elif _is_intense_planned_session(session):
+                suggestions.append(
+                    _make_adjustment_suggestion(
+                        "replace",
+                        session,
+                        reason="La sesion es exigente para el nivel de fatiga actual.",
+                        suggested_change="Reemplazar por trabajo muy facil o regenerativo.",
+                        priority="high",
+                    )
+                )
+            else:
+                suggestions.append(
+                    _make_adjustment_suggestion(
+                        "reduce",
+                        session,
+                        reason="Aunque no sea clave, la carga total aconseja bajar estimulo.",
+                        suggested_change="Reducir duracion o moverla si no mejora la recuperacion.",
+                        priority="medium",
+                    )
+                )
+    else:
+        for session in remaining_by_id.values():
+            suggestions.append(
+                _make_adjustment_suggestion(
+                    "monitor",
+                    session,
+                    reason="No hay datos suficientes para proponer un cambio fuerte con seguridad.",
+                    suggested_change="Mantener vigilancia antes de decidir un ajuste.",
+                    priority="low",
+                )
+            )
+
+    warnings: list[str] = []
+    if not suggestions:
+        warnings.append("No hay sesiones pendientes para evaluar ajustes esta semana.")
+
+    current_week_summary = {
+        "adherence_percent": adherence.get("adherence_percent"),
+        "strategy_label": strategy.get("strategy_label"),
+        "estimated_total_minutes": strategy.get("estimated_total_minutes"),
+        "remaining_sessions": remaining.get("remaining_sessions"),
+        "optional_sessions": remaining.get("optional_sessions"),
+    }
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": reference_date.isoformat(),
+        "risk_level": risk_level,
+        "current_week_summary": current_week_summary,
+        "remaining_sessions": remaining.get("sessions", []),
+        "suggestions": suggestions,
+        "summary": _build_plan_adjustment_summary(risk_level, suggestions),
+        "warnings": warnings,
+    }
+
+
+def _make_adjustment_suggestion(
+    suggestion_type: str,
+    session: PlannedSession,
+    *,
+    reason: str,
+    suggested_change: str,
+    priority: str,
+) -> dict[str, Any]:
+    return {
+        "type": suggestion_type,
+        "session_id": session.id,
+        "date": session.training_day.day_date.isoformat() if session.training_day and session.training_day.day_date else None,
+        "sport": _normalize_sport_value(session.sport_type) or session.sport_type,
+        "name": session.name,
+        "reason": reason,
+        "suggested_change": suggested_change,
+        "priority": priority,
+    }
+
+
+def _build_plan_adjustment_summary(risk_level: str, suggestions: list[dict[str, Any]]) -> str:
+    if not suggestions:
+        return "No hay sesiones pendientes para ajustar."
+    if risk_level == "low":
+        return "El contexto actual no obliga a tocar el plan; la sugerencia principal es mantener."
+    if risk_level == "moderate":
+        return "Conviene revisar opcionales e intensidad antes de sumar mas carga."
+    if risk_level == "high":
+        return "Hay razones para bajar carga esta semana, empezando por opcionales y sesiones intensas."
+    return "Faltan datos para proponer cambios fuertes; conviene decidir con prudencia."
+
+
+def _build_next_session_decision_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+    *,
+    planned_session_id: int | None,
+) -> dict[str, Any]:
+    session = (
+        _load_planned_session_for_compare(db, athlete.id, planned_session_id)
+        if planned_session_id is not None else _find_next_pending_session(db, athlete=athlete, reference_date=reference_date)
+    )
+    if session is None:
+        return {
+            "athlete": _serialize_athlete_min(athlete),
+            "reference_date": reference_date.isoformat(),
+            "message": "No hay proxima sesion pendiente.",
+        }
+
+    fatigue = _build_fatigue_risk_payload(db, athlete, reference_date)
+    readiness = fatigue.get("readiness")
+    risk_level = fatigue.get("risk_level")
+    optionalish = _is_optionalish_session(session)
+    intense = _is_intense_planned_session(session)
+    decision = "keep"
+    reason = "El contexto actual permite sostener la sesion."
+    recommended_execution = "Mantener la sesion segun lo planificado."
+    watchouts: list[str] = []
+
+    if optionalish and risk_level in {"moderate", "high"}:
+        decision = "cancel_optional"
+        reason = "La sesion es opcional y el riesgo actual no justifica sumar esa carga."
+        recommended_execution = "Saltearla o usarla solo si la recuperacion mejora claramente."
+    elif intense and risk_level == "high":
+        decision = "postpone"
+        reason = "La sesion es exigente para el nivel de fatiga actual."
+        recommended_execution = "Postergarla o reemplazarla por trabajo regenerativo."
+    elif intense and risk_level == "moderate":
+        decision = "reduce"
+        reason = "Hay fatiga suficiente como para moderar una sesion intensa."
+        recommended_execution = "Bajar bloques, intensidad o duracion total."
+    elif risk_level == "unknown":
+        decision = "unknown"
+        reason = "Faltan datos suficientes para decidir con confianza."
+        recommended_execution = "Tomar la decision con sensaciones y, si hace falta, elegir una version mas facil."
+
+    if readiness and not readiness.get("available"):
+        watchouts.append("No hay datos de salud recientes.")
+    if intense:
+        watchouts.append("Es una sesion potencialmente exigente.")
+    if optionalish:
+        watchouts.append("La sesion parece opcional o complementaria.")
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": reference_date.isoformat(),
+        "session": _serialize_conversational_session_detail(session),
+        "readiness": readiness,
+        "fatigue_risk": fatigue,
+        "decision": decision,
+        "reason": reason,
+        "recommended_execution": recommended_execution,
+        "watchouts": watchouts,
+    }
+
+
+def _build_optional_session_impact_payload(
+    db: Session,
+    athlete: Athlete,
+    *,
+    planned_session_id: int | None,
+    date_value: str | None,
+    sport: str | None,
+) -> dict[str, Any]:
+    session = _resolve_optional_session_target(
+        db,
+        athlete.id,
+        planned_session_id=planned_session_id,
+        date_value=date_value,
+        sport=sport,
+    )
+    if session is None:
+        return {
+            "athlete": _serialize_athlete_min(athlete),
+            "target_session": None,
+            "impact_level": "unknown",
+            "impact_summary": "No se pudo resolver una sesion objetivo.",
+            "alternatives": [],
+            "recommendation": "Indica SESSION_ID o DATE + SPORT para analizar el impacto.",
+        }
+
+    optionalish = _is_optionalish_session(session)
+    intense = _is_intense_planned_session(session)
+    bucket = _sport_bucket(session.sport_type)
+    impact_level = "low"
+    impact_summary = "Saltearla tendria impacto acotado."
+    recommendation = "Se puede omitir si hace falta bajar carga."
+
+    if optionalish:
+        impact_level = "low"
+        impact_summary = "La sesion parece opcional, asi que omitirla no deberia alterar demasiado la logica semanal."
+        if bucket == "strength":
+            recommendation = "Si la fatiga esta alta, es una buena candidata para recortar."
+    elif intense or _looks_like_long_session(session):
+        impact_level = "high" if _looks_like_long_session(session) else "moderate"
+        impact_summary = "Omitirla cambia parte importante del objetivo semanal."
+        recommendation = "Conviene moverla o reemplazarla por una version reducida antes que cancelarla sin mas."
+    elif bucket == "strength":
+        impact_level = "moderate"
+        impact_summary = "La sesion suma complemento util, pero su ausencia no rompe toda la semana."
+        recommendation = "Si se saltea, compensar con movilidad o fuerza corta otro dia."
+
+    alternatives = _build_optional_session_alternatives(session, impact_level)
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "target_session": _serialize_conversational_session_detail(session),
+        "impact_level": impact_level,
+        "impact_summary": impact_summary,
+        "alternatives": alternatives,
+        "recommendation": recommendation,
+    }
+
+
+def _build_optional_session_alternatives(session: PlannedSession, impact_level: str) -> list[dict[str, str]]:
+    if impact_level in {"none", "low"}:
+        return [
+            {"option": "skip", "description": "No hacer la sesion y priorizar recuperacion."},
+            {"option": "shorten", "description": "Hacer una version corta solo si te sentis bien."},
+        ]
+    return [
+        {"option": "move", "description": "Moverla a otro dia de la semana si mejora la recuperacion."},
+        {"option": "reduce", "description": "Hacer una version reducida en lugar de cancelarla del todo."},
+    ]
+
+
+def _resolve_optional_session_target(
+    db: Session,
+    athlete_id: int,
+    *,
+    planned_session_id: int | None,
+    date_value: str | None,
+    sport: str | None,
+) -> PlannedSession | None:
+    if planned_session_id is not None:
+        return _load_planned_session_for_compare(db, athlete_id, planned_session_id)
+    if not date_value or not sport:
+        return None
+    target_date = _parse_iso_date(date_value, "date")
+    target_sport = _normalize_sport_value(sport) or sport
+    candidates = _get_planned_sessions_for_date(db, athlete_id, target_date)
+    return next(
+        (item for item in candidates if (_normalize_sport_value(item.sport_type) or item.sport_type) == target_sport),
+        None,
+    )
+
+
+def _build_plan_adjustment_import_text_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+    *,
+    adjustment_type: str,
+    planned_session_id: int | None,
+    reason: str | None,
+) -> dict[str, Any]:
+    warnings: list[str] = []
+    session = _resolve_adjustment_target_session(
+        db,
+        athlete,
+        reference_date,
+        adjustment_type=adjustment_type,
+        planned_session_id=planned_session_id,
+    )
+    if session is None:
+        return {
+            "athlete": _serialize_athlete_min(athlete),
+            "generated": False,
+            "import_text": None,
+            "explanation": "No hay una sesion objetivo segura para generar el importable.",
+            "requires_preview": True,
+            "requires_commit_confirmation": True,
+            "warnings": warnings,
+        }
+
+    final_reason = (reason or "").strip() or _default_adjustment_reason(adjustment_type)
+    import_text = _build_import_text_for_adjustment(
+        athlete=athlete,
+        session=session,
+        adjustment_type=adjustment_type,
+        reason=final_reason,
+    )
+    if import_text is None:
+        return {
+            "athlete": _serialize_athlete_min(athlete),
+            "generated": False,
+            "import_text": None,
+            "explanation": "No se pudo generar un bloque importable compatible de forma segura.",
+            "requires_preview": True,
+            "requires_commit_confirmation": True,
+            "warnings": warnings,
+        }
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "generated": True,
+        "import_text": import_text,
+        "explanation": _build_import_adjustment_explanation(adjustment_type, session),
+        "requires_preview": True,
+        "requires_commit_confirmation": True,
+        "warnings": warnings,
+    }
+
+
+def _resolve_adjustment_target_session(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+    *,
+    adjustment_type: str,
+    planned_session_id: int | None,
+) -> PlannedSession | None:
+    if planned_session_id is not None:
+        return _load_planned_session_for_compare(db, athlete.id, planned_session_id)
+    if adjustment_type == "cancel_optional":
+        week_start = _week_start_from_date(reference_date)
+        sessions = _get_week_planned_sessions(db, athlete=athlete, week_start_date=week_start)
+        for session in sessions:
+            if _is_pending_session(session, reference_date=reference_date) and _is_optionalish_session(session):
+                return session
+        return None
+    return _find_next_pending_session(db, athlete=athlete, reference_date=reference_date)
+
+
+def _default_adjustment_reason(adjustment_type: str) -> str:
+    defaults = {
+        "reduce_next": "fatiga acumulada",
+        "cancel_optional": "recorte de carga opcional",
+        "replace_with_recovery": "recuperacion prioritaria",
+        "custom": "ajuste propuesto",
+    }
+    return defaults.get(adjustment_type, "ajuste propuesto")
+
+
+def _build_import_text_for_adjustment(
+    *,
+    athlete: Athlete,
+    session: PlannedSession,
+    adjustment_type: str,
+    reason: str,
+) -> str | None:
+    session_date = session.training_day.day_date if session.training_day else None
+    if session_date is None:
+        return None
+    week_start = _week_start_from_date(session_date)
+    week_end = _week_end_from_start(week_start)
+    header = [
+        "WEEK",
+        f"ATHLETE_ID: {athlete.id}",
+        f"ATHLETE_NAME: {athlete.name}",
+        f"START_DATE: {week_start.isoformat()}",
+        f"END_DATE: {week_end.isoformat()}",
+        "MODE: preview",
+        "",
+        "SESSION",
+    ]
+
+    if adjustment_type == "cancel_optional":
+        body = [
+            "ACTION: cancel",
+            f"SESSION_ID: {session.id}",
+            f"REASON: {reason}",
+            "",
+            "END",
+        ]
+        return "\n".join(header + body)
+
+    reduced_minutes = _reduced_duration_minutes(session)
+    notes = _import_adjustment_notes(session, adjustment_type, reason)
+    body = [
+        "ACTION: update",
+        f"SESSION_ID: {session.id}",
+        f"DATE: {session_date.isoformat()}",
+        f"SPORT: {_normalize_sport_value(session.sport_type) or session.sport_type}",
+        f"NAME: {session.name}",
+        f"NOTES: {notes}",
+        "",
+        "BLOCK",
+        f"VALUE: {reduced_minutes if adjustment_type == 'reduce_next' else 30}",
+        "UNIT: min",
+        "",
+        "END",
+    ]
+    return "\n".join(header + body)
+
+
+def _reduced_duration_minutes(session: PlannedSession) -> int:
+    original = max(_planned_session_duration_minutes(session), 20)
+    return max(20, int(round(original * 0.7)))
+
+
+def _import_adjustment_notes(session: PlannedSession, adjustment_type: str, reason: str) -> str:
+    if adjustment_type == "replace_with_recovery":
+        return f"Reemplazar por recuperacion suave. Motivo: {reason}."
+    if adjustment_type == "reduce_next":
+        return f"Reducir carga respecto al plan original. Motivo: {reason}."
+    return f"Ajuste propuesto. Motivo: {reason}."
+
+
+def _build_import_adjustment_explanation(adjustment_type: str, session: PlannedSession) -> str:
+    if adjustment_type == "cancel_optional":
+        return f"Se genero un bloque para cancelar la sesion {session.name} sin aplicarlo."
+    if adjustment_type == "replace_with_recovery":
+        return f"Se genero un bloque para convertir {session.name} en una sesion de recuperacion."
+    return f"Se genero un bloque para reducir la sesion {session.name} sin aplicarlo."
+
+
+def _build_training_decision_context_payload(
+    db: Session,
+    athlete: Athlete,
+    reference_date: date,
+) -> dict[str, Any]:
+    week_start = _week_start_from_date(reference_date)
+    fatigue = _build_fatigue_risk_payload(db, athlete, reference_date)
+    strategy = _build_week_strategy_summary_payload(db, athlete, week_start)
+    remaining = get_remaining_week_plan(
+        athlete_id=athlete.id,
+        week_start_date=week_start.isoformat(),
+        db=db,
+    )
+    next_session = get_next_planned_session(
+        athlete_id=athlete.id,
+        reference_date=reference_date.isoformat(),
+        db=db,
+    )
+    last_7_days = _build_recent_load_summary(db, athlete.id, reference_date)
+    factors = _build_training_decision_factors(
+        fatigue_risk=fatigue,
+        strategy=strategy,
+        remaining=remaining,
+        next_session=next_session,
+    )
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "reference_date": reference_date.isoformat(),
+        "last_7_days": last_7_days,
+        "readiness": fatigue.get("readiness"),
+        "week_strategy": strategy,
+        "remaining_week": remaining,
+        "next_session": next_session,
+        "fatigue_risk": fatigue,
+        "key_decision_factors": factors,
+        "summary": _build_training_decision_context_summary(factors),
+    }
+
+
+def _build_training_decision_factors(
+    *,
+    fatigue_risk: dict[str, Any],
+    strategy: dict[str, Any],
+    remaining: dict[str, Any],
+    next_session: dict[str, Any],
+) -> list[str]:
+    factors: list[str] = []
+    if fatigue_risk.get("risk_level"):
+        factors.append(f"Riesgo de fatiga: {fatigue_risk['risk_level']}.")
+    if strategy.get("strategy_label"):
+        factors.append(f"Estrategia semanal: {strategy['strategy_label']}.")
+    if int(remaining.get("remaining_sessions") or 0) > 0:
+        factors.append(f"Quedan {remaining['remaining_sessions']} sesiones exigibles esta semana.")
+    if next_session.get("name"):
+        factors.append(f"Proxima sesion: {next_session['name']}.")
+    elif next_session.get("message"):
+        factors.append(next_session["message"])
+    return factors
+
+
+def _build_training_decision_context_summary(factors: list[str]) -> str:
+    if not factors:
+        return "No hay suficiente contexto para decidir cambios en el plan."
+    return " ".join(factors)
+
+
+def _is_optionalish_session(session: PlannedSession) -> bool:
+    return _normalized_session_type(session) == "optional"
+
+
+def _looks_like_long_session(session: PlannedSession) -> bool:
+    text = " ".join(
+        str(item).lower()
+        for item in (session.name, session.target_notes, session.description_text, session.session_type)
+        if item
+    )
+    return _planned_session_duration_minutes(session) >= 90 or "fondo" in text or "long" in text
 
 
 def _planned_session_day_status(session: PlannedSession, matches: list[dict[str, Any]]) -> str:

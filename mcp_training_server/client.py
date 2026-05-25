@@ -260,6 +260,138 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def get_week_comparison(
+        self,
+        *,
+        athlete_id: int,
+        week_start_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json("/api/mcp/week-comparison", params=params)
+
+    async def get_training_load_trend(
+        self,
+        *,
+        athlete_id: int,
+        weeks: int = 4,
+    ) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/training-load-trend",
+            params={
+                "athlete_id": str(int(athlete_id)),
+                "weeks": str(max(2, int(weeks))),
+            },
+        )
+
+    async def get_fatigue_risk_summary(
+        self,
+        *,
+        athlete_id: int,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/fatigue-risk-summary", params=params)
+
+    async def get_week_strategy_summary(
+        self,
+        *,
+        athlete_id: int,
+        week_start_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json("/api/mcp/week-strategy-summary", params=params)
+
+    async def get_training_dashboard(
+        self,
+        *,
+        athlete_id: int,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/training-dashboard", params=params)
+
+    async def get_plan_adjustment_suggestions(
+        self,
+        *,
+        athlete_id: int,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/plan-adjustment-suggestions", params=params)
+
+    async def get_next_session_decision(
+        self,
+        *,
+        athlete_id: int,
+        reference_date: str | None = None,
+        planned_session_id: int | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if reference_date:
+            params["reference_date"] = reference_date
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        return await self._get_json("/api/mcp/next-session-decision", params=params)
+
+    async def get_optional_session_impact(
+        self,
+        *,
+        athlete_id: int,
+        planned_session_id: int | None = None,
+        date: str | None = None,
+        sport: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if date:
+            params["date"] = date
+        if sport:
+            params["sport"] = sport
+        return await self._get_json("/api/mcp/optional-session-impact", params=params)
+
+    async def generate_plan_adjustment_import_text(
+        self,
+        *,
+        athlete_id: int,
+        adjustment_type: str,
+        reference_date: str | None = None,
+        planned_session_id: int | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        params = {
+            "athlete_id": str(int(athlete_id)),
+            "adjustment_type": adjustment_type,
+        }
+        if reference_date:
+            params["reference_date"] = reference_date
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if reason:
+            params["reason"] = reason
+        return await self._get_json("/api/mcp/generate-plan-adjustment-import-text", params=params)
+
+    async def get_training_decision_context(
+        self,
+        *,
+        athlete_id: int,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/training-decision-context", params=params)
+
     async def get_session_analysis_payload(
         self,
         *,
@@ -380,6 +512,138 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def get_my_week_comparison(
+        self,
+        *,
+        access_code: str,
+        week_start_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json("/api/mcp/me/week-comparison", params=params)
+
+    async def get_my_training_load_trend(
+        self,
+        *,
+        access_code: str,
+        weeks: int = 4,
+    ) -> dict[str, Any]:
+        return await self._get_json(
+            "/api/mcp/me/training-load-trend",
+            params={
+                "access_code": access_code,
+                "weeks": str(max(2, int(weeks))),
+            },
+        )
+
+    async def get_my_fatigue_risk_summary(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/me/fatigue-risk-summary", params=params)
+
+    async def get_my_week_strategy_summary(
+        self,
+        *,
+        access_code: str,
+        week_start_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        return await self._get_json("/api/mcp/me/week-strategy-summary", params=params)
+
+    async def get_my_training_dashboard(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/me/training-dashboard", params=params)
+
+    async def get_my_plan_adjustment_suggestions(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/me/plan-adjustment-suggestions", params=params)
+
+    async def get_my_next_session_decision(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+        planned_session_id: int | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        return await self._get_json("/api/mcp/me/next-session-decision", params=params)
+
+    async def get_my_optional_session_impact(
+        self,
+        *,
+        access_code: str,
+        planned_session_id: int | None = None,
+        date: str | None = None,
+        sport: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if date:
+            params["date"] = date
+        if sport:
+            params["sport"] = sport
+        return await self._get_json("/api/mcp/me/optional-session-impact", params=params)
+
+    async def get_my_plan_adjustment_import_text(
+        self,
+        *,
+        access_code: str,
+        adjustment_type: str,
+        reference_date: str | None = None,
+        planned_session_id: int | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
+        params = {
+            "access_code": access_code,
+            "adjustment_type": adjustment_type,
+        }
+        if reference_date:
+            params["reference_date"] = reference_date
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if reason:
+            params["reason"] = reason
+        return await self._get_json("/api/mcp/me/generate-plan-adjustment-import-text", params=params)
+
+    async def get_my_training_decision_context(
+        self,
+        *,
+        access_code: str,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/me/training-decision-context", params=params)
+
     async def get_my_session_analysis_payload(
         self,
         *,
@@ -406,6 +670,16 @@ class TrainingAppApiClient:
             json_payload["athlete_id"] = self.settings.training_api_athlete_id
         return await self._post_json(
             "/api/mcp/plan-import/preview",
+            json_payload=json_payload,
+            token_kind="read",
+        )
+
+    async def verify_plan_import(self, *, import_text: str) -> dict[str, Any]:
+        json_payload: dict[str, Any] = {"import_text": import_text}
+        if self.settings.training_api_athlete_id is not None:
+            json_payload["athlete_id"] = self.settings.training_api_athlete_id
+        return await self._post_json(
+            "/api/mcp/plan-import/verify",
             json_payload=json_payload,
             token_kind="read",
         )

@@ -41,9 +41,30 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 - `get_my_today_remaining_sessions(access_code: str)` sesiones pendientes de hoy por clave
 - `get_week_adherence(athlete_id: int, week_start_date: str | None = None)` cumplimiento semanal
 - `get_my_week_adherence(access_code: str, week_start_date: str | None = None)` cumplimiento semanal por clave
+- `get_week_comparison(athlete_id: int, week_start_date: str | None = None)` comparacion de semana contra semana previa
+- `get_my_week_comparison(access_code: str, week_start_date: str | None = None)` comparacion semanal por clave
+- `get_training_load_trend(athlete_id: int, weeks: int = 4)` tendencia reciente de carga
+- `get_my_training_load_trend(access_code: str, weeks: int = 4)` tendencia reciente de carga por clave
+- `get_fatigue_risk_summary(athlete_id: int, reference_date: str | None = None)` riesgo de fatiga
+- `get_my_fatigue_risk_summary(access_code: str, reference_date: str | None = None)` riesgo de fatiga por clave
+- `get_week_strategy_summary(athlete_id: int, week_start_date: str | None = None)` estrategia de la semana
+- `get_my_week_strategy_summary(access_code: str, week_start_date: str | None = None)` estrategia de la semana por clave
+- `get_training_dashboard(athlete_id: int, reference_date: str | None = None)` panorama general compuesto
+- `get_my_training_dashboard(access_code: str, reference_date: str | None = None)` panorama general compuesto por clave
+- `get_plan_adjustment_suggestions(athlete_id: int, reference_date: str | None = None)` sugerencias read-only de ajuste
+- `get_my_plan_adjustment_suggestions(access_code: str, reference_date: str | None = None)` sugerencias read-only de ajuste por clave
+- `get_next_session_decision(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)` decision sobre proxima sesion
+- `get_my_next_session_decision(access_code: str, reference_date: str | None = None, planned_session_id: int | None = None)` decision sobre proxima sesion por clave
+- `get_optional_session_impact(athlete_id: int, planned_session_id: int | None = None, date: str | None = None, sport: str | None = None)` impacto de omitir una sesion
+- `get_my_optional_session_impact(access_code: str, planned_session_id: int | None = None, date: str | None = None, sport: str | None = None)` impacto por clave
+- `generate_plan_adjustment_import_text(athlete_id: int, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)` texto importable V2 sin aplicar
+- `get_my_plan_adjustment_import_text(access_code: str, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)` texto importable V2 por clave
+- `get_training_decision_context(athlete_id: int, reference_date: str | None = None)` contexto compuesto para decidir ajustes
+- `get_my_training_decision_context(access_code: str, reference_date: str | None = None)` contexto compuesto por clave
 - `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 - `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `preview_plan_import(import_text: str)`
+- `verify_plan_import(import_text: str)`
 - `commit_plan_import(import_text: str, confirmation: str)`
 
 ## Acceso experimental por atleta
@@ -219,6 +240,8 @@ La tool esta pensada para prompts como:
 
 Las tools V3 agregan respuestas deterministicas para preguntas naturales sin obligar a navegar la UI. No usan IA generativa: solo derivan datos reales de `planned_sessions`, matches Garmin, sesiones manuales y estado de cancelacion.
 
+Con `SESSION_TYPE` formal, V3 trata `required`, `race` y `test` como exigibles; `optional` y `recovery` no penalizan adherencia si quedan sin completar.
+
 `get_remaining_week_plan` y `get_my_remaining_week_plan` consultan `GET /api/mcp/training/remaining-week-plan` y `GET /api/mcp/me/training/remaining-week-plan`.
 
 Devuelven:
@@ -226,8 +249,12 @@ Devuelven:
 - `week_start_date` y `today`
 - cantidad de `completed_sessions`
 - cantidad de `remaining_sessions`
+- cantidad de `required_sessions`
 - cantidad de `optional_sessions`
+- cantidad de `recovery_sessions`
 - `remaining_volume_minutes`
+- `total_remaining_minutes_required`
+- `total_remaining_minutes_optional`
 - `sessions` pendientes
 
 Prompt ejemplo:
@@ -271,6 +298,9 @@ Prompt ejemplo:
 Devuelven:
 
 - `planned_sessions`
+- `required_sessions`
+- `optional_sessions`
+- `recovery_sessions`
 - `completed_sessions`
 - `cancelled_sessions`
 - `missed_sessions`
@@ -279,11 +309,96 @@ Devuelven:
 
 Regla:
 
-- `adherence_percent = completed_sessions / (planned_sessions - cancelled_sessions)`
+- `adherence_percent = completed_sessions / required_sessions`
 
 Prompt ejemplo:
 
 - `Cumpli la semana?`
+
+## Conversational V3B
+
+Las tools V3B agregan comparaciones semanales, tendencia de carga, riesgo de fatiga, estrategia de semana y un dashboard compuesto. Siguen siendo read-only y deterministicas.
+
+`get_week_comparison` y `get_my_week_comparison` consultan `GET /api/mcp/week-comparison` y `GET /api/mcp/me/week-comparison`.
+
+Sirven para preguntas como:
+
+- `Como fue esta semana contra la anterior?`
+- `Hice mas o menos que la semana pasada?`
+
+`get_training_load_trend` y `get_my_training_load_trend` consultan `GET /api/mcp/training-load-trend` y `GET /api/mcp/me/training-load-trend`.
+
+Sirven para preguntas como:
+
+- `Estoy subiendo la carga?`
+- `Vengo acumulando mucho?`
+- `Como viene la carga de las ultimas semanas?`
+
+`get_fatigue_risk_summary` y `get_my_fatigue_risk_summary` consultan `GET /api/mcp/fatigue-risk-summary` y `GET /api/mcp/me/fatigue-risk-summary`.
+
+Sirven para preguntas como:
+
+- `Estoy acumulando fatiga?`
+- `Conviene bajar algo?`
+- `Estoy para meter intensidad?`
+
+`get_week_strategy_summary` y `get_my_week_strategy_summary` consultan `GET /api/mcp/week-strategy-summary` y `GET /api/mcp/me/week-strategy-summary`.
+
+Sirven para preguntas como:
+
+- `Explicame esta semana.`
+- `Que busca esta semana?`
+- `Cual es la logica del plan?`
+
+`get_training_dashboard` y `get_my_training_dashboard` consultan `GET /api/mcp/training-dashboard` y `GET /api/mcp/me/training-dashboard`.
+
+Sirven para preguntas como:
+
+- `Como estoy hoy?`
+- `Dame panorama general.`
+- `Que deberia mirar antes del proximo entreno?`
+
+## Conversational V3C
+
+Las tools V3C agregan ayuda de decision y ajuste de plan sin escribir en base. Cuando generan un `import_text`, es solo una propuesta compatible con V2 para usar despues con `preview_plan_import` y, si corresponde, `commit_plan_import`.
+
+`get_plan_adjustment_suggestions` y `get_my_plan_adjustment_suggestions` consultan `GET /api/mcp/plan-adjustment-suggestions` y `GET /api/mcp/me/plan-adjustment-suggestions`.
+
+Sirven para preguntas como:
+
+- `Tengo que modificar algo esta semana?`
+- `Tocarias algo de esta semana?`
+
+`get_next_session_decision` y `get_my_next_session_decision` consultan `GET /api/mcp/next-session-decision` y `GET /api/mcp/me/next-session-decision`.
+
+Sirven para preguntas como:
+
+- `Mantengo el entrenamiento de manana?`
+- `Que hago con la proxima sesion?`
+- `Estoy para hacer intensidad?`
+
+`get_optional_session_impact` y `get_my_optional_session_impact` consultan `GET /api/mcp/optional-session-impact` y `GET /api/mcp/me/optional-session-impact`.
+
+Sirven para preguntas como:
+
+- `Puedo saltear la bici?`
+- `Que pasa si no hago la bici?`
+- `Que pasa si cancelo esta sesion opcional?`
+
+`generate_plan_adjustment_import_text` y `get_my_plan_adjustment_import_text` consultan `GET /api/mcp/generate-plan-adjustment-import-text` y `GET /api/mcp/me/generate-plan-adjustment-import-text`.
+
+Sirven para preguntas como:
+
+- `Generame el importable para cancelar la bici opcional.`
+- `Armame el importable para bajar la sesion de manana.`
+- `Proponeme el ajuste en formato importable.`
+
+`get_training_decision_context` y `get_my_training_decision_context` consultan `GET /api/mcp/training-decision-context` y `GET /api/mcp/me/training-decision-context`.
+
+Sirven para preguntas como:
+
+- `Dame contexto para decidir.`
+- `Que deberia mirar antes de tocar el plan?`
 
 ## Nueva tool de payload tecnico
 
@@ -439,11 +554,15 @@ curl -H "Authorization: Bearer change-me" "http://127.0.0.1:8000/api/mcp/analysi
 
 `preview_plan_import` consulta `POST /api/mcp/plan-import/preview` y no escribe en DB.
 
+`verify_plan_import` consulta `POST /api/mcp/plan-import/verify` y compara el bloque importable contra lo que realmente quedo en DB, sin aplicar cambios.
+
 `commit_plan_import` consulta `POST /api/mcp/plan-import/commit`, exige `TRAINING_API_WRITE_TOKEN` y requiere `confirmation="APLICAR"`.
 
 La importacion soporta `create`, `update`, `upsert` y `cancel`. Cancelar no borra fisicamente; marca la sesion como cancelada en la app principal.
 
-Los bloques semanales deben incluir `ATHLETE_ID`; `ATHLETE_NAME` es opcional:
+`verify_plan_import` devuelve `valid=false` si faltan sesiones o si difieren campos clave. Si solo encuentra sesiones extra en la misma semana, devuelve `valid=true` con warnings.
+
+Los bloques semanales deben incluir `ATHLETE_ID` y conviene incluir `ATHLETE_NAME`. Toda `SESSION` deberia declarar `SESSION_TYPE`:
 
 ```text
 WEEK
@@ -457,6 +576,7 @@ SESSION
 ACTION: upsert
 DATE: 2026-05-26
 SPORT: strength
+SESSION_TYPE: required
 NAME: Gimnasio suave
 
 BLOCK
@@ -465,6 +585,18 @@ UNIT: min
 
 END
 ```
+
+`SESSION_TYPE` soporta `required`, `optional`, `recovery`, `race` y `test`.
+
+Reglas practicas del importable:
+
+- No importar dias de descanso como `SESSION`.
+- No usar `SPORT: recovery`.
+- Movilidad real: `SPORT: mobility` y `SESSION_TYPE: recovery`.
+- Bici o gym opcional: `SESSION_TYPE: optional`.
+- Fondo y sesiones clave: `SESSION_TYPE: required`.
+- Carrera objetivo: `SESSION_TYPE: race`.
+- Test controlado: `SESSION_TYPE: test`.
 
 ### Smoke test remoto MCP
 

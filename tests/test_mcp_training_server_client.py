@@ -158,6 +158,141 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["adherence_percent"], 80.0)
 
+    async def test_get_week_comparison_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/week-comparison")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-25")
+            return httpx.Response(200, json={"current_week_start_date": "2026-05-25", "delta": {"sessions": 1}})
+
+        client = _build_client(handler)
+        payload = await client.get_week_comparison(athlete_id=1, week_start_date="2026-05-25")
+
+        self.assertEqual(payload["delta"]["sessions"], 1)
+
+    async def test_get_training_load_trend_passes_weeks(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training-load-trend")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("weeks"), "5")
+            return httpx.Response(200, json={"weeks": 5, "trend_direction": "up"})
+
+        client = _build_client(handler)
+        payload = await client.get_training_load_trend(athlete_id=1, weeks=5)
+
+        self.assertEqual(payload["trend_direction"], "up")
+
+    async def test_get_fatigue_risk_summary_passes_optional_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/fatigue-risk-summary")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            return httpx.Response(200, json={"reference_date": "2026-05-25", "risk_level": "moderate"})
+
+        client = _build_client(handler)
+        payload = await client.get_fatigue_risk_summary(athlete_id=1, reference_date="2026-05-25")
+
+        self.assertEqual(payload["risk_level"], "moderate")
+
+    async def test_get_week_strategy_summary_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/week-strategy-summary")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-25")
+            return httpx.Response(200, json={"week_start_date": "2026-05-25", "strategy_label": "build"})
+
+        client = _build_client(handler)
+        payload = await client.get_week_strategy_summary(athlete_id=1, week_start_date="2026-05-25")
+
+        self.assertEqual(payload["strategy_label"], "build")
+
+    async def test_get_training_dashboard_passes_optional_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training-dashboard")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            return httpx.Response(200, json={"reference_date": "2026-05-25", "recommended_focus": "Bajar carga"})
+
+        client = _build_client(handler)
+        payload = await client.get_training_dashboard(athlete_id=1, reference_date="2026-05-25")
+
+        self.assertEqual(payload["recommended_focus"], "Bajar carga")
+
+    async def test_get_plan_adjustment_suggestions_passes_optional_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/plan-adjustment-suggestions")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            return httpx.Response(200, json={"risk_level": "moderate", "suggestions": []})
+
+        client = _build_client(handler)
+        payload = await client.get_plan_adjustment_suggestions(athlete_id=1, reference_date="2026-05-25")
+
+        self.assertEqual(payload["risk_level"], "moderate")
+
+    async def test_get_next_session_decision_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/next-session-decision")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertEqual(request.url.params.get("planned_session_id"), "44")
+            return httpx.Response(200, json={"decision": "reduce"})
+
+        client = _build_client(handler)
+        payload = await client.get_next_session_decision(athlete_id=1, reference_date="2026-05-25", planned_session_id=44)
+
+        self.assertEqual(payload["decision"], "reduce")
+
+    async def test_get_optional_session_impact_passes_target_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/optional-session-impact")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("planned_session_id"), "55")
+            self.assertEqual(request.url.params.get("date"), "2026-05-27")
+            self.assertEqual(request.url.params.get("sport"), "cycling")
+            return httpx.Response(200, json={"impact_level": "low"})
+
+        client = _build_client(handler)
+        payload = await client.get_optional_session_impact(
+            athlete_id=1,
+            planned_session_id=55,
+            date="2026-05-27",
+            sport="cycling",
+        )
+
+        self.assertEqual(payload["impact_level"], "low")
+
+    async def test_generate_plan_adjustment_import_text_passes_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/generate-plan-adjustment-import-text")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("adjustment_type"), "cancel_optional")
+            self.assertEqual(request.url.params.get("planned_session_id"), "66")
+            self.assertEqual(request.url.params.get("reason"), "fatiga")
+            return httpx.Response(200, json={"generated": True, "requires_preview": True})
+
+        client = _build_client(handler)
+        payload = await client.generate_plan_adjustment_import_text(
+            athlete_id=1,
+            adjustment_type="cancel_optional",
+            planned_session_id=66,
+            reason="fatiga",
+        )
+
+        self.assertTrue(payload["generated"])
+
+    async def test_get_training_decision_context_passes_optional_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/training-decision-context")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            return httpx.Response(200, json={"reference_date": "2026-05-25", "summary": "ok"})
+
+        client = _build_client(handler)
+        payload = await client.get_training_decision_context(athlete_id=1, reference_date="2026-05-25")
+
+        self.assertEqual(payload["summary"], "ok")
+
     async def test_get_session_analysis_payload_passes_optional_query_params(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/analysis/session-payload")
@@ -384,6 +519,155 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["adherence_percent"], 75.0)
 
+    async def test_get_my_week_comparison_only_sends_access_code_and_week_start_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/week-comparison")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"current_week_start_date": "2026-05-25", "delta": {"sessions": -1}})
+
+        client = _build_client(handler)
+        payload = await client.get_my_week_comparison(access_code="CARO-7K92-XP31", week_start_date="2026-05-25")
+
+        self.assertEqual(payload["delta"]["sessions"], -1)
+
+    async def test_get_my_training_load_trend_only_sends_access_code_and_weeks(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training-load-trend")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("weeks"), "6")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"weeks": 6, "trend_direction": "mixed"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_training_load_trend(access_code="CARO-7K92-XP31", weeks=6)
+
+        self.assertEqual(payload["trend_direction"], "mixed")
+
+    async def test_get_my_fatigue_risk_summary_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/fatigue-risk-summary")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"reference_date": "2026-05-25", "risk_level": "high"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_fatigue_risk_summary(access_code="CARO-7K92-XP31", reference_date="2026-05-25")
+
+        self.assertEqual(payload["risk_level"], "high")
+
+    async def test_get_my_week_strategy_summary_only_sends_access_code_and_week_start_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/week-strategy-summary")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"week_start_date": "2026-05-25", "strategy_label": "specific"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_week_strategy_summary(access_code="CARO-7K92-XP31", week_start_date="2026-05-25")
+
+        self.assertEqual(payload["strategy_label"], "specific")
+
+    async def test_get_my_training_dashboard_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training-dashboard")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"reference_date": "2026-05-25", "key_message": "Todo estable"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_training_dashboard(access_code="CARO-7K92-XP31", reference_date="2026-05-25")
+
+        self.assertEqual(payload["key_message"], "Todo estable")
+
+    async def test_get_my_plan_adjustment_suggestions_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/plan-adjustment-suggestions")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"risk_level": "high"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_plan_adjustment_suggestions(access_code="CARO-7K92-XP31", reference_date="2026-05-25")
+
+        self.assertEqual(payload["risk_level"], "high")
+
+    async def test_get_my_next_session_decision_only_sends_access_code_and_target(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/next-session-decision")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertEqual(request.url.params.get("planned_session_id"), "44")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"decision": "cancel_optional"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_next_session_decision(
+            access_code="CARO-7K92-XP31",
+            reference_date="2026-05-25",
+            planned_session_id=44,
+        )
+
+        self.assertEqual(payload["decision"], "cancel_optional")
+
+    async def test_get_my_optional_session_impact_only_sends_access_code_and_target(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/optional-session-impact")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("planned_session_id"), "55")
+            self.assertEqual(request.url.params.get("date"), "2026-05-27")
+            self.assertEqual(request.url.params.get("sport"), "cycling")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"impact_level": "moderate"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_optional_session_impact(
+            access_code="CARO-7K92-XP31",
+            planned_session_id=55,
+            date="2026-05-27",
+            sport="cycling",
+        )
+
+        self.assertEqual(payload["impact_level"], "moderate")
+
+    async def test_get_my_plan_adjustment_import_text_only_sends_access_code_and_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/generate-plan-adjustment-import-text")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("adjustment_type"), "reduce_next")
+            self.assertEqual(request.url.params.get("planned_session_id"), "66")
+            self.assertEqual(request.url.params.get("reason"), "fatiga")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"generated": False})
+
+        client = _build_client(handler)
+        payload = await client.get_my_plan_adjustment_import_text(
+            access_code="CARO-7K92-XP31",
+            adjustment_type="reduce_next",
+            planned_session_id=66,
+            reason="fatiga",
+        )
+
+        self.assertFalse(payload["generated"])
+
+    async def test_get_my_training_decision_context_only_sends_access_code_and_reference_date(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/me/training-decision-context")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-25")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"summary": "decision context"})
+
+        client = _build_client(handler)
+        payload = await client.get_my_training_decision_context(access_code="CARO-7K92-XP31", reference_date="2026-05-25")
+
+        self.assertEqual(payload["summary"], "decision context")
+
     async def test_preview_plan_import_posts_with_read_token(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/plan-import/preview")
@@ -394,6 +678,19 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         client = _build_client(handler)
         payload = await client.preview_plan_import(import_text="SESSION\nEND")
+
+        self.assertTrue(payload["valid"])
+
+    async def test_verify_plan_import_posts_with_read_token(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/plan-import/verify")
+            self.assertEqual(request.headers.get("Authorization"), "Bearer token-123")
+            self.assertEqual(request.method, "POST")
+            self.assertEqual(request.read().decode(), '{"import_text":"SESSION\\nEND"}')
+            return httpx.Response(200, json={"valid": True, "matched_sessions": 1})
+
+        client = _build_client(handler)
+        payload = await client.verify_plan_import(import_text="SESSION\nEND")
 
         self.assertTrue(payload["valid"])
 
@@ -475,6 +772,16 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
             "get_my_next_planned_session": inspect.signature(mcp_server.get_my_next_planned_session),
             "get_my_today_remaining_sessions": inspect.signature(mcp_server.get_my_today_remaining_sessions),
             "get_my_week_adherence": inspect.signature(mcp_server.get_my_week_adherence),
+            "get_my_week_comparison": inspect.signature(mcp_server.get_my_week_comparison),
+            "get_my_training_load_trend": inspect.signature(mcp_server.get_my_training_load_trend),
+            "get_my_fatigue_risk_summary": inspect.signature(mcp_server.get_my_fatigue_risk_summary),
+            "get_my_week_strategy_summary": inspect.signature(mcp_server.get_my_week_strategy_summary),
+            "get_my_training_dashboard": inspect.signature(mcp_server.get_my_training_dashboard),
+            "get_my_plan_adjustment_suggestions": inspect.signature(mcp_server.get_my_plan_adjustment_suggestions),
+            "get_my_next_session_decision": inspect.signature(mcp_server.get_my_next_session_decision),
+            "get_my_optional_session_impact": inspect.signature(mcp_server.get_my_optional_session_impact),
+            "get_my_plan_adjustment_import_text": inspect.signature(mcp_server.get_my_plan_adjustment_import_text),
+            "get_my_training_decision_context": inspect.signature(mcp_server.get_my_training_decision_context),
             "get_my_session_analysis_payload": inspect.signature(mcp_server.get_my_session_analysis_payload),
         }
 
