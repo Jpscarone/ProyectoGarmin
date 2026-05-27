@@ -24,9 +24,11 @@ from app.services.analysis_v2.weekly_analysis_service import run_weekly_analysis
 from app.services.garmin_credential_service import (
     GarminCredentialConfigurationError,
     GarminCredentialDecryptError,
+    default_token_dir_for_athlete,
     get_or_create_garmin_account,
     resolve_garmin_credentials,
 )
+from app.services.security import GarminCredentialBundle
 from app.services.garmin.activity_sync import sync_activities_by_date
 from app.services.garmin.auth import get_garmin_auth_context
 from app.services.garmin.client import GarminClient
@@ -82,6 +84,7 @@ class ScheduledJobRunSummary:
     athletes_processed: int
     athletes_succeeded: int
     athletes_failed: int
+    athletes_skipped: int = 0
     activities_created: int = 0
     activities_updated: int = 0
     activities_linked: int = 0
@@ -107,6 +110,7 @@ class ScheduledJobRunSummary:
             "athletes_processed": self.athletes_processed,
             "athletes_succeeded": self.athletes_succeeded,
             "athletes_failed": self.athletes_failed,
+            "athletes_skipped": self.athletes_skipped,
             "activities_created": self.activities_created,
             "activities_updated": self.activities_updated,
             "activities_linked": self.activities_linked,
@@ -139,26 +143,16 @@ def sync_health_for_athlete(
 ) -> SyncOperationResult:
     del force
     sync_settings = settings or get_settings()
-    athlete = _get_sync_athlete(db, athlete_id=athlete_id)
-    account = get_or_create_garmin_account(db, athlete)
-    try:
-        credentials = resolve_garmin_credentials(sync_settings, athlete, account)
-    except (GarminCredentialConfigurationError, GarminCredentialDecryptError) as exc:
-        return SyncOperationResult(
-            status="failed",
-            message=str(exc),
-            error_detail="invalid_garmin_credentials",
-        )
-    if credentials is None:
-        return SyncOperationResult(
-            status="failed",
-            message="Este atleta no tiene cuenta Garmin configurada.",
-            error_detail="missing_garmin_credentials",
-        )
-    account.token_dir = credentials.token_dir
-    account.garmin_email = account.garmin_email or credentials.email
-    db.add(account)
-    db.commit()
+    prep = _prepare_garmin_sync(db, sync_settings, athlete_id)
+    if prep.skip_result is not None:
+        return prep.skip_result
+    if prep.failed_result is not None:
+        return prep.failed_result
+    athlete = prep.athlete
+    account = prep.account
+    credentials = prep.credentials
+    if athlete is None or account is None or credentials is None:
+        return SyncOperationResult(status="failed", message="No se pudo preparar el sync de salud.", error_detail="garmin_sync_setup_failed")
     reviewed_dates = _date_range(start_date, end_date)
     existing_by_date = {
         metric.metric_date: metric
@@ -231,6 +225,11 @@ def sync_activities_for_athlete(
 ) -> SyncOperationResult:
     del force
     sync_settings = settings or get_settings()
+    prep = _prepare_garmin_sync(db, sync_settings, athlete_id)
+    if prep.skip_result is not None:
+        return prep.skip_result
+    if prep.failed_result is not None:
+        return prep.failed_result
     before = {
         item.garmin_activity_id: item.id
         for item in db.scalars(select(GarminActivity).where(GarminActivity.athlete_id == athlete_id)).all()
@@ -441,6 +440,7 @@ def run_morning_health_job(
             athletes_processed=0,
             athletes_succeeded=0,
             athletes_failed=0,
+            athletes_skipped=0,
             log_id=skip_log.id,
             error_detail=skip_log.error_detail,
         )
@@ -459,6 +459,7 @@ def run_morning_health_job(
         athletes_processed=0,
         athletes_succeeded=0,
         athletes_failed=0,
+        athletes_skipped=0,
         log_id=job_log.id,
     )
     athlete_errors: list[str] = []
@@ -480,6 +481,9 @@ def run_morning_health_job(
                     force=force,
                     settings=sync_settings,
                 )
+                if _is_missing_garmin_skip(health_result):
+                    summary.athletes_skipped += 1
+                    continue
                 ai_result = generate_health_ai_if_needed(
                     db,
                     athlete_id=athlete.id,
@@ -541,6 +545,7 @@ def run_evening_full_job(
             athletes_processed=0,
             athletes_succeeded=0,
             athletes_failed=0,
+            athletes_skipped=0,
             log_id=skip_log.id,
             error_detail=skip_log.error_detail,
         )
@@ -559,6 +564,7 @@ def run_evening_full_job(
         athletes_processed=0,
         athletes_succeeded=0,
         athletes_failed=0,
+        athletes_skipped=0,
         log_id=job_log.id,
     )
     athlete_errors: list[str] = []
@@ -581,6 +587,9 @@ def run_evening_full_job(
                     force=force,
                     settings=sync_settings,
                 )
+                if _is_missing_garmin_skip(activities_result):
+                    summary.athletes_skipped += 1
+                    continue
                 health_result = sync_health_for_athlete(
                     db,
                     athlete_id=athlete.id,
@@ -589,6 +598,9 @@ def run_evening_full_job(
                     force=force,
                     settings=sync_settings,
                 )
+                if _is_missing_garmin_skip(health_result):
+                    summary.athletes_skipped += 1
+                    continue
                 link_result = auto_link_new_activities_for_athlete(
                     db,
                     athlete_id=athlete.id,
@@ -683,6 +695,7 @@ def run_resolve_pending_job(
             athletes_processed=0,
             athletes_succeeded=0,
             athletes_failed=0,
+            athletes_skipped=0,
             log_id=skip_log.id,
             error_detail=skip_log.error_detail,
         )
@@ -701,6 +714,7 @@ def run_resolve_pending_job(
         athletes_processed=0,
         athletes_succeeded=0,
         athletes_failed=0,
+        athletes_skipped=0,
         log_id=job_log.id,
     )
     athlete_errors: list[str] = []
@@ -767,11 +781,12 @@ def get_scheduled_sync_history(db: Session, *, limit: int = 20) -> list[dict[str
 
 
 def _get_target_athletes(db: Session, settings: Settings, *, athlete_id: int | None) -> list[Athlete]:
+    del settings
     if athlete_id is not None:
         athlete = db.get(Athlete, athlete_id)
         if athlete is None or athlete.status != "active":
             return []
-        return [athlete] if _athlete_has_garmin_config(athlete, settings) else []
+        return [athlete]
 
     athletes = list(
         db.scalars(
@@ -781,13 +796,7 @@ def _get_target_athletes(db: Session, settings: Settings, *, athlete_id: int | N
             .order_by(Athlete.id.asc())
         ).all()
     )
-    return [athlete for athlete in athletes if _athlete_has_garmin_config(athlete, settings)]
-
-
-def _athlete_has_garmin_config(athlete: Athlete, settings: Settings) -> bool:
-    if any((account.status or "active") == "active" for account in athlete.garmin_accounts):
-        return True
-    return bool(settings.garmin_enabled)
+    return athletes
 
 
 def _get_active_garmin_account(db: Session, athlete_id: int) -> GarminAccount | None:
@@ -995,6 +1004,8 @@ def _finalize_job_log(
 def _resolve_summary_status(summary: ScheduledJobRunSummary, athlete_errors: list[str]) -> str:
     if summary.athletes_processed == 0:
         return "skipped"
+    if summary.athletes_succeeded == 0 and summary.athletes_failed == 0 and summary.athletes_skipped > 0:
+        return "skipped"
     if summary.athletes_failed == 0:
         return "success"
     if summary.athletes_succeeded > 0:
@@ -1007,8 +1018,11 @@ def _resolve_summary_status(summary: ScheduledJobRunSummary, athlete_errors: lis
 def _build_summary_message(summary: ScheduledJobRunSummary) -> str:
     parts = [
         f"{summary.athletes_succeeded}/{summary.athletes_processed} atletas ok",
-        f"salud {summary.health_days_synced} dias",
     ]
+    if summary.athletes_skipped:
+        skipped_label = "omitido sin Garmin" if summary.athletes_skipped == 1 else "omitidos sin Garmin"
+        parts.append(f"{summary.athletes_skipped} {skipped_label}")
+    parts.append(f"salud {summary.health_days_synced} dias")
     if summary.job_type == JOB_TYPE_EVENING_FULL:
         parts.extend(
             [
@@ -1116,3 +1130,60 @@ def _to_local_datetime(value: datetime) -> datetime:
     if local_value is None:
         return _to_aware(value)
     return local_value
+
+
+@dataclass(slots=True)
+class _GarminSyncPreparation:
+    athlete: Athlete | None
+    account: GarminAccount | None
+    credentials: GarminCredentialBundle | None
+    skip_result: SyncOperationResult | None = None
+    failed_result: SyncOperationResult | None = None
+
+
+def _prepare_garmin_sync(db: Session, settings: Settings, athlete_id: int) -> _GarminSyncPreparation:
+    athlete = _get_sync_athlete(db, athlete_id=athlete_id)
+    account = _get_active_garmin_account(db, athlete.id)
+    try:
+        credentials = resolve_garmin_credentials(settings, athlete, account)
+    except (GarminCredentialConfigurationError, GarminCredentialDecryptError) as exc:
+        return _GarminSyncPreparation(
+            athlete=athlete,
+            account=account,
+            credentials=None,
+            failed_result=SyncOperationResult(
+                status="failed",
+                message=str(exc),
+                error_detail="invalid_garmin_credentials",
+            ),
+        )
+
+    if credentials is None:
+        return _GarminSyncPreparation(
+            athlete=athlete,
+            account=account,
+            credentials=None,
+            skip_result=SyncOperationResult(
+                status="skipped",
+                message="Atleta sin Garmin configurado",
+            ),
+        )
+
+    prepared_account = account or get_or_create_garmin_account(db, athlete)
+    desired_token_dir = credentials.token_dir or default_token_dir_for_athlete(athlete.id)
+    if prepared_account.token_dir != desired_token_dir or not prepared_account.garmin_email:
+        prepared_account.token_dir = desired_token_dir
+        prepared_account.garmin_email = prepared_account.garmin_email or credentials.email
+        db.add(prepared_account)
+        db.commit()
+        db.refresh(prepared_account)
+
+    return _GarminSyncPreparation(
+        athlete=athlete,
+        account=prepared_account,
+        credentials=credentials,
+    )
+
+
+def _is_missing_garmin_skip(result: SyncOperationResult) -> bool:
+    return result.status == "skipped" and result.message == "Atleta sin Garmin configurado"

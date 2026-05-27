@@ -32,7 +32,7 @@ def is_manually_completed_strength_session(planned_session: Any) -> bool:
 
 
 def is_session_completed(planned_session: Any) -> bool:
-    return has_linked_activity(planned_session) or is_manually_completed_strength_session(planned_session)
+    return has_linked_activity(planned_session) or getattr(planned_session, "completed_at", None) is not None
 
 
 def completion_method(planned_session: Any) -> str | None:

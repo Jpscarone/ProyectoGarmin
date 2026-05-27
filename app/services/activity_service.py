@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session, selectinload
 from app.db.models.garmin_activity import GarminActivity
 from app.db.models.planned_session import PlannedSession
 from app.db.models.training_day import TrainingDay
-from app.services.session_completion_service import is_manually_completed_strength_session, has_linked_activity
+from app.services.session_completion_service import (
+    has_linked_activity,
+    is_manually_completed_strength_session,
+    is_session_completed,
+)
 
 
 def get_completed_activities_for_period(
@@ -54,7 +58,7 @@ def get_completed_activities_for_period(
     for session in planned_sessions:
         if (str(session.sport_type or "").strip().lower() != "strength"):
             continue
-        if is_manually_completed_strength_session(session) or has_linked_activity(session) or session.completed:
+        if is_manually_completed_strength_session(session) or has_linked_activity(session) or is_session_completed(session):
             strength_sessions.append(session)
 
     return garmin_activities, strength_sessions
