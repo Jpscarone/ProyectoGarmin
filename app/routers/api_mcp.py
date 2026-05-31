@@ -274,6 +274,27 @@ def get_my_week_load_summary(
     )
 
 
+@router.get("/me/week-metrics-json")
+@router.get("/my/week-metrics-json")
+def get_my_week_metrics_json(
+    request: Request,
+    access_code: str = Query(...),
+    week_start_date: str | None = Query(default=None),
+    week_end_date: str | None = Query(default=None),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_week_metrics_json(
+        athlete_id=athlete.id,
+        week_start_date=week_start_date,
+        week_end_date=week_end_date,
+        reference_date=reference_date,
+        db=db,
+    )
+
+
 @router.get("/me/training/remaining-week-plan")
 def get_my_remaining_week_plan(
     request: Request,
@@ -559,6 +580,27 @@ def get_my_session_analysis_payload(
     )
 
 
+@router.get("/me/session-metrics-json")
+@router.get("/my/session-metrics-json")
+def get_my_session_metrics_json(
+    request: Request,
+    access_code: str = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    activity_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_session_metrics_json(
+        athlete_id=athlete.id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date_value=date_value,
+        db=db,
+    )
+
+
 @router.get("/me/session-block-analysis-payload")
 @router.get("/my/session-block-analysis-payload")
 def get_my_session_block_analysis_payload(
@@ -682,6 +724,39 @@ def read_latest_weekly_analysis(
     return {
         "athlete": _serialize_athlete_min(athlete),
         "weekly_analysis": _serialize_weekly_analysis(latest_weekly),
+    }
+
+
+@router.get("/week-metrics-json")
+def get_week_metrics_json(
+    athlete_id: int = Query(...),
+    week_start_date: str | None = Query(default=None),
+    week_end_date: str | None = Query(default=None),
+    reference_date: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    resolved = _resolve_week_metrics_analysis(
+        db,
+        athlete.id,
+        week_start_date=week_start_date,
+        week_end_date=week_end_date,
+        reference_date=reference_date,
+    )
+    analysis = resolved["analysis"]
+    limitations = list(resolved["limitations"])
+    if analysis is None or not isinstance(analysis.metrics_json, dict) or not analysis.metrics_json:
+        limitations.append("No hay weekly metrics_json disponible.")
+    return {
+        "schema_version": "weekly_metrics_json_v1",
+        "athlete": _serialize_athlete_min(athlete),
+        "week": {
+            "week_start_date": resolved["week_start_date"].isoformat() if resolved["week_start_date"] is not None else None,
+            "week_end_date": resolved["week_end_date"].isoformat() if resolved["week_end_date"] is not None else None,
+        },
+        "metrics_json_available": bool(analysis is not None and isinstance(analysis.metrics_json, dict) and analysis.metrics_json),
+        "metrics_json": analysis.metrics_json if analysis is not None and isinstance(analysis.metrics_json, dict) and analysis.metrics_json else None,
+        "limitations": _dedupe_strings(limitations),
     }
 
 
@@ -1490,6 +1565,44 @@ def get_session_analysis_payload(
     }
 
 
+@router.get("/session-metrics-json")
+def get_session_metrics_json(
+    athlete_id: int = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    activity_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(date_value, "date") if date_value else None
+    planned_session, activity, resolved_date, limitations = _resolve_block_analysis_entities(
+        db,
+        athlete.id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        target_date=target_date,
+    )
+    analysis = _resolve_session_payload_analysis(db, planned_session, activity)
+    metrics_payload = analysis.metrics_json if analysis and isinstance(analysis.metrics_json, dict) else {}
+    if planned_session is None:
+        limitations.append("No hay sesion planificada resuelta para esta consulta.")
+    if activity is None:
+        limitations.append("No hay actividad resuelta para esta consulta.")
+    if analysis is None:
+        limitations.append("No hay SessionAnalysis guardado para esta combinacion sesion-actividad.")
+    elif not metrics_payload:
+        limitations.append("El SessionAnalysis existe pero no tiene metrics_json disponible.")
+
+    return {
+        "athlete": _serialize_athlete_min(athlete),
+        "date": resolved_date.isoformat() if resolved_date is not None else None,
+        "planned_session": _serialize_analysis_payload_planned_session(planned_session),
+        "activity": _serialize_analysis_payload_activity(activity),
+        "metrics_json": metrics_payload or {},
+        "limitations": _dedupe_strings(limitations),
+    }
+
+
 @router.get("/session-block-analysis-payload")
 def get_session_block_analysis_payload(
     athlete_id: int = Query(...),
@@ -1875,6 +1988,17 @@ def _get_latest_weekly_analysis(db: Session, athlete_id: int) -> WeeklyAnalysis 
     )
 
 
+def _get_latest_weekly_analysis_with_metrics_json(db: Session, athlete_id: int) -> WeeklyAnalysis | None:
+    return db.scalar(
+        select(WeeklyAnalysis)
+        .where(
+            WeeklyAnalysis.athlete_id == athlete_id,
+            WeeklyAnalysis.metrics_json.is_not(None),
+        )
+        .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
+    )
+
+
 def _get_next_session_inclusive(
     db: Session,
     athlete_id: int,
@@ -1960,6 +2084,33 @@ def _get_latest_weekly_analysis_until(db: Session, athlete_id: int, reference_da
     )
 
 
+def _get_weekly_analyses_containing_date(db: Session, athlete_id: int, reference_date: date) -> list[WeeklyAnalysis]:
+    return list(
+        db.scalars(
+            select(WeeklyAnalysis)
+            .where(
+                WeeklyAnalysis.athlete_id == athlete_id,
+                WeeklyAnalysis.week_start_date <= reference_date,
+                WeeklyAnalysis.week_end_date >= reference_date,
+            )
+            .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
+        ).all()
+    )
+
+
+def _get_weekly_analyses_for_end(db: Session, athlete_id: int, week_end_date: date) -> list[WeeklyAnalysis]:
+    return list(
+        db.scalars(
+            select(WeeklyAnalysis)
+            .where(
+                WeeklyAnalysis.athlete_id == athlete_id,
+                WeeklyAnalysis.week_end_date == week_end_date,
+            )
+            .order_by(WeeklyAnalysis.week_start_date.desc(), WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
+        ).all()
+    )
+
+
 def _get_weekly_analysis_for_start(db: Session, athlete_id: int, week_start_date: date) -> WeeklyAnalysis | None:
     return db.scalar(
         select(WeeklyAnalysis)
@@ -1969,6 +2120,88 @@ def _get_weekly_analysis_for_start(db: Session, athlete_id: int, week_start_date
         )
         .order_by(WeeklyAnalysis.analyzed_at.desc(), WeeklyAnalysis.id.desc())
     )
+
+
+def _resolve_week_metrics_analysis(
+    db: Session,
+    athlete_id: int,
+    *,
+    week_start_date: str | None,
+    week_end_date: str | None,
+    reference_date: str | None,
+) -> dict[str, Any]:
+    if week_start_date and reference_date:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Usa week_start_date o reference_date, no ambos a la vez.",
+        )
+
+    parsed_start = _parse_iso_date(week_start_date, "week_start_date") if week_start_date else None
+    parsed_end = _parse_iso_date(week_end_date, "week_end_date") if week_end_date else None
+    parsed_reference = _parse_iso_date(reference_date, "reference_date") if reference_date else None
+    limitations: list[str] = []
+
+    if parsed_start is not None:
+        analysis = _get_weekly_analysis_for_start(db, athlete_id, parsed_start)
+        if analysis is not None and parsed_end is not None and analysis.week_end_date != parsed_end:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="week_end_date no coincide con la semana encontrada para week_start_date.",
+            )
+        return {
+            "analysis": analysis,
+            "week_start_date": parsed_start,
+            "week_end_date": parsed_end or (analysis.week_end_date if analysis is not None else _week_end_from_start(parsed_start)),
+            "limitations": limitations,
+        }
+
+    if parsed_reference is not None:
+        candidates = _get_weekly_analyses_containing_date(db, athlete_id, parsed_reference)
+        if parsed_end is not None:
+            candidates = [item for item in candidates if item.week_end_date == parsed_end]
+        if len(candidates) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": f"Hay multiples weekly_analysis candidatas para {parsed_reference.isoformat()}.",
+                    "candidates": [_serialize_weekly_analysis(item) for item in candidates],
+                },
+            )
+        analysis = candidates[0] if candidates else None
+        resolved_start = analysis.week_start_date if analysis is not None else _week_start_from_date(parsed_reference)
+        resolved_end = analysis.week_end_date if analysis is not None else (parsed_end or _week_end_from_start(resolved_start))
+        return {
+            "analysis": analysis,
+            "week_start_date": resolved_start,
+            "week_end_date": resolved_end,
+            "limitations": limitations,
+        }
+
+    if parsed_end is not None:
+        candidates = _get_weekly_analyses_for_end(db, athlete_id, parsed_end)
+        if len(candidates) > 1:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": f"Hay multiples weekly_analysis candidatas para week_end_date {parsed_end.isoformat()}.",
+                    "candidates": [_serialize_weekly_analysis(item) for item in candidates],
+                },
+            )
+        analysis = candidates[0] if candidates else None
+        return {
+            "analysis": analysis,
+            "week_start_date": analysis.week_start_date if analysis is not None else None,
+            "week_end_date": parsed_end,
+            "limitations": limitations,
+        }
+
+    analysis = _get_latest_weekly_analysis_with_metrics_json(db, athlete_id)
+    return {
+        "analysis": analysis,
+        "week_start_date": analysis.week_start_date if analysis is not None else None,
+        "week_end_date": analysis.week_end_date if analysis is not None else None,
+        "limitations": limitations,
+    }
 
 
 def _analysis_payload_loader_options() -> tuple[Any, ...]:

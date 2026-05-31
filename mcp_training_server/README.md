@@ -2,7 +2,7 @@
 
 ## Que hace
 
-Este servidor MCP remoto consume la API interna read-only de ProyectoGarmin bajo `/api/mcp` y expone tools para consultar atletas, actividades, salud, estado de entrenamiento y comparaciones entre sesion programada y actividad realizada.
+Este servidor MCP remoto consume la API interna read-only de ProyectoGarmin bajo `/api/mcp` y expone tools para consultar atletas, actividades, salud, estado de entrenamiento y metrics tecnicos para analisis conversacional.
 
 No se conecta directo a PostgreSQL.
 Solo escribe datos mediante las tools V2 de importacion de planificacion, protegidas con token de escritura.
@@ -11,9 +11,8 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 
 - `get_athletes()`
 - `get_recent_activities(athlete_id: int, limit: int = 10)`
-- `get_activity_detail(athlete_id: int, activity_id: int)`
 - `get_health_summary(athlete_id: int)`
-- `get_latest_weekly_analysis(athlete_id: int)`
+- `get_week_metrics_json(athlete_id: int, week_start_date: str | None = None, week_end_date: str | None = None, reference_date: str | None = None)`
 - `get_training_status(athlete_id: int)`
 - `get_day_plan(athlete_id: int, date: str)` planificacion exacta por fecha
 - `get_week_plan(athlete_id: int, week_start_date: str | None = None, include_completed: bool = True)` planificacion semanal exacta
@@ -25,12 +24,9 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 - `get_my_recent_activities(access_code: str, limit: int = 10)` solo Garmin
 - `get_my_health_summary(access_code: str)`
 - `get_my_training_status(access_code: str)`
-- `compare_planned_vs_done(athlete_id: int, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
-- `compare_my_planned_vs_done(access_code: str, date: str | None = None)`
+- `get_my_week_metrics_json(access_code: str, week_start_date: str | None = None, week_end_date: str | None = None, reference_date: str | None = None)`
 - `get_next_session_recommendation(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
 - `get_my_next_session_recommendation(access_code: str, reference_date: str | None = None)`
-- `get_week_load_summary(athlete_id: int, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
-- `get_my_week_load_summary(access_code: str, week_start_date: str | None = None, compare_previous: bool = True)` Garmin + sesiones manuales/completadas
 - `get_remaining_week_plan(athlete_id: int, week_start_date: str | None = None)` lo pendiente de la semana
 - `get_my_remaining_week_plan(access_code: str, week_start_date: str | None = None)` lo pendiente de la semana para atleta por clave
 - `get_previous_week_summary(athlete_id: int)` resumen deterministico de la semana pasada
@@ -63,8 +59,8 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 - `get_my_plan_adjustment_import_text(access_code: str, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)` texto importable V2 por clave
 - `get_training_decision_context(athlete_id: int, reference_date: str | None = None)` contexto compuesto para decidir ajustes
 - `get_my_training_decision_context(access_code: str, reference_date: str | None = None)` contexto compuesto por clave
-- `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
-- `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+- `get_session_metrics_json(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
+- `get_my_session_metrics_json(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `get_session_block_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 - `get_my_session_block_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `preview_plan_import(import_text: str)`
@@ -414,7 +410,45 @@ Sirven para preguntas como:
 - `Dame contexto para decidir.`
 - `Que deberia mirar antes de tocar el plan?`
 
-## Nueva tool de payload tecnico
+## Tool principal para sesiones
+
+Para analisis conversacional de sesiones usar siempre `get_session_metrics_json`.
+
+Las tools antiguas `get_activity_detail`, `compare_planned_vs_done` y `get_session_analysis_payload` quedan deprecated para MCP publico.
+
+`get_session_metrics_json` consulta `GET /api/mcp/session-metrics-json` y devuelve un JSON read-only con:
+
+- `planned_session`
+- `activity`
+- `metrics_json` completo del `SessionAnalysis`
+- `limitations` claras si falta actividad, sesion o metrics
+
+La tool esta pensada para prompts como:
+
+- `Traeme el metrics_json de la sesion del 2026-05-15`
+- `Analiza esta sesion usando el metrics_json guardado`
+- `Mostrame block_analysis, structured_match y scores de la ultima actividad`
+
+## Weekly RAW Metrics Mode
+
+Para analisis semanal conversacional usar siempre `get_week_metrics_json`.
+
+Las tools semanales narrativas o duplicadas como `get_latest_weekly_analysis` y `get_week_load_summary` quedan deprecated para MCP publico.
+
+`get_week_metrics_json` consulta `GET /api/mcp/week-metrics-json` y devuelve un JSON read-only con:
+
+- `week`
+- `metrics_json_available`
+- `metrics_json` completo
+- `limitations`
+
+La tool esta pensada para prompts como:
+
+- `Traeme el weekly metrics_json de la ultima semana disponible`
+- `Analiza esta semana usando el metrics_json guardado`
+- `Mostrame totals, trends y scores de la semana del 2026-05-19`
+
+## Tool legacy de payload tecnico
 
 `get_session_analysis_payload` consulta `GET /api/mcp/analysis/session-payload` y devuelve un JSON read-only con:
 

@@ -46,6 +46,23 @@ class TrainingAppApiClient:
             params={"athlete_id": str(int(athlete_id))},
         )
 
+    async def get_week_metrics_json(
+        self,
+        *,
+        athlete_id: int,
+        week_start_date: str | None = None,
+        week_end_date: str | None = None,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        if week_end_date:
+            params["week_end_date"] = week_end_date
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/week-metrics-json", params=params)
+
     async def get_training_status(self, *, athlete_id: int) -> dict[str, Any]:
         return await self._get_json(
             "/api/mcp/training/status",
@@ -423,6 +440,26 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def get_session_metrics_json(
+        self,
+        *,
+        athlete_id: int,
+        planned_session_id: int | None = None,
+        activity_id: int | None = None,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/session-metrics-json",
+            params=params,
+        )
+
     async def get_session_block_analysis_payload(
         self,
         *,
@@ -488,6 +525,23 @@ class TrainingAppApiClient:
             "/api/mcp/me/training/week-load-summary",
             params=params,
         )
+
+    async def get_my_week_metrics_json(
+        self,
+        *,
+        access_code: str,
+        week_start_date: str | None = None,
+        week_end_date: str | None = None,
+        reference_date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if week_start_date:
+            params["week_start_date"] = week_start_date
+        if week_end_date:
+            params["week_end_date"] = week_end_date
+        if reference_date:
+            params["reference_date"] = reference_date
+        return await self._get_json("/api/mcp/my/week-metrics-json", params=params)
 
     async def get_my_remaining_week_plan(
         self,
@@ -703,6 +757,26 @@ class TrainingAppApiClient:
             params["date"] = date
         return await self._get_json(
             "/api/mcp/me/analysis/session-payload",
+            params=params,
+        )
+
+    async def get_my_session_metrics_json(
+        self,
+        *,
+        access_code: str,
+        planned_session_id: int | None = None,
+        activity_id: int | None = None,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/my/session-metrics-json",
             params=params,
         )
 

@@ -1684,3 +1684,107 @@ class ApiMcpRoutesTests(unittest.TestCase):
         self.assertEqual(payload["activity"]["id"], activity.id)
         self.assertFalse(payload["data_quality"]["has_metrics_json"])
         self.assertIn("No hay SessionAnalysis guardado", " ".join(payload["data_quality"]["warnings"]))
+
+    def test_session_metrics_json_returns_metrics_payload_when_available(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 17),
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            sport_type="running",
+            modality="outdoor",
+            name="Sesion metrics",
+            session_type="required",
+        )
+        self.db.add(planned_session)
+        self.db.commit()
+        self.db.refresh(planned_session)
+
+        activity = GarminActivity(
+            athlete_id=self.athlete.id,
+            garmin_activity_id=910003,
+            activity_name="Actividad metrics",
+            sport_type="running",
+            start_time=datetime(2026, 5, 17, 8, 0, 0),
+            duration_sec=1800,
+            distance_m=5000,
+        )
+        self.db.add(activity)
+        self.db.commit()
+        self.db.refresh(activity)
+
+        self.db.add(
+            ActivitySessionMatch(
+                athlete_id=self.athlete.id,
+                garmin_activity_id_fk=activity.id,
+                planned_session_id_fk=planned_session.id,
+                training_day_id_fk=training_day.id,
+                match_confidence=0.99,
+                match_method="manual",
+            )
+        )
+        self.db.add(
+            SessionAnalysis(
+                athlete_id=self.athlete.id,
+                planned_session_id=planned_session.id,
+                activity_id=activity.id,
+                status="completed",
+                metrics_json={
+                    "block_analysis": [{"block_index": 1, "status": "ok"}],
+                    "scores": {"execution": 82},
+                },
+            )
+        )
+        self.db.commit()
+
+        response = self.client.get(
+            f"/api/mcp/session-metrics-json?athlete_id={self.athlete.id}&planned_session_id={planned_session.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["planned_session"]["id"], planned_session.id)
+        self.assertEqual(payload["activity"]["id"], activity.id)
+        self.assertEqual(payload["metrics_json"]["block_analysis"][0]["status"], "ok")
+        self.assertEqual(payload["limitations"], [])
+
+    def test_my_session_metrics_json_uses_access_code(self) -> None:
+        training_day = TrainingDay(
+            athlete_id=self.athlete.id,
+            training_plan_id=self.plan.id,
+            day_date=date(2026, 5, 18),
+        )
+        self.db.add(training_day)
+        self.db.commit()
+        self.db.refresh(training_day)
+
+        planned_session = PlannedSession(
+            athlete_id=self.athlete.id,
+            training_day_id=training_day.id,
+            sport_type="running",
+            modality="outdoor",
+            name="Sesion my metrics",
+            session_type="required",
+        )
+        self.db.add(planned_session)
+        self.db.commit()
+        self.db.refresh(planned_session)
+
+        response = self.client.get(
+            f"/api/mcp/my/session-metrics-json?access_code=ATLETA-MCP-1234&planned_session_id={planned_session.id}",
+            headers=self.headers,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["athlete"]["id"], self.athlete.id)
+        self.assertEqual(payload["planned_session"]["id"], planned_session.id)
+        self.assertIn("No hay actividad resuelta", " ".join(payload["limitations"]))

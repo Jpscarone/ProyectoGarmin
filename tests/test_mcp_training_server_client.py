@@ -91,6 +91,25 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["recommendation"]["status"], "balanced")
 
+    async def test_get_week_metrics_json_passes_resolution_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/week-metrics-json")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-19")
+            self.assertEqual(request.url.params.get("week_end_date"), "2026-05-25")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-21")
+            return httpx.Response(200, json={"schema_version": "weekly_metrics_json_v1", "metrics_json_available": True})
+
+        client = _build_client(handler)
+        payload = await client.get_week_metrics_json(
+            athlete_id=1,
+            week_start_date="2026-05-19",
+            week_end_date="2026-05-25",
+            reference_date="2026-05-21",
+        )
+
+        self.assertEqual(payload["schema_version"], "weekly_metrics_json_v1")
+
     async def test_get_remaining_week_plan_passes_optional_query_params(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/training/remaining-week-plan")
@@ -324,6 +343,25 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["resolved_by"], "planned_session_id")
 
+    async def test_get_session_metrics_json_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/session-metrics-json")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("planned_session_id"), "12")
+            self.assertEqual(request.url.params.get("activity_id"), "34")
+            self.assertEqual(request.url.params.get("date"), "2026-05-13")
+            return httpx.Response(200, json={"metrics_json": {"block_analysis": []}})
+
+        client = _build_client(handler)
+        payload = await client.get_session_metrics_json(
+            athlete_id=1,
+            planned_session_id=12,
+            activity_id=34,
+            date="2026-05-13",
+        )
+
+        self.assertIn("block_analysis", payload["metrics_json"])
+
     async def test_get_session_block_analysis_payload_passes_optional_query_params(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/session-block-analysis-payload")
@@ -434,6 +472,24 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["athlete"]["id"], 2)
 
+    async def test_get_my_session_metrics_json_uses_access_code_only(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/my/session-metrics-json")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("planned_session_id"), "12")
+            self.assertEqual(request.url.params.get("date"), "2026-05-13")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"athlete": {"id": 2}, "metrics_json": {}})
+
+        client = _build_client(handler)
+        payload = await client.get_my_session_metrics_json(
+            access_code="CARO-7K92-XP31",
+            planned_session_id=12,
+            date="2026-05-13",
+        )
+
+        self.assertEqual(payload["athlete"]["id"], 2)
+
     async def test_get_my_day_plan_only_sends_access_code_and_date(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/me/day-plan")
@@ -495,6 +551,26 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(payload["week"]["start_date"], "2026-05-12")
+
+    async def test_get_my_week_metrics_json_only_sends_access_code_and_resolution_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/my/week-metrics-json")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("week_start_date"), "2026-05-19")
+            self.assertEqual(request.url.params.get("week_end_date"), "2026-05-25")
+            self.assertEqual(request.url.params.get("reference_date"), "2026-05-21")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"metrics_json_available": True})
+
+        client = _build_client(handler)
+        payload = await client.get_my_week_metrics_json(
+            access_code="CARO-7K92-XP31",
+            week_start_date="2026-05-19",
+            week_end_date="2026-05-25",
+            reference_date="2026-05-21",
+        )
+
+        self.assertTrue(payload["metrics_json_available"])
 
     async def test_get_my_remaining_week_plan_does_not_send_athlete_id(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
@@ -825,6 +901,7 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
             "get_my_recent_activities": inspect.signature(mcp_server.get_my_recent_activities),
             "get_my_health_summary": inspect.signature(mcp_server.get_my_health_summary),
             "get_my_training_status": inspect.signature(mcp_server.get_my_training_status),
+            "get_my_week_metrics_json": inspect.signature(mcp_server.get_my_week_metrics_json),
             "get_my_week_plan": inspect.signature(mcp_server.get_my_week_plan),
             "compare_my_planned_vs_done": inspect.signature(mcp_server.compare_my_planned_vs_done),
             "get_my_next_session_recommendation": inspect.signature(mcp_server.get_my_next_session_recommendation),
@@ -844,11 +921,36 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
             "get_my_optional_session_impact": inspect.signature(mcp_server.get_my_optional_session_impact),
             "get_my_plan_adjustment_import_text": inspect.signature(mcp_server.get_my_plan_adjustment_import_text),
             "get_my_training_decision_context": inspect.signature(mcp_server.get_my_training_decision_context),
-            "get_my_session_analysis_payload": inspect.signature(mcp_server.get_my_session_analysis_payload),
+            "get_my_session_metrics_json": inspect.signature(mcp_server.get_my_session_metrics_json),
         }
 
         for tool_name, signature in signatures.items():
             self.assertNotIn("athlete_id", signature.parameters, tool_name)
+
+    def test_deprecated_tools_are_not_registered_in_mcp_public_tool_list(self) -> None:
+        from mcp_training_server import server as mcp_server
+
+        tool_manager = getattr(mcp_server.mcp, "_tool_manager", None)
+        self.assertIsNotNone(tool_manager)
+        tools_dict = getattr(tool_manager, "_tools", None) or getattr(tool_manager, "tools", None)
+        self.assertIsNotNone(tools_dict)
+        if isinstance(tools_dict, dict):
+            tool_names = set(tools_dict.keys())
+        else:
+            tool_names = {getattr(item, "name", "") for item in tools_dict}
+
+        self.assertIn("get_session_metrics_json", tool_names)
+        self.assertIn("get_my_session_metrics_json", tool_names)
+        self.assertNotIn("get_activity_detail", tool_names)
+        self.assertNotIn("compare_planned_vs_done", tool_names)
+        self.assertNotIn("compare_my_planned_vs_done", tool_names)
+        self.assertNotIn("get_session_analysis_payload", tool_names)
+        self.assertNotIn("get_my_session_analysis_payload", tool_names)
+        self.assertIn("get_week_metrics_json", tool_names)
+        self.assertIn("get_my_week_metrics_json", tool_names)
+        self.assertNotIn("get_latest_weekly_analysis", tool_names)
+        self.assertNotIn("get_week_load_summary", tool_names)
+        self.assertNotIn("get_my_week_load_summary", tool_names)
 
 
 def _build_client(handler, *, training_api_athlete_id: int | None = None) -> TrainingAppApiClient:

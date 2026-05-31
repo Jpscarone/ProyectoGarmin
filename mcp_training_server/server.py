@@ -39,7 +39,6 @@ async def get_recent_activities(athlete_id: int, limit: int = 10) -> dict[str, A
     return await CLIENT.get_recent_activities(athlete_id=athlete_id, limit=limit)
 
 
-@mcp.tool()
 async def get_activity_detail(athlete_id: int, activity_id: int) -> dict[str, Any]:
     """Devuelve el detalle de una actividad y cualquier analisis asociado."""
     return await CLIENT.get_activity_detail(athlete_id=athlete_id, activity_id=activity_id)
@@ -51,10 +50,25 @@ async def get_health_summary(athlete_id: int) -> dict[str, Any]:
     return await CLIENT.get_health_summary(athlete_id=athlete_id)
 
 
-@mcp.tool()
 async def get_latest_weekly_analysis(athlete_id: int) -> dict[str, Any]:
     """Devuelve el ultimo analisis semanal guardado para un atleta."""
     return await CLIENT.get_latest_weekly_analysis(athlete_id=athlete_id)
+
+
+@mcp.tool()
+async def get_week_metrics_json(
+    athlete_id: int,
+    week_start_date: str | None = None,
+    week_end_date: str | None = None,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve el weekly metrics_json completo como fuente principal para analisis conversacional semanal."""
+    return await CLIENT.get_week_metrics_json(
+        athlete_id=athlete_id,
+        week_start_date=week_start_date,
+        week_end_date=week_end_date,
+        reference_date=reference_date,
+    )
 
 
 @mcp.tool()
@@ -108,6 +122,22 @@ async def get_my_training_status(access_code: str) -> dict[str, Any]:
 
 
 @mcp.tool()
+async def get_my_week_metrics_json(
+    access_code: str,
+    week_start_date: str | None = None,
+    week_end_date: str | None = None,
+    reference_date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve el weekly metrics_json completo solo para el atleta resuelto por la clave privada."""
+    return await CLIENT.get_my_week_metrics_json(
+        access_code=access_code,
+        week_start_date=week_start_date,
+        week_end_date=week_end_date,
+        reference_date=reference_date,
+    )
+
+
+@mcp.tool()
 async def get_my_day_plan(access_code: str, date: str) -> dict[str, Any]:
     """Devuelve la planificacion exacta del dia solo para el atleta resuelto por la clave privada."""
     return await CLIENT.get_my_day_plan(access_code=access_code, date=date)
@@ -139,7 +169,6 @@ async def get_my_day_overview(access_code: str, date: str) -> dict[str, Any]:
     return await CLIENT.get_my_day_overview(access_code=access_code, date=date)
 
 
-@mcp.tool()
 async def compare_planned_vs_done(
     athlete_id: int,
     date: str | None = None,
@@ -155,7 +184,6 @@ async def compare_planned_vs_done(
     )
 
 
-@mcp.tool()
 async def compare_my_planned_vs_done(
     access_code: str,
     date: str | None = None,
@@ -193,7 +221,6 @@ async def get_my_next_session_recommendation(
     )
 
 
-@mcp.tool()
 async def get_week_load_summary(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -207,7 +234,6 @@ async def get_week_load_summary(
     )
 
 
-@mcp.tool()
 async def get_my_week_load_summary(
     access_code: str,
     week_start_date: str | None = None,
@@ -605,7 +631,6 @@ async def get_my_training_decision_context(
     )
 
 
-@mcp.tool()
 async def get_session_analysis_payload(
     athlete_id: int,
     planned_session_id: int | None = None,
@@ -621,7 +646,6 @@ async def get_session_analysis_payload(
     )
 
 
-@mcp.tool()
 async def get_my_session_analysis_payload(
     access_code: str,
     date: str | None = None,
@@ -630,6 +654,38 @@ async def get_my_session_analysis_payload(
 ) -> dict[str, Any]:
     """Devuelve el payload tecnico de analisis de sesion solo para el atleta resuelto por la clave privada."""
     return await CLIENT.get_my_session_analysis_payload(
+        access_code=access_code,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date=date,
+    )
+
+
+@mcp.tool()
+async def get_session_metrics_json(
+    athlete_id: int,
+    planned_session_id: int | None = None,
+    activity_id: int | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve planned_session, activity y metrics_json completo como fuente principal para analisis conversacional de sesiones."""
+    return await CLIENT.get_session_metrics_json(
+        athlete_id=athlete_id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date=date,
+    )
+
+
+@mcp.tool()
+async def get_my_session_metrics_json(
+    access_code: str,
+    date: str | None = None,
+    activity_id: int | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Devuelve planned_session, activity y metrics_json completo solo para el atleta resuelto por la clave privada."""
+    return await CLIENT.get_my_session_metrics_json(
         access_code=access_code,
         planned_session_id=planned_session_id,
         activity_id=activity_id,

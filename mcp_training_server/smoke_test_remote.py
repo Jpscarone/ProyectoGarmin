@@ -27,9 +27,8 @@ async def _run() -> None:
             required = {
                 "get_athletes",
                 "get_recent_activities",
-                "get_activity_detail",
                 "get_health_summary",
-                "get_latest_weekly_analysis",
+                "get_week_metrics_json",
                 "get_training_status",
             }
             missing = sorted(required.difference(tool_names))
