@@ -7,43 +7,46 @@ Este servidor MCP remoto consume la API interna read-only de ProyectoGarmin bajo
 No se conecta directo a PostgreSQL.
 Solo escribe datos mediante las tools V2 de importacion de planificacion, protegidas con token de escritura.
 
-## Tools expuestas
+## Tools publicas oficiales
+
+Basicas:
 
 - `get_athletes()`
 - `get_recent_activities(athlete_id: int, limit: int = 10)`
 - `get_health_summary(athlete_id: int)`
+
+Plan:
+
+- `get_week_plan(athlete_id: int, week_start_date: str | None = None, include_completed: bool = True)`
+- `get_day_plan(athlete_id: int, date: str)`
+- `get_remaining_week_plan(athlete_id: int, week_start_date: str | None = None)`
+- `get_today_remaining_sessions(athlete_id: int)`
+- `get_next_planned_session(athlete_id: int, reference_date: str | None = None)`
+
+Coach diario:
+
+- `get_today_coach_briefing(athlete_id: int, reference_date: str | None = None)`
+- `get_training_dashboard(athlete_id: int, reference_date: str | None = None)`
+- `get_fatigue_risk_summary(athlete_id: int, reference_date: str | None = None)`
+
+RAW metrics:
+
+- `get_session_metrics_json(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
+- `get_my_session_metrics_json(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `get_week_metrics_json(athlete_id: int, week_start_date: str | None = None, week_end_date: str | None = None, reference_date: str | None = None)`
-- `get_training_status(athlete_id: int)`
-- `get_day_plan(athlete_id: int, date: str)` planificacion exacta por fecha
-- `get_week_plan(athlete_id: int, week_start_date: str | None = None, include_completed: bool = True)` planificacion semanal exacta
-- `get_day_overview(athlete_id: int, date: str)`
-- `identify_me(access_code: str)`
-- `get_my_day_plan(access_code: str, date: str)` planificacion exacta por fecha para el atleta resuelto por clave
-- `get_my_week_plan(access_code: str, week_start_date: str | None = None, include_completed: bool = True)` planificacion semanal exacta para el atleta resuelto por clave
-- `get_my_day_overview(access_code: str, date: str)`
-- `get_my_recent_activities(access_code: str, limit: int = 10)` solo Garmin
-- `get_my_health_summary(access_code: str)`
-- `get_my_training_status(access_code: str)`
 - `get_my_week_metrics_json(access_code: str, week_start_date: str | None = None, week_end_date: str | None = None, reference_date: str | None = None)`
-- `get_next_session_recommendation(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
-- `get_my_next_session_recommendation(access_code: str, reference_date: str | None = None)`
-- `get_remaining_week_plan(athlete_id: int, week_start_date: str | None = None)` lo pendiente de la semana
-- `get_my_remaining_week_plan(access_code: str, week_start_date: str | None = None)` lo pendiente de la semana para atleta por clave
-- `get_previous_week_summary(athlete_id: int)` resumen deterministico de la semana pasada
-- `get_my_previous_week_summary(access_code: str)` resumen deterministico de la semana pasada por clave
-- `get_next_planned_session(athlete_id: int, reference_date: str | None = None)` proxima sesion pendiente
-- `get_my_next_planned_session(access_code: str, reference_date: str | None = None)` proxima sesion pendiente por clave
-- `get_today_remaining_sessions(athlete_id: int)` sesiones pendientes de hoy
-- `get_my_today_remaining_sessions(access_code: str)` sesiones pendientes de hoy por clave
-- `get_week_adherence(athlete_id: int, week_start_date: str | None = None)` cumplimiento semanal
-- `get_my_week_adherence(access_code: str, week_start_date: str | None = None)` cumplimiento semanal por clave
-- `get_today_coach_briefing(athlete_id: int, reference_date: str | None = None)` briefing diario compuesto
-- `get_my_today_coach_briefing(access_code: str, reference_date: str | None = None)` briefing diario por clave
-- `get_week_comparison(athlete_id: int, week_start_date: str | None = None)` comparacion de semana contra semana previa
-- `get_my_week_comparison(access_code: str, week_start_date: str | None = None)` comparacion semanal por clave
-- `get_training_load_trend(athlete_id: int, weeks: int = 4)` tendencia reciente de carga
-- `get_my_training_load_trend(access_code: str, weeks: int = 4)` tendencia reciente de carga por clave
-- `get_fatigue_risk_summary(athlete_id: int, reference_date: str | None = None)` riesgo de fatiga
+
+Importacion:
+
+- `preview_plan_import(import_text: str)`
+- `verify_plan_import(import_text: str)`
+- `commit_plan_import(import_text: str, confirmation: str)`
+
+V3C opcional:
+
+- `get_next_session_decision(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
+- `get_plan_adjustment_suggestions(athlete_id: int, reference_date: str | None = None)`
+- `generate_plan_adjustment_import_text(athlete_id: int, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)`
 - `get_my_fatigue_risk_summary(access_code: str, reference_date: str | None = None)` riesgo de fatiga por clave
 - `get_week_strategy_summary(athlete_id: int, week_start_date: str | None = None)` estrategia de la semana
 - `get_my_week_strategy_summary(access_code: str, week_start_date: str | None = None)` estrategia de la semana por clave

@@ -951,6 +951,19 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("get_latest_weekly_analysis", tool_names)
         self.assertNotIn("get_week_load_summary", tool_names)
         self.assertNotIn("get_my_week_load_summary", tool_names)
+        self.assertNotIn("get_my_health_summary", tool_names)
+        self.assertNotIn("get_my_recent_activities", tool_names)
+        self.assertNotIn("get_my_day_plan", tool_names)
+        self.assertNotIn("get_my_week_plan", tool_names)
+        self.assertNotIn("get_my_remaining_week_plan", tool_names)
+        self.assertNotIn("get_my_today_remaining_sessions", tool_names)
+        self.assertNotIn("get_my_next_planned_session", tool_names)
+        self.assertNotIn("get_my_today_coach_briefing", tool_names)
+        self.assertNotIn("get_my_training_dashboard", tool_names)
+        self.assertNotIn("get_my_fatigue_risk_summary", tool_names)
+        self.assertNotIn("get_optional_session_impact", tool_names)
+        self.assertNotIn("get_my_optional_session_impact", tool_names)
+        self.assertNotIn("get_training_decision_context", tool_names)
 
 
 def _build_client(handler, *, training_api_athlete_id: int | None = None) -> TrainingAppApiClient:

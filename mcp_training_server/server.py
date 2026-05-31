@@ -71,7 +71,6 @@ async def get_week_metrics_json(
     )
 
 
-@mcp.tool()
 async def get_training_status(athlete_id: int) -> dict[str, Any]:
     """Devuelve el estado general del atleta, plan, salud y actividad reciente."""
     return await CLIENT.get_training_status(athlete_id=athlete_id)
@@ -97,25 +96,21 @@ async def get_week_plan(
     )
 
 
-@mcp.tool()
 async def identify_me(access_code: str) -> dict[str, Any]:
     """Identifica al atleta asociado a una clave privada experimental, sin exponer athlete_id en la consulta."""
     return await CLIENT.identify_me(access_code=access_code)
 
 
-@mcp.tool()
 async def get_my_recent_activities(access_code: str, limit: int = 10) -> dict[str, Any]:
     """Devuelve solo actividades Garmin recientes del atleta. No incluye sesiones de gimnasio/fuerza completadas manualmente."""
     return await CLIENT.get_my_recent_activities(access_code=access_code, limit=limit)
 
 
-@mcp.tool()
 async def get_my_health_summary(access_code: str) -> dict[str, Any]:
     """Devuelve el resumen de salud/readiness del atleta asociado a la clave privada indicada."""
     return await CLIENT.get_my_health_summary(access_code=access_code)
 
 
-@mcp.tool()
 async def get_my_training_status(access_code: str) -> dict[str, Any]:
     """Devuelve el estado general del atleta asociado a la clave privada indicada."""
     return await CLIENT.get_my_training_status(access_code=access_code)
@@ -137,13 +132,11 @@ async def get_my_week_metrics_json(
     )
 
 
-@mcp.tool()
 async def get_my_day_plan(access_code: str, date: str) -> dict[str, Any]:
     """Devuelve la planificacion exacta del dia solo para el atleta resuelto por la clave privada."""
     return await CLIENT.get_my_day_plan(access_code=access_code, date=date)
 
 
-@mcp.tool()
 async def get_my_week_plan(
     access_code: str,
     week_start_date: str | None = None,
@@ -157,13 +150,11 @@ async def get_my_week_plan(
     )
 
 
-@mcp.tool()
 async def get_day_overview(athlete_id: int, date: str) -> dict[str, Any]:
     """Devuelve el panorama completo del dia exacto: planificacion, actividades y matches si existen."""
     return await CLIENT.get_day_overview(athlete_id=athlete_id, date=date)
 
 
-@mcp.tool()
 async def get_my_day_overview(access_code: str, date: str) -> dict[str, Any]:
     """Devuelve el panorama completo del dia exacto solo para el atleta resuelto por su clave privada."""
     return await CLIENT.get_my_day_overview(access_code=access_code, date=date)
@@ -195,7 +186,6 @@ async def compare_my_planned_vs_done(
     )
 
 
-@mcp.tool()
 async def get_next_session_recommendation(
     athlete_id: int,
     reference_date: str | None = None,
@@ -209,7 +199,6 @@ async def get_next_session_recommendation(
     )
 
 
-@mcp.tool()
 async def get_my_next_session_recommendation(
     access_code: str,
     reference_date: str | None = None,
@@ -259,7 +248,6 @@ async def get_remaining_week_plan(
     )
 
 
-@mcp.tool()
 async def get_my_remaining_week_plan(
     access_code: str,
     week_start_date: str | None = None,
@@ -271,13 +259,11 @@ async def get_my_remaining_week_plan(
     )
 
 
-@mcp.tool()
 async def get_previous_week_summary(athlete_id: int) -> dict[str, Any]:
     """Devuelve un resumen simple, deterministico y read-only de lo realizado la semana pasada."""
     return await CLIENT.get_previous_week_summary(athlete_id=athlete_id)
 
 
-@mcp.tool()
 async def get_my_previous_week_summary(access_code: str) -> dict[str, Any]:
     """Devuelve el resumen de la semana pasada solo para el atleta resuelto por su clave privada."""
     return await CLIENT.get_my_previous_week_summary(access_code=access_code)
@@ -295,7 +281,6 @@ async def get_next_planned_session(
     )
 
 
-@mcp.tool()
 async def get_my_next_planned_session(
     access_code: str,
     reference_date: str | None = None,
@@ -313,13 +298,11 @@ async def get_today_remaining_sessions(athlete_id: int) -> dict[str, Any]:
     return await CLIENT.get_today_remaining_sessions(athlete_id=athlete_id)
 
 
-@mcp.tool()
 async def get_my_today_remaining_sessions(access_code: str) -> dict[str, Any]:
     """Devuelve las sesiones pendientes de hoy solo para el atleta resuelto por su clave privada."""
     return await CLIENT.get_my_today_remaining_sessions(access_code=access_code)
 
 
-@mcp.tool()
 async def get_week_adherence(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -343,7 +326,6 @@ async def get_today_coach_briefing(
     )
 
 
-@mcp.tool()
 async def get_my_week_adherence(
     access_code: str,
     week_start_date: str | None = None,
@@ -355,7 +337,6 @@ async def get_my_week_adherence(
     )
 
 
-@mcp.tool()
 async def get_my_today_coach_briefing(
     access_code: str,
     reference_date: str | None = None,
@@ -367,7 +348,6 @@ async def get_my_today_coach_briefing(
     )
 
 
-@mcp.tool()
 async def get_week_comparison(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -379,7 +359,6 @@ async def get_week_comparison(
     )
 
 
-@mcp.tool()
 async def get_my_week_comparison(
     access_code: str,
     week_start_date: str | None = None,
@@ -391,7 +370,6 @@ async def get_my_week_comparison(
     )
 
 
-@mcp.tool()
 async def get_training_load_trend(
     athlete_id: int,
     weeks: int = 4,
@@ -403,7 +381,6 @@ async def get_training_load_trend(
     )
 
 
-@mcp.tool()
 async def get_my_training_load_trend(
     access_code: str,
     weeks: int = 4,
@@ -427,7 +404,6 @@ async def get_fatigue_risk_summary(
     )
 
 
-@mcp.tool()
 async def get_my_fatigue_risk_summary(
     access_code: str,
     reference_date: str | None = None,
@@ -439,7 +415,6 @@ async def get_my_fatigue_risk_summary(
     )
 
 
-@mcp.tool()
 async def get_week_strategy_summary(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -451,7 +426,6 @@ async def get_week_strategy_summary(
     )
 
 
-@mcp.tool()
 async def get_my_week_strategy_summary(
     access_code: str,
     week_start_date: str | None = None,
@@ -475,7 +449,6 @@ async def get_training_dashboard(
     )
 
 
-@mcp.tool()
 async def get_my_training_dashboard(
     access_code: str,
     reference_date: str | None = None,
@@ -499,7 +472,6 @@ async def get_plan_adjustment_suggestions(
     )
 
 
-@mcp.tool()
 async def get_my_plan_adjustment_suggestions(
     access_code: str,
     reference_date: str | None = None,
@@ -525,7 +497,6 @@ async def get_next_session_decision(
     )
 
 
-@mcp.tool()
 async def get_my_next_session_decision(
     access_code: str,
     reference_date: str | None = None,
@@ -539,7 +510,6 @@ async def get_my_next_session_decision(
     )
 
 
-@mcp.tool()
 async def get_optional_session_impact(
     athlete_id: int,
     planned_session_id: int | None = None,
@@ -555,7 +525,6 @@ async def get_optional_session_impact(
     )
 
 
-@mcp.tool()
 async def get_my_optional_session_impact(
     access_code: str,
     planned_session_id: int | None = None,
@@ -589,7 +558,6 @@ async def generate_plan_adjustment_import_text(
     )
 
 
-@mcp.tool()
 async def get_my_plan_adjustment_import_text(
     access_code: str,
     adjustment_type: str,
@@ -607,7 +575,6 @@ async def get_my_plan_adjustment_import_text(
     )
 
 
-@mcp.tool()
 async def get_training_decision_context(
     athlete_id: int,
     reference_date: str | None = None,
@@ -619,7 +586,6 @@ async def get_training_decision_context(
     )
 
 
-@mcp.tool()
 async def get_my_training_decision_context(
     access_code: str,
     reference_date: str | None = None,
@@ -693,7 +659,6 @@ async def get_my_session_metrics_json(
     )
 
 
-@mcp.tool()
 async def get_session_block_analysis_payload(
     athlete_id: int,
     planned_session_id: int | None = None,
@@ -709,7 +674,6 @@ async def get_session_block_analysis_payload(
     )
 
 
-@mcp.tool()
 async def get_my_session_block_analysis_payload(
     access_code: str,
     date: str | None = None,
