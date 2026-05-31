@@ -638,6 +638,38 @@ async def get_my_session_analysis_payload(
 
 
 @mcp.tool()
+async def get_session_block_analysis_payload(
+    athlete_id: int,
+    planned_session_id: int | None = None,
+    activity_id: int | None = None,
+    date: str | None = None,
+) -> dict[str, Any]:
+    """Devuelve un payload tecnico fino por bloques y laps para una sesion o actividad concreta."""
+    return await CLIENT.get_session_block_analysis_payload(
+        athlete_id=athlete_id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date=date,
+    )
+
+
+@mcp.tool()
+async def get_my_session_block_analysis_payload(
+    access_code: str,
+    date: str | None = None,
+    activity_id: int | None = None,
+    planned_session_id: int | None = None,
+) -> dict[str, Any]:
+    """Devuelve el payload fino de analisis por bloques solo para el atleta resuelto por la clave privada."""
+    return await CLIENT.get_my_session_block_analysis_payload(
+        access_code=access_code,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date=date,
+    )
+
+
+@mcp.tool()
 async def preview_plan_import(import_text: str) -> dict[str, Any]:
     """Previsualiza una importacion semanal o individual de planificacion sin escribir en la base."""
     return await CLIENT.preview_plan_import(import_text=import_text)

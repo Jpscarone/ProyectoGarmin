@@ -26,7 +26,7 @@ from app.db.models.weekly_analysis import WeeklyAnalysis
 from app.db.session import get_db
 from app.services.analysis_v2.weekly_analysis_service import build_week_context, compute_week_metrics
 from app.services.health_readiness_service import build_health_readiness_summary, build_health_training_context, evaluate_health_readiness
-from app.services.planning.presentation import describe_session_structure_short, derive_session_metrics
+from app.services.planning.presentation import build_session_display_blocks_for_session, describe_session_structure_short, derive_session_metrics
 from app.services.athlete_context import get_current_athlete, get_current_training_plan
 from app.services.mcp_context_service import (
     build_last_activity_feedback_payload,
@@ -551,6 +551,27 @@ def get_my_session_analysis_payload(
     _reject_forbidden_query_params(request, "athlete_id")
     athlete = resolve_athlete_by_access_code(access_code, db)
     return get_session_analysis_payload(
+        athlete_id=athlete.id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        date_value=date_value,
+        db=db,
+    )
+
+
+@router.get("/me/session-block-analysis-payload")
+@router.get("/my/session-block-analysis-payload")
+def get_my_session_block_analysis_payload(
+    request: Request,
+    access_code: str = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    activity_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    _reject_forbidden_query_params(request, "athlete_id")
+    athlete = resolve_athlete_by_access_code(access_code, db)
+    return get_session_block_analysis_payload(
         athlete_id=athlete.id,
         planned_session_id=planned_session_id,
         activity_id=activity_id,
@@ -1469,6 +1490,50 @@ def get_session_analysis_payload(
     }
 
 
+@router.get("/session-block-analysis-payload")
+def get_session_block_analysis_payload(
+    athlete_id: int = Query(...),
+    planned_session_id: int | None = Query(default=None),
+    activity_id: int | None = Query(default=None),
+    date_value: str | None = Query(default=None, alias="date"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    athlete = _get_athlete_or_404(db, athlete_id)
+    target_date = _parse_iso_date(date_value, "date") if date_value else None
+    planned_session, activity, resolved_date, limitations = _resolve_block_analysis_entities(
+        db,
+        athlete.id,
+        planned_session_id=planned_session_id,
+        activity_id=activity_id,
+        target_date=target_date,
+    )
+    analysis = _resolve_session_payload_analysis(db, planned_session, activity)
+    metrics_payload = analysis.metrics_json if analysis and isinstance(analysis.metrics_json, dict) else {}
+    context_payload = metrics_payload.get("context", {}) if isinstance(metrics_payload, dict) else {}
+    activity_laps = _serialize_block_analysis_activity_laps(activity, context_payload)
+    block_matching = _build_block_matching_payload(planned_session, activity_laps, metrics_payload)
+
+    if planned_session is None:
+        limitations.append("No hay sesion planificada resuelta para este analisis por bloques.")
+    if activity is None:
+        limitations.append("No hay actividad resuelta para este analisis por bloques.")
+    if planned_session is not None and not activity_laps:
+        limitations.append("No hay laps/splits disponibles para analisis fino por bloque.")
+
+    return {
+        "schema_version": "session_block_analysis_payload_v1",
+        "athlete": _serialize_athlete_min(athlete),
+        "date": resolved_date.isoformat() if resolved_date is not None else None,
+        "planned_session": _serialize_block_analysis_planned_session(planned_session),
+        "activity": _serialize_block_analysis_activity(activity),
+        "activity_laps": activity_laps,
+        "raw_metrics_available": _build_block_analysis_raw_metrics_available(activity, context_payload, metrics_payload),
+        "block_matching": block_matching,
+        "overall_block_summary": _build_block_analysis_overall_summary(block_matching),
+        "limitations": _dedupe_strings(limitations),
+    }
+
+
 def _parse_iso_date(raw_value: str, field_name: str) -> date:
     return _parse_mcp_date(raw_value, field_name)
 
@@ -1973,6 +2038,36 @@ def _get_latest_activity_analysis_payload(db: Session, athlete_id: int) -> Garmi
         .order_by(GarminActivity.start_time.desc(), GarminActivity.id.desc())
         .options(*_analysis_payload_loader_options())
     )
+
+
+def _get_planned_sessions_for_date_analysis_payload(db: Session, athlete_id: int, target_date: date) -> list[PlannedSession]:
+    return list(
+        db.scalars(
+            select(PlannedSession)
+            .join(TrainingDay, PlannedSession.training_day_id == TrainingDay.id)
+            .where(
+                PlannedSession.athlete_id == athlete_id,
+                TrainingDay.day_date == target_date,
+            )
+            .order_by(PlannedSession.session_order.asc(), PlannedSession.id.asc())
+            .options(*_planned_analysis_payload_loader_options())
+        ).all()
+    )
+
+
+def _get_activities_for_exact_date_analysis_payload(db: Session, athlete_id: int, target_date: date) -> list[GarminActivity]:
+    candidates = list(
+        db.scalars(
+            select(GarminActivity)
+            .where(
+                GarminActivity.athlete_id == athlete_id,
+                func.date(GarminActivity.start_time) == target_date.isoformat(),
+            )
+            .order_by(GarminActivity.start_time.asc(), GarminActivity.id.asc())
+            .options(*_analysis_payload_loader_options())
+        ).all()
+    )
+    return [item for item in candidates if _activity_local_date(item) == target_date]
 
 
 def _training_day_loader_options() -> tuple[Any, ...]:
@@ -5057,6 +5152,559 @@ def _build_previous_week_summary_payload(current_start: date, context: Any, metr
         "delta_duration_sec": None,
         "delta_distance_m": None,
     }
+
+
+def _resolve_block_analysis_entities(
+    db: Session,
+    athlete_id: int,
+    *,
+    planned_session_id: int | None,
+    activity_id: int | None,
+    target_date: date | None,
+) -> tuple[PlannedSession | None, GarminActivity | None, date | None, list[str]]:
+    limitations: list[str] = []
+    planned_session: PlannedSession | None = None
+    activity: GarminActivity | None = None
+
+    if planned_session_id is not None:
+        planned_session = _load_planned_session_analysis_payload(db, athlete_id, planned_session_id)
+        activity = (
+            planned_session.activity_match.garmin_activity
+            if planned_session.activity_match and planned_session.activity_match.garmin_activity is not None
+            else _find_fallback_activity_for_planned(db, planned_session)
+        )
+    elif activity_id is not None:
+        activity = _load_activity_analysis_payload(db, athlete_id, activity_id)
+        planned_session = (
+            activity.activity_match.planned_session
+            if activity.activity_match and activity.activity_match.planned_session is not None
+            else _find_fallback_planned_for_activity(db, activity)
+        )
+        if planned_session is None:
+            limitations.append("La actividad no tiene una sesion planificada vinculada.")
+    elif target_date is not None:
+        planned_candidates = _get_planned_sessions_for_date_analysis_payload(db, athlete_id, target_date)
+        activity_candidates = _get_activities_for_exact_date_analysis_payload(db, athlete_id, target_date)
+        planned_session, activity = _resolve_block_analysis_date_candidates(
+            target_date,
+            planned_candidates,
+            activity_candidates,
+        )
+    else:
+        activity = _get_latest_activity_analysis_payload(db, athlete_id)
+        if activity is not None:
+            planned_session = (
+                activity.activity_match.planned_session
+                if activity.activity_match and activity.activity_match.planned_session is not None
+                else _find_fallback_planned_for_activity(db, activity)
+            )
+        else:
+            planned_session = _get_latest_planned_session_for_compare(db, athlete_id)
+
+    resolved_date = target_date or _planned_session_date(planned_session) or _activity_local_date(activity)
+    return planned_session, activity, resolved_date, limitations
+
+
+def _resolve_block_analysis_date_candidates(
+    target_date: date,
+    planned_candidates: list[PlannedSession],
+    activity_candidates: list[GarminActivity],
+) -> tuple[PlannedSession | None, GarminActivity | None]:
+    if not planned_candidates and not activity_candidates:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No hay sesion planificada ni actividad para {target_date.isoformat()}.",
+        )
+    if len(planned_candidates) <= 1 and len(activity_candidates) <= 1:
+        return (
+            planned_candidates[0] if planned_candidates else None,
+            activity_candidates[0] if activity_candidates else None,
+        )
+
+    explicit_pairs: list[tuple[PlannedSession, GarminActivity]] = []
+    for planned in planned_candidates:
+        match = planned.activity_match
+        if match is not None and match.garmin_activity is not None and match.garmin_activity in activity_candidates:
+            explicit_pairs.append((planned, match.garmin_activity))
+    for activity in activity_candidates:
+        match = activity.activity_match
+        if match is not None and match.planned_session is not None and match.planned_session in planned_candidates:
+            explicit_pairs.append((match.planned_session, activity))
+    explicit_pairs = list(dict.fromkeys(explicit_pairs))
+    if len(explicit_pairs) == 1:
+        return explicit_pairs[0]
+
+    if len(activity_candidates) == 1 and planned_candidates:
+        unique_planned = _pick_unique_planned_candidate_for_activity(planned_candidates, activity_candidates[0])
+        if unique_planned is not None:
+            return unique_planned, activity_candidates[0]
+    if len(planned_candidates) == 1 and activity_candidates:
+        unique_activity = _pick_unique_activity_candidate_for_planned(activity_candidates, planned_candidates[0])
+        if unique_activity is not None:
+            return planned_candidates[0], unique_activity
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": f"No se pudo resolver de forma no ambigua la sesion/actividad del {target_date.isoformat()}.",
+            "planned_sessions": [_serialize_block_candidate_planned(item) for item in planned_candidates],
+            "activities": [_serialize_block_candidate_activity(item) for item in activity_candidates],
+        },
+    )
+
+
+def _pick_unique_planned_candidate_for_activity(
+    candidates: list[PlannedSession],
+    activity: GarminActivity,
+) -> PlannedSession | None:
+    exact = [item for item in candidates if _sports_match(item.sport_type, activity.sport_type) and _modalities_match(item.modality, activity.modality)]
+    if len(exact) == 1:
+        return exact[0]
+    sport_only = [item for item in candidates if _sports_match(item.sport_type, activity.sport_type)]
+    if len(sport_only) == 1:
+        return sport_only[0]
+    return None
+
+
+def _pick_unique_activity_candidate_for_planned(
+    candidates: list[GarminActivity],
+    planned_session: PlannedSession,
+) -> GarminActivity | None:
+    exact = [item for item in candidates if _sports_match(item.sport_type, planned_session.sport_type) and _modalities_match(item.modality, planned_session.modality)]
+    if len(exact) == 1:
+        return exact[0]
+    sport_only = [item for item in candidates if _sports_match(item.sport_type, planned_session.sport_type)]
+    if len(sport_only) == 1:
+        return sport_only[0]
+    return None
+
+
+def _serialize_block_candidate_planned(session: PlannedSession) -> dict[str, Any]:
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "date": _planned_session_date(session).isoformat() if _planned_session_date(session) else None,
+        "sport": session.sport_type,
+        "modality": session.modality,
+        "name": session.name,
+        "planned_duration_sec": metrics.duration_sec,
+    }
+
+
+def _serialize_block_candidate_activity(activity: GarminActivity) -> dict[str, Any]:
+    return {
+        "id": activity.id,
+        "date": _activity_local_date(activity).isoformat() if _activity_local_date(activity) else None,
+        "sport": activity.sport_type,
+        "modality": activity.modality,
+        "activity_name": activity.activity_name,
+        "duration_sec": activity.duration_sec,
+    }
+
+
+def _serialize_block_analysis_planned_session(session: PlannedSession | None) -> dict[str, Any] | None:
+    if session is None:
+        return None
+    metrics = derive_session_metrics(session)
+    return {
+        "id": session.id,
+        "date": _planned_session_date(session).isoformat() if _planned_session_date(session) else None,
+        "sport": session.sport_type,
+        "session_type": _normalized_session_type(session),
+        "name": session.name,
+        "notes": session.target_notes or session.description_text,
+        "total_planned_duration_sec": metrics.duration_sec,
+        "blocks": _serialize_block_analysis_planned_blocks(session),
+    }
+
+
+def _serialize_block_analysis_planned_blocks(session: PlannedSession) -> list[dict[str, Any]]:
+    blocks = build_session_display_blocks_for_session(session)
+    serialized: list[dict[str, Any]] = []
+    for index, block in enumerate(blocks, start=1):
+        if getattr(block, "kind", None) == "repeat":
+            work_step = next((item for item in block.steps if item.step_type != "recovery"), block.steps[0] if block.steps else None)
+            duration_sec = sum((item.duration_sec or 0) for item in block.steps) * int(block.repeat_count or 1)
+            distance_m = sum((item.distance_m or 0) for item in block.steps) * int(block.repeat_count or 1)
+            serialized.append(
+                {
+                    "index": index,
+                    "id": work_step.source_step_id if work_step is not None else None,
+                    "step_type": "repeat",
+                    "planned_duration_sec": duration_sec or None,
+                    "planned_distance_m": distance_m or None,
+                    "target_type": work_step.target_type if work_step is not None else None,
+                    "target_hr_min": work_step.target_hr_min if work_step is not None else None,
+                    "target_hr_max": work_step.target_hr_max if work_step is not None else None,
+                    "target_pace_min_sec_km": work_step.target_pace_min_sec_km if work_step is not None else None,
+                    "target_pace_max_sec_km": work_step.target_pace_max_sec_km if work_step is not None else None,
+                    "target_rpe_min": None,
+                    "target_rpe_max": None,
+                    "target_notes": work_step.target_notes if work_step is not None else None,
+                }
+            )
+            continue
+        serialized.append(
+            {
+                "index": index,
+                "id": block.source_step_id,
+                "step_type": block.step_type,
+                "planned_duration_sec": block.duration_sec,
+                "planned_distance_m": block.distance_m,
+                "target_type": block.target_type,
+                "target_hr_min": block.target_hr_min,
+                "target_hr_max": block.target_hr_max,
+                "target_pace_min_sec_km": block.target_pace_min_sec_km,
+                "target_pace_max_sec_km": block.target_pace_max_sec_km,
+                "target_rpe_min": None,
+                "target_rpe_max": None,
+                "target_notes": block.target_notes,
+            }
+        )
+    return serialized
+
+
+def _serialize_block_analysis_activity(activity: GarminActivity | None) -> dict[str, Any] | None:
+    if activity is None:
+        return None
+    return {
+        "id": activity.id,
+        "garmin_activity_id": activity.garmin_activity_id,
+        "sport": activity.sport_type,
+        "start_time": activity.start_time.isoformat() if activity.start_time else None,
+        "duration_sec": activity.duration_sec,
+        "distance_m": activity.distance_m,
+        "avg_hr": activity.avg_hr,
+        "max_hr": activity.max_hr,
+        "avg_pace_sec_km": activity.avg_pace_sec_km,
+        "training_load": activity.training_load,
+        "aerobic_te": activity.training_effect_aerobic,
+        "anaerobic_te": activity.training_effect_anaerobic,
+    }
+
+
+def _serialize_block_analysis_activity_laps(activity: GarminActivity | None, context_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    if activity is not None and activity.laps:
+        return [
+            {
+                "index": index,
+                "lap_id": lap.id,
+                "start_time": lap.start_time.isoformat() if lap.start_time else None,
+                "duration_sec": lap.duration_sec,
+                "distance_m": lap.distance_m,
+                "avg_hr": lap.avg_hr,
+                "max_hr": lap.max_hr,
+                "avg_pace_sec_km": lap.avg_pace_sec_km,
+                "ascent_m": lap.elevation_gain_m,
+                "descent_m": lap.elevation_loss_m,
+            }
+            for index, lap in enumerate(sorted(activity.laps, key=lambda item: (item.lap_number, item.id)), start=1)
+        ]
+    raw_laps = context_payload.get("activity_laps") if isinstance(context_payload, dict) else None
+    if not isinstance(raw_laps, list):
+        return []
+    serialized: list[dict[str, Any]] = []
+    for index, lap in enumerate(raw_laps, start=1):
+        if not isinstance(lap, dict):
+            continue
+        serialized.append(
+            {
+                "index": index,
+                "lap_id": lap.get("lap_id") or lap.get("id"),
+                "start_time": lap.get("start_time"),
+                "duration_sec": lap.get("duration_sec"),
+                "distance_m": lap.get("distance_m"),
+                "avg_hr": lap.get("avg_hr"),
+                "max_hr": lap.get("max_hr"),
+                "avg_pace_sec_km": lap.get("avg_pace_sec_km"),
+                "ascent_m": lap.get("ascent_m") or lap.get("elevation_gain_m"),
+                "descent_m": lap.get("descent_m") or lap.get("elevation_loss_m"),
+            }
+        )
+    return serialized
+
+
+def _build_block_analysis_raw_metrics_available(
+    activity: GarminActivity | None,
+    context_payload: dict[str, Any],
+    metrics_payload: dict[str, Any],
+) -> dict[str, bool]:
+    raw_summary = activity.raw_summary_json if activity is not None and isinstance(activity.raw_summary_json, dict) else {}
+    has_context_laps = bool(isinstance(context_payload, dict) and context_payload.get("activity_laps"))
+    return {
+        "laps": bool(activity is not None and activity.laps),
+        "splits": bool(has_context_laps or raw_summary.get("splits")),
+        "samples": bool(raw_summary.get("samples") or raw_summary.get("time_series") or raw_summary.get("samples_json")),
+        "metrics_json": bool(metrics_payload),
+    }
+
+
+def _build_block_matching_payload(
+    planned_session: PlannedSession | None,
+    activity_laps: list[dict[str, Any]],
+    metrics_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if planned_session is None:
+        return []
+    planned_blocks = _serialize_block_analysis_planned_blocks(planned_session)
+    if not planned_blocks:
+        return []
+    lap_indexes_by_block = _resolve_lap_indexes_by_block(planned_blocks, activity_laps, metrics_payload)
+    rows: list[dict[str, Any]] = []
+    for block in planned_blocks:
+        indexes = lap_indexes_by_block.get(int(block["index"]), [])
+        matched_laps = [activity_laps[index - 1] for index in indexes if 1 <= index <= len(activity_laps)]
+        rows.append(_build_block_matching_row(block, matched_laps, len(activity_laps)))
+    return rows
+
+
+def _resolve_lap_indexes_by_block(
+    planned_blocks: list[dict[str, Any]],
+    activity_laps: list[dict[str, Any]],
+    metrics_payload: dict[str, Any],
+) -> dict[int, list[int]]:
+    metrics_matches = _lap_indexes_from_metrics_json(metrics_payload)
+    if metrics_matches:
+        return metrics_matches
+    if not activity_laps:
+        return {int(block["index"]): [] for block in planned_blocks}
+    if len(activity_laps) == len(planned_blocks):
+        return {int(block["index"]): [position] for position, block in enumerate(planned_blocks, start=1)}
+    if len(activity_laps) < len(planned_blocks):
+        return {
+            int(block["index"]): [position] if position <= len(activity_laps) else []
+            for position, block in enumerate(planned_blocks, start=1)
+        }
+
+    mapping: dict[int, list[int]] = {}
+    lap_cursor = 0
+    for block_position, block in enumerate(planned_blocks, start=1):
+        remaining_blocks = len(planned_blocks) - block_position
+        remaining_laps = len(activity_laps) - lap_cursor
+        if remaining_blocks <= 0:
+            mapping[int(block["index"])] = list(range(lap_cursor + 1, len(activity_laps) + 1))
+            lap_cursor = len(activity_laps)
+            break
+        target_duration = block.get("planned_duration_sec")
+        assigned: list[int] = []
+        min_laps_to_leave = max(remaining_blocks, 0)
+        accumulated = 0
+        while lap_cursor < len(activity_laps):
+            if remaining_laps - len(assigned) <= min_laps_to_leave:
+                break
+            current_index = lap_cursor + 1
+            assigned.append(current_index)
+            accumulated += int(activity_laps[lap_cursor].get("duration_sec") or 0)
+            lap_cursor += 1
+            if target_duration is None or accumulated >= int(target_duration * 0.85):
+                break
+        if not assigned and lap_cursor < len(activity_laps):
+            assigned.append(lap_cursor + 1)
+            lap_cursor += 1
+        mapping[int(block["index"])] = assigned
+    if lap_cursor < len(activity_laps) and planned_blocks:
+        mapping[int(planned_blocks[-1]["index"])].extend(list(range(lap_cursor + 1, len(activity_laps) + 1)))
+    return mapping
+
+
+def _lap_indexes_from_metrics_json(metrics_payload: dict[str, Any]) -> dict[int, list[int]]:
+    metrics = metrics_payload.get("metrics") if isinstance(metrics_payload, dict) else None
+    laps = metrics.get("laps") if isinstance(metrics, dict) else None
+    pairs = laps.get("pairs") if isinstance(laps, dict) else None
+    mapping: dict[int, list[int]] = {}
+    if not isinstance(pairs, list):
+        return mapping
+    for pair in pairs:
+        if not isinstance(pair, dict):
+            continue
+        block_index = pair.get("planned_step_order")
+        lap_index = pair.get("activity_lap_index")
+        if not isinstance(block_index, int) or not isinstance(lap_index, int):
+            continue
+        mapping.setdefault(block_index, []).append(lap_index)
+    return mapping
+
+
+def _build_block_matching_row(
+    block: dict[str, Any],
+    matched_laps: list[dict[str, Any]],
+    total_laps: int,
+) -> dict[str, Any]:
+    planned_duration = block.get("planned_duration_sec")
+    actual_duration = sum(int(item.get("duration_sec") or 0) for item in matched_laps) or None
+    actual_avg_hr = _weighted_average_from_laps(matched_laps, "avg_hr")
+    actual_max_hr = max((item.get("max_hr") for item in matched_laps if item.get("max_hr") is not None), default=None)
+    actual_avg_pace = _weighted_average_from_laps(matched_laps, "avg_pace_sec_km")
+    hr_status, hr_comment, hr_in_target = _evaluate_block_hr(block, actual_avg_hr, actual_max_hr)
+    pace_comment = _evaluate_block_pace_comment(block, actual_avg_pace)
+    block_result = hr_status
+    if block_result == "unknown" and block.get("target_type") == "pace":
+        block_result = _evaluate_pace_result(block, actual_avg_pace)
+    if block_result == "unknown" and block.get("target_type") in (None, "") and planned_duration is not None and actual_duration is not None:
+        if abs(actual_duration - planned_duration) / max(planned_duration, 1) <= 0.1:
+            block_result = "ok"
+    if not matched_laps:
+        match_quality = "none"
+        block_result = "incomplete" if total_laps else "unknown"
+    elif len(matched_laps) == 1:
+        match_quality = "exact"
+    else:
+        match_quality = "estimated"
+    if matched_laps and planned_duration is not None and actual_duration is not None and actual_duration < planned_duration * 0.6:
+        match_quality = "partial"
+        if block_result == "ok":
+            block_result = "incomplete"
+    return {
+        "planned_block_index": block.get("index"),
+        "matched_lap_indexes": [int(item.get("index")) for item in matched_laps if item.get("index") is not None],
+        "match_quality": match_quality,
+        "planned_duration_sec": planned_duration,
+        "actual_duration_sec": actual_duration,
+        "duration_diff_sec": (actual_duration - planned_duration) if actual_duration is not None and planned_duration is not None else None,
+        "target_type": block.get("target_type"),
+        "target_hr_min": block.get("target_hr_min"),
+        "target_hr_max": block.get("target_hr_max"),
+        "actual_avg_hr": actual_avg_hr,
+        "actual_max_hr": actual_max_hr,
+        "hr_in_target": hr_in_target,
+        "hr_comment": hr_comment,
+        "pace_comment": pace_comment,
+        "block_result": block_result,
+    }
+
+
+def _weighted_average_from_laps(laps: list[dict[str, Any]], field_name: str) -> int | None:
+    weighted_sum = 0.0
+    total_weight = 0.0
+    for lap in laps:
+        value = lap.get(field_name)
+        duration_sec = lap.get("duration_sec") or 0
+        if value is None or duration_sec is None:
+            continue
+        weighted_sum += float(value) * float(duration_sec)
+        total_weight += float(duration_sec)
+    if total_weight <= 0:
+        return None
+    return int(round(weighted_sum / total_weight))
+
+
+def _evaluate_block_hr(
+    block: dict[str, Any],
+    actual_avg_hr: int | None,
+    actual_max_hr: int | None,
+) -> tuple[str, str | None, bool | None]:
+    target_type = block.get("target_type")
+    target_min = block.get("target_hr_min")
+    target_max = block.get("target_hr_max")
+    if target_type != "hr" or (target_min is None and target_max is None):
+        return "unknown", None, None
+    if actual_avg_hr is None:
+        return "unknown", "No hay frecuencia cardiaca por lap para este bloque.", None
+    if target_min is not None and actual_avg_hr < target_min:
+        return "too_low", f"FC media por debajo del objetivo ({actual_avg_hr} < {target_min}).", False
+    if target_max is not None and actual_avg_hr > target_max:
+        if actual_avg_hr <= target_max + 5:
+            comment = f"FC media apenas por encima del rango ({actual_avg_hr} > {target_max})."
+            if actual_max_hr is not None and actual_max_hr > target_max:
+                comment = f"{comment} Pico maximo en {actual_max_hr}."
+            return "slightly_high", comment, False
+        return "too_high", f"FC media claramente por encima del objetivo ({actual_avg_hr} > {target_max}).", False
+    comment = "Dentro del rango de FC planificado."
+    if actual_max_hr is not None and target_max is not None and actual_max_hr > target_max:
+        comment = f"Dentro de rango medio, con pico leve arriba ({actual_max_hr})."
+    return "ok", comment, True
+
+
+def _evaluate_block_pace_comment(block: dict[str, Any], actual_avg_pace: int | None) -> str | None:
+    if block.get("target_type") != "pace":
+        return None
+    target_min = block.get("target_pace_min_sec_km")
+    target_max = block.get("target_pace_max_sec_km")
+    if actual_avg_pace is None:
+        return "No hay ritmo por lap para este bloque."
+    if target_min is None and target_max is None:
+        return "Sin objetivo de ritmo explicitado."
+    lower, upper = _ordered_range(target_min, target_max)
+    if lower is not None and actual_avg_pace < lower:
+        return f"Ritmo mas rapido de lo planificado ({actual_avg_pace}s/km)."
+    if upper is not None and actual_avg_pace > upper:
+        return f"Ritmo mas lento de lo planificado ({actual_avg_pace}s/km)."
+    return "Ritmo dentro del rango planificado."
+
+
+def _evaluate_pace_result(block: dict[str, Any], actual_avg_pace: int | None) -> str:
+    if block.get("target_type") != "pace" or actual_avg_pace is None:
+        return "unknown"
+    lower, upper = _ordered_range(block.get("target_pace_min_sec_km"), block.get("target_pace_max_sec_km"))
+    if lower is not None and actual_avg_pace < lower:
+        return "too_high"
+    if upper is not None and actual_avg_pace > upper:
+        return "too_low"
+    return "ok"
+
+
+def _ordered_range(left: int | None, right: int | None) -> tuple[int | None, int | None]:
+    values = [value for value in (left, right) if value is not None]
+    if not values:
+        return None, None
+    if len(values) == 1:
+        return values[0], values[0]
+    return min(values), max(values)
+
+
+def _build_block_analysis_overall_summary(block_matching: list[dict[str, Any]]) -> dict[str, Any]:
+    total_blocks = len(block_matching)
+    matched_blocks = sum(1 for item in block_matching if item.get("matched_lap_indexes"))
+    if not block_matching:
+        return {
+            "matched_blocks": 0,
+            "total_blocks": 0,
+            "main_deviation": "No hay bloques comparables.",
+            "execution_quality": "unknown",
+            "coach_takeaway": "Faltan bloques planificados o laps suficientes para un analisis fino.",
+        }
+    results = [str(item.get("block_result") or "unknown") for item in block_matching]
+    if "too_high" in results:
+        main_deviation = "Hubo al menos un bloque por encima del objetivo."
+        quality = "poor"
+    elif "incomplete" in results:
+        main_deviation = "La estructura quedo incompleta respecto de lo planificado."
+        quality = "acceptable"
+    elif "slightly_high" in results or "too_low" in results:
+        main_deviation = "Hubo desviaciones moderadas en algunos bloques."
+        quality = "acceptable"
+    elif all(result == "ok" for result in results):
+        main_deviation = "Los bloques principales quedaron alineados con el objetivo."
+        quality = "good"
+    else:
+        main_deviation = "No hay suficiente dato fino para evaluar todos los bloques."
+        quality = "unknown"
+    return {
+        "matched_blocks": matched_blocks,
+        "total_blocks": total_blocks,
+        "main_deviation": main_deviation,
+        "execution_quality": quality,
+        "coach_takeaway": _coach_takeaway_from_quality(quality),
+    }
+
+
+def _coach_takeaway_from_quality(quality: str) -> str:
+    if quality == "good":
+        return "La sesion salio bien alineada con lo planificado."
+    if quality == "acceptable":
+        return "La sesion es util, pero conviene revisar los bloques con desvio."
+    if quality == "poor":
+        return "Conviene revisar intensidad y estructura antes de repetir esta carga."
+    return "La informacion disponible no alcanza para una conclusion fina por bloques."
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    deduped: list[str] = []
+    for value in values:
+        normalized = (value or "").strip()
+        if normalized and normalized not in deduped:
+            deduped.append(normalized)
+    return deduped
 
 
 def _resolve_session_payload_analysis(

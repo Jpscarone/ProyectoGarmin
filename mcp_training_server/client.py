@@ -423,6 +423,26 @@ class TrainingAppApiClient:
             params=params,
         )
 
+    async def get_session_block_analysis_payload(
+        self,
+        *,
+        athlete_id: int,
+        planned_session_id: int | None = None,
+        activity_id: int | None = None,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"athlete_id": str(int(athlete_id))}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/session-block-analysis-payload",
+            params=params,
+        )
+
     async def compare_my_planned_vs_done(
         self,
         *,
@@ -683,6 +703,26 @@ class TrainingAppApiClient:
             params["date"] = date
         return await self._get_json(
             "/api/mcp/me/analysis/session-payload",
+            params=params,
+        )
+
+    async def get_my_session_block_analysis_payload(
+        self,
+        *,
+        access_code: str,
+        planned_session_id: int | None = None,
+        activity_id: int | None = None,
+        date: str | None = None,
+    ) -> dict[str, Any]:
+        params = {"access_code": access_code}
+        if planned_session_id is not None:
+            params["planned_session_id"] = str(int(planned_session_id))
+        if activity_id is not None:
+            params["activity_id"] = str(int(activity_id))
+        if date:
+            params["date"] = date
+        return await self._get_json(
+            "/api/mcp/my/session-block-analysis-payload",
             params=params,
         )
 

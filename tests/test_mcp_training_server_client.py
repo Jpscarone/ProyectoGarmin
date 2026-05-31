@@ -324,6 +324,25 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(payload["resolved_by"], "planned_session_id")
 
+    async def test_get_session_block_analysis_payload_passes_optional_query_params(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/session-block-analysis-payload")
+            self.assertEqual(request.url.params.get("athlete_id"), "1")
+            self.assertEqual(request.url.params.get("planned_session_id"), "12")
+            self.assertEqual(request.url.params.get("activity_id"), "34")
+            self.assertEqual(request.url.params.get("date"), "2026-05-13")
+            return httpx.Response(200, json={"schema_version": "session_block_analysis_payload_v1"})
+
+        client = _build_client(handler)
+        payload = await client.get_session_block_analysis_payload(
+            athlete_id=1,
+            planned_session_id=12,
+            activity_id=34,
+            date="2026-05-13",
+        )
+
+        self.assertEqual(payload["schema_version"], "session_block_analysis_payload_v1")
+
     async def test_identify_me_uses_access_code_without_athlete_id(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.url.path, "/api/mcp/me/identify")
@@ -396,6 +415,24 @@ class TrainingAppApiClientTests(unittest.IsolatedAsyncioTestCase):
         payload = await client.get_my_day_overview(access_code="CARO-7K92-XP31", date="19-05-2026")
 
         self.assertEqual(payload["date"], "2026-05-19")
+
+    async def test_get_my_session_block_analysis_payload_uses_access_code_only(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.url.path, "/api/mcp/my/session-block-analysis-payload")
+            self.assertEqual(request.url.params.get("access_code"), "CARO-7K92-XP31")
+            self.assertEqual(request.url.params.get("planned_session_id"), "12")
+            self.assertEqual(request.url.params.get("date"), "2026-05-13")
+            self.assertIsNone(request.url.params.get("athlete_id"))
+            return httpx.Response(200, json={"athlete": {"id": 2}})
+
+        client = _build_client(handler)
+        payload = await client.get_my_session_block_analysis_payload(
+            access_code="CARO-7K92-XP31",
+            planned_session_id=12,
+            date="2026-05-13",
+        )
+
+        self.assertEqual(payload["athlete"]["id"], 2)
 
     async def test_get_my_day_plan_only_sends_access_code_and_date(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

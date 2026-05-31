@@ -65,6 +65,8 @@ Solo escribe datos mediante las tools V2 de importacion de planificacion, proteg
 - `get_my_training_decision_context(access_code: str, reference_date: str | None = None)` contexto compuesto por clave
 - `get_session_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
 - `get_my_session_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
+- `get_session_block_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
+- `get_my_session_block_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
 - `preview_plan_import(import_text: str)`
 - `verify_plan_import(import_text: str)`
 - `commit_plan_import(import_text: str, confirmation: str)`
@@ -427,6 +429,23 @@ La tool esta pensada para prompts como:
 - `Traeme el payload de analisis de la ultima actividad de Pablo`
 - `Dame feedback tecnico por bloques usando el payload de sesion`
 - `Mostrame laps, steps y metrics_json de la sesion del 2026-05-15`
+
+## Nueva tool de analisis fino por bloques
+
+`get_session_block_analysis_payload` consulta `GET /api/mcp/session-block-analysis-payload` y devuelve un JSON read-only con:
+
+- bloques planificados normalizados
+- actividad Garmin resumida
+- laps reales o laps disponibles en `metrics_json`
+- matching bloque vs laps
+- resumen global y limitaciones claras cuando falta granularidad
+
+La tool esta pensada para prompts como:
+
+- `Analiza la sesion del 29/05/26 por bloques`
+- `En que bloque me pase de pulsaciones?`
+- `Cumpli el bloque principal?`
+- `Las recuperaciones bajaron lo suficiente?`
 
 ## Dependencias
 
