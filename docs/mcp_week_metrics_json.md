@@ -12,6 +12,8 @@ ChatGPT hace la interpretacion semanal.
 - `get_week_metrics_json(athlete_id, week_start_date?, week_end_date?, reference_date?)`
 - `get_my_week_metrics_json(access_code, week_start_date?, week_end_date?, reference_date?)`
 
+En el MCP publico solo se mantiene el wrapper `get_my_week_metrics_json` para analisis semanal raw.
+
 ## Resolucion
 
 1. Si viene `week_start_date`, usa esa semana.

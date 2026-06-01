@@ -47,28 +47,8 @@ V3C opcional:
 - `get_next_session_decision(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)`
 - `get_plan_adjustment_suggestions(athlete_id: int, reference_date: str | None = None)`
 - `generate_plan_adjustment_import_text(athlete_id: int, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)`
-- `get_my_fatigue_risk_summary(access_code: str, reference_date: str | None = None)` riesgo de fatiga por clave
-- `get_week_strategy_summary(athlete_id: int, week_start_date: str | None = None)` estrategia de la semana
-- `get_my_week_strategy_summary(access_code: str, week_start_date: str | None = None)` estrategia de la semana por clave
-- `get_training_dashboard(athlete_id: int, reference_date: str | None = None)` panorama general compuesto
-- `get_my_training_dashboard(access_code: str, reference_date: str | None = None)` panorama general compuesto por clave
-- `get_plan_adjustment_suggestions(athlete_id: int, reference_date: str | None = None)` sugerencias read-only de ajuste
-- `get_my_plan_adjustment_suggestions(access_code: str, reference_date: str | None = None)` sugerencias read-only de ajuste por clave
-- `get_next_session_decision(athlete_id: int, reference_date: str | None = None, planned_session_id: int | None = None)` decision sobre proxima sesion
-- `get_my_next_session_decision(access_code: str, reference_date: str | None = None, planned_session_id: int | None = None)` decision sobre proxima sesion por clave
-- `get_optional_session_impact(athlete_id: int, planned_session_id: int | None = None, date: str | None = None, sport: str | None = None)` impacto de omitir una sesion
-- `get_my_optional_session_impact(access_code: str, planned_session_id: int | None = None, date: str | None = None, sport: str | None = None)` impacto por clave
-- `generate_plan_adjustment_import_text(athlete_id: int, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)` texto importable V2 sin aplicar
-- `get_my_plan_adjustment_import_text(access_code: str, adjustment_type: str, reference_date: str | None = None, planned_session_id: int | None = None, reason: str | None = None)` texto importable V2 por clave
-- `get_training_decision_context(athlete_id: int, reference_date: str | None = None)` contexto compuesto para decidir ajustes
-- `get_my_training_decision_context(access_code: str, reference_date: str | None = None)` contexto compuesto por clave
-- `get_session_metrics_json(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
-- `get_my_session_metrics_json(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
-- `get_session_block_analysis_payload(athlete_id: int, planned_session_id: int | None = None, activity_id: int | None = None, date: str | None = None)`
-- `get_my_session_block_analysis_payload(access_code: str, date: str | None = None, activity_id: int | None = None, planned_session_id: int | None = None)`
-- `preview_plan_import(import_text: str)`
-- `verify_plan_import(import_text: str)`
-- `commit_plan_import(import_text: str, confirmation: str)`
+
+Tools legacy como `get_activity_detail`, `compare_planned_vs_done`, `get_session_analysis_payload`, `get_latest_weekly_analysis` y `get_week_load_summary` siguen existiendo internamente para compatibilidad, pero ya no forman parte del MCP publico.
 
 ## Acceso experimental por atleta
 

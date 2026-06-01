@@ -11,6 +11,8 @@ Devuelve el `metrics_json` ya guardado en `SessionAnalysis`, sin recalcular nada
 - `get_session_metrics_json(athlete_id, planned_session_id?, activity_id?, date?)`
 - `get_my_session_metrics_json(access_code, planned_session_id?, activity_id?, date?)`
 
+En el MCP publico solo se mantiene el wrapper `get_my_session_metrics_json` para sesiones.
+
 ## Payload
 
 La respuesta incluye:

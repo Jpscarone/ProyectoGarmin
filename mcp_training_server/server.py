@@ -26,14 +26,39 @@ mcp = FastMCP(
     json_response=True,
 )
 
+PUBLIC_MCP_TOOL_NAMES: tuple[str, ...] = (
+    "get_athletes",
+    "get_recent_activities",
+    "get_health_summary",
+    "get_week_plan",
+    "get_my_week_plan",
+    "get_day_plan",
+    "get_remaining_week_plan",
+    "get_today_remaining_sessions",
+    "get_next_planned_session",
+    "get_today_coach_briefing",
+    "get_my_today_coach_briefing",
+    "get_training_dashboard",
+    "get_fatigue_risk_summary",
+    "get_my_health_summary",
+    "get_session_metrics_json",
+    "get_my_session_metrics_json",
+    "get_week_metrics_json",
+    "get_my_week_metrics_json",
+    "preview_plan_import",
+    "verify_plan_import",
+    "commit_plan_import",
+    "get_next_session_decision",
+    "get_plan_adjustment_suggestions",
+    "generate_plan_adjustment_import_text",
+)
 
-@mcp.tool()
+
 async def get_athletes() -> dict[str, Any] | list[dict[str, Any]]:
     """Devuelve los atletas disponibles."""
     return await CLIENT.get_athletes()
 
 
-@mcp.tool()
 async def get_recent_activities(athlete_id: int, limit: int = 10) -> dict[str, Any]:
     """Devuelve las actividades recientes de un atleta."""
     return await CLIENT.get_recent_activities(athlete_id=athlete_id, limit=limit)
@@ -44,7 +69,6 @@ async def get_activity_detail(athlete_id: int, activity_id: int) -> dict[str, An
     return await CLIENT.get_activity_detail(athlete_id=athlete_id, activity_id=activity_id)
 
 
-@mcp.tool()
 async def get_health_summary(athlete_id: int) -> dict[str, Any]:
     """Devuelve el resumen de salud/readiness de un atleta."""
     return await CLIENT.get_health_summary(athlete_id=athlete_id)
@@ -55,7 +79,6 @@ async def get_latest_weekly_analysis(athlete_id: int) -> dict[str, Any]:
     return await CLIENT.get_latest_weekly_analysis(athlete_id=athlete_id)
 
 
-@mcp.tool()
 async def get_week_metrics_json(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -76,13 +99,11 @@ async def get_training_status(athlete_id: int) -> dict[str, Any]:
     return await CLIENT.get_training_status(athlete_id=athlete_id)
 
 
-@mcp.tool()
 async def get_day_plan(athlete_id: int, date: str) -> dict[str, Any]:
     """Devuelve la planificacion exacta de una fecha: training_day, sesiones y actividad vinculada si existe."""
     return await CLIENT.get_day_plan(athlete_id=athlete_id, date=date)
 
 
-@mcp.tool()
 async def get_week_plan(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -116,7 +137,6 @@ async def get_my_training_status(access_code: str) -> dict[str, Any]:
     return await CLIENT.get_my_training_status(access_code=access_code)
 
 
-@mcp.tool()
 async def get_my_week_metrics_json(
     access_code: str,
     week_start_date: str | None = None,
@@ -236,7 +256,6 @@ async def get_my_week_load_summary(
     )
 
 
-@mcp.tool()
 async def get_remaining_week_plan(
     athlete_id: int,
     week_start_date: str | None = None,
@@ -269,7 +288,6 @@ async def get_my_previous_week_summary(access_code: str) -> dict[str, Any]:
     return await CLIENT.get_my_previous_week_summary(access_code=access_code)
 
 
-@mcp.tool()
 async def get_next_planned_session(
     athlete_id: int,
     reference_date: str | None = None,
@@ -292,7 +310,6 @@ async def get_my_next_planned_session(
     )
 
 
-@mcp.tool()
 async def get_today_remaining_sessions(athlete_id: int) -> dict[str, Any]:
     """Devuelve solo las sesiones pendientes de hoy, sin incluir canceladas ni completadas."""
     return await CLIENT.get_today_remaining_sessions(athlete_id=athlete_id)
@@ -314,7 +331,6 @@ async def get_week_adherence(
     )
 
 
-@mcp.tool()
 async def get_today_coach_briefing(
     athlete_id: int,
     reference_date: str | None = None,
@@ -392,7 +408,6 @@ async def get_my_training_load_trend(
     )
 
 
-@mcp.tool()
 async def get_fatigue_risk_summary(
     athlete_id: int,
     reference_date: str | None = None,
@@ -437,7 +452,6 @@ async def get_my_week_strategy_summary(
     )
 
 
-@mcp.tool()
 async def get_training_dashboard(
     athlete_id: int,
     reference_date: str | None = None,
@@ -460,7 +474,6 @@ async def get_my_training_dashboard(
     )
 
 
-@mcp.tool()
 async def get_plan_adjustment_suggestions(
     athlete_id: int,
     reference_date: str | None = None,
@@ -483,7 +496,6 @@ async def get_my_plan_adjustment_suggestions(
     )
 
 
-@mcp.tool()
 async def get_next_session_decision(
     athlete_id: int,
     reference_date: str | None = None,
@@ -540,7 +552,6 @@ async def get_my_optional_session_impact(
     )
 
 
-@mcp.tool()
 async def generate_plan_adjustment_import_text(
     athlete_id: int,
     adjustment_type: str,
@@ -627,7 +638,6 @@ async def get_my_session_analysis_payload(
     )
 
 
-@mcp.tool()
 async def get_session_metrics_json(
     athlete_id: int,
     planned_session_id: int | None = None,
@@ -643,7 +653,6 @@ async def get_session_metrics_json(
     )
 
 
-@mcp.tool()
 async def get_my_session_metrics_json(
     access_code: str,
     date: str | None = None,
@@ -689,22 +698,34 @@ async def get_my_session_block_analysis_payload(
     )
 
 
-@mcp.tool()
 async def preview_plan_import(import_text: str) -> dict[str, Any]:
     """Previsualiza una importacion semanal o individual de planificacion sin escribir en la base."""
     return await CLIENT.preview_plan_import(import_text=import_text)
 
 
-@mcp.tool()
 async def verify_plan_import(import_text: str) -> dict[str, Any]:
     """Verifica en modo read-only que un bloque importable haya quedado reflejado en la base sin aplicar cambios."""
     return await CLIENT.verify_plan_import(import_text=import_text)
 
 
-@mcp.tool()
 async def commit_plan_import(import_text: str, confirmation: str) -> dict[str, Any]:
     """Aplica una importacion de planificacion. Requiere confirmation='APLICAR' y token de escritura."""
     return await CLIENT.commit_plan_import(import_text=import_text, confirmation=confirmation)
+
+
+def _register_public_tools() -> None:
+    registered: set[str] = set()
+    for tool_name in PUBLIC_MCP_TOOL_NAMES:
+        tool_func = globals().get(tool_name)
+        if tool_func is None:
+            raise RuntimeError(f"Tool publica no encontrada: {tool_name}")
+        if tool_name in registered:
+            raise RuntimeError(f"Tool publica duplicada: {tool_name}")
+        mcp.tool()(tool_func)
+        registered.add(tool_name)
+
+
+_register_public_tools()
 
 
 def main() -> None:
