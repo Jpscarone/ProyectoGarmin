@@ -51,23 +51,27 @@ class PlanImportPayload:
     end_date: date | None = None
     mode: str | None = None
     sessions: list[PlanImportSession] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def parse_plan_import(import_text: str) -> PlanImportPayload:
     payload = PlanImportPayload()
     current_session: _SessionBuilder | None = None
     current_block: dict[str, str] | None = None
-    saw_end = False
+    saw_closure = False
+    week_open = False
+    significant_lines = _significant_lines(import_text or "")
 
-    for line_number, raw_line in enumerate((import_text or "").splitlines(), start=1):
-        line = raw_line.strip()
-        if not line:
-            continue
+    for index, (line_number, line) in enumerate(significant_lines):
         marker = line.upper()
+        next_marker = _next_marker(significant_lines, index)
         if marker == "WEEK":
             _finish_block(current_session, current_block, line_number)
             current_block = None
             current_session = _finish_session(payload, current_session, line_number)
+            if week_open:
+                raise PlanImportParseError(f"Linea {line_number}: WEEK anidado no soportado.")
+            week_open = True
             continue
         if marker == "SESSION":
             _finish_block(current_session, current_block, line_number)
@@ -81,11 +85,43 @@ def parse_plan_import(import_text: str) -> PlanImportPayload:
             _finish_block(current_session, current_block, line_number)
             current_block = {}
             continue
-        if marker == "END":
+        if marker == "END_BLOCK":
+            if current_block is None:
+                raise PlanImportParseError(f"Linea {line_number}: END_BLOCK sin BLOCK abierto.")
+            _finish_block(current_session, current_block, line_number)
+            current_block = None
+            saw_closure = True
+            continue
+        if marker == "END_SESSION":
+            if current_session is None:
+                raise PlanImportParseError(f"Linea {line_number}: END_SESSION sin SESSION abierta.")
             _finish_block(current_session, current_block, line_number)
             current_block = None
             current_session = _finish_session(payload, current_session, line_number)
-            saw_end = True
+            saw_closure = True
+            continue
+        if marker == "END_WEEK":
+            if not week_open:
+                raise PlanImportParseError(f"Linea {line_number}: END_WEEK sin WEEK abierto.")
+            if current_block is not None:
+                _finish_block(current_session, current_block, line_number)
+                current_block = None
+            current_session = _finish_session(payload, current_session, line_number)
+            week_open = False
+            saw_closure = True
+            continue
+        if marker == "END":
+            current_session, current_block, week_open, warning = _handle_ambiguous_end(
+                payload=payload,
+                current_session=current_session,
+                current_block=current_block,
+                week_open=week_open,
+                line_number=line_number,
+                next_marker=next_marker,
+            )
+            if warning:
+                payload.warnings.append(warning)
+            saw_closure = True
             continue
 
         key, value = _parse_key_value(line, line_number)
@@ -97,10 +133,11 @@ def parse_plan_import(import_text: str) -> PlanImportPayload:
             _apply_week_field(payload, key, value, line_number)
 
     if current_block is not None or current_session is not None:
-        _finish_block(current_session, current_block, len((import_text or "").splitlines()))
-        _finish_session(payload, current_session, len((import_text or "").splitlines()))
+        last_line_number = significant_lines[-1][0] if significant_lines else 1
+        _finish_block(current_session, current_block, last_line_number)
+        _finish_session(payload, current_session, last_line_number)
 
-    if not saw_end:
+    if not saw_closure:
         raise PlanImportParseError("El bloque debe finalizar con END.")
     if not payload.sessions:
         raise PlanImportParseError("El bloque no contiene sesiones.")
@@ -114,6 +151,59 @@ class _SessionBuilder:
     line_number: int
     fields: dict[str, str] = field(default_factory=dict)
     blocks: list[PlanImportBlock] = field(default_factory=list)
+
+
+def _significant_lines(import_text: str) -> list[tuple[int, str]]:
+    significant: list[tuple[int, str]] = []
+    for line_number, raw_line in enumerate(import_text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        significant.append((line_number, line))
+    return significant
+
+
+def _next_marker(lines: list[tuple[int, str]], index: int) -> str | None:
+    if index + 1 >= len(lines):
+        return None
+    return lines[index + 1][1].upper()
+
+
+def _handle_ambiguous_end(
+    *,
+    payload: PlanImportPayload,
+    current_session: _SessionBuilder | None,
+    current_block: dict[str, str] | None,
+    week_open: bool,
+    line_number: int,
+    next_marker: str | None,
+) -> tuple[_SessionBuilder | None, dict[str, str] | None, bool, str | None]:
+    if current_block is not None:
+        if next_marker in {"BLOCK", "END", "END_BLOCK", "END_SESSION"}:
+            _finish_block(current_session, current_block, line_number)
+            return (
+                current_session,
+                None,
+                week_open,
+                "Se interpreto END como cierre de BLOCK. Se recomienda usar END_BLOCK para evitar ambiguedad.",
+            )
+        if next_marker == "END_WEEK":
+            _finish_block(current_session, current_block, line_number)
+            return _finish_session(payload, current_session, line_number), None, week_open, None
+        if next_marker in {"SESSION", None}:
+            _finish_block(current_session, current_block, line_number)
+            return _finish_session(payload, current_session, line_number), None, week_open, None
+        raise PlanImportParseError(f"END ambiguo en linea {line_number}. Usa END_BLOCK o END_SESSION.")
+
+    if current_session is not None:
+        if next_marker in {"SESSION", "END", "END_WEEK", None}:
+            return _finish_session(payload, current_session, line_number), None, week_open, None
+        raise PlanImportParseError(f"END ambiguo en linea {line_number}. Usa END_BLOCK o END_SESSION.")
+
+    if week_open:
+        return None, None, False, None
+
+    raise PlanImportParseError(f"Linea {line_number}: END sin bloque abierto.")
 
 
 def _parse_key_value(line: str, line_number: int) -> tuple[str, str]:

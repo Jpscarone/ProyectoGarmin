@@ -182,6 +182,99 @@ END
 
         self.assertIsNone(payload.sessions[0].session_type)
 
+    def test_parser_supports_compact_multiple_blocks_without_warning(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Aerobico con final
+
+BLOCK
+VALUE: 15
+UNIT: min
+
+BLOCK
+VALUE: 35
+UNIT: min
+
+BLOCK
+VALUE: 10
+UNIT: min
+
+END
+"""
+        )
+
+        self.assertEqual(len(payload.sessions), 1)
+        self.assertEqual(len(payload.sessions[0].blocks), 3)
+        self.assertEqual(payload.warnings, [])
+
+    def test_parser_supports_explicit_end_per_block_with_warning(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Aerobico con final
+
+BLOCK
+VALUE: 15
+UNIT: min
+END
+BLOCK
+VALUE: 35
+UNIT: min
+END
+END
+"""
+        )
+
+        self.assertEqual(len(payload.sessions), 1)
+        self.assertEqual(len(payload.sessions[0].blocks), 2)
+        self.assertIn("Se interpreto END como cierre de BLOCK.", " ".join(payload.warnings))
+
+    def test_parser_supports_explicit_end_markers(self) -> None:
+        payload = parse_plan_import(
+            """WEEK
+ATHLETE_ID: 7
+
+SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Rodaje
+
+BLOCK
+VALUE: 30
+UNIT: min
+END_BLOCK
+END_SESSION
+END_WEEK
+"""
+        )
+
+        self.assertEqual(payload.athlete_id, 7)
+        self.assertEqual(len(payload.sessions), 1)
+        self.assertEqual(len(payload.sessions[0].blocks), 1)
+
+    def test_parser_rejects_ambiguous_end(self) -> None:
+        with self.assertRaisesRegex(ValueError, "END ambiguo en linea"):
+            parse_plan_import(
+                """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Rodaje
+
+BLOCK
+VALUE: 30
+UNIT: min
+END
+NOTES: inesperado
+"""
+            )
+
 
 class PlanImportServiceAndRouteTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -334,6 +427,31 @@ END
         self.assertTrue(result["valid"])
         self.assertIn("Se detecto opcional por notas", " ".join(result["warnings"]))
         self.assertEqual(payload.sessions[0].session_type, "optional")
+
+    def test_preview_surfaces_parser_warning_for_ambiguous_end_block_close(self) -> None:
+        payload = parse_plan_import(
+            """SESSION
+ACTION: create
+DATE: 2026-05-26
+SPORT: running
+NAME: Rodaje con bloques
+
+BLOCK
+VALUE: 15
+UNIT: min
+END
+BLOCK
+VALUE: 15
+UNIT: min
+END
+END
+"""
+        )
+
+        result = preview_plan_import(self.db, self.athlete.id, payload)
+
+        self.assertTrue(result["valid"])
+        self.assertIn("Se interpreto END como cierre de BLOCK.", " ".join(result["warnings"]))
 
     def test_commit_upsert_update_existing(self) -> None:
         existing = self._add_session(date(2026, 5, 26), "running", "Viejo")

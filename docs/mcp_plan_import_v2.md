@@ -120,7 +120,63 @@ REASON: fatiga alta
 END
 ```
 
-`WEEK`, `START_DATE`, `END_DATE` y `MODE` son opcionales. `ATHLETE_ID` debe incluirse para uso MCP multiatleta; `ATHLETE_NAME` es opcional y se usa como control humano. `END` es obligatorio.
+`WEEK`, `START_DATE`, `END_DATE` y `MODE` son opcionales. `ATHLETE_ID` debe incluirse para uso MCP multiatleta; `ATHLETE_NAME` es opcional y se usa como control humano. Debe existir al menos un cierre explicito con `END`, `END_SESSION` o `END_WEEK`.
+
+Marcadores soportados:
+
+- `END`: compatible con el formato viejo. Puede cerrar `BLOCK`, `SESSION` o `WEEK` segun contexto.
+- `END_BLOCK`: cierra un `BLOCK` de forma explicita.
+- `END_SESSION`: cierra una `SESSION` de forma explicita.
+- `END_WEEK`: cierra `WEEK` de forma explicita.
+
+Formatos validos:
+
+Formato compacto historico:
+
+```text
+SESSION
+...
+BLOCK
+...
+BLOCK
+...
+END
+```
+
+Formato explicito/intuitivo:
+
+```text
+SESSION
+...
+BLOCK
+...
+END
+BLOCK
+...
+END
+END
+```
+
+Formato sin ambiguedad recomendado:
+
+```text
+SESSION
+...
+BLOCK
+...
+END_BLOCK
+BLOCK
+...
+END_BLOCK
+END_SESSION
+END_WEEK
+```
+
+Si `END` se interpreta solo como cierre de `BLOCK`, preview y verify devuelven el warning:
+
+```text
+Se interpreto END como cierre de BLOCK. Se recomienda usar END_BLOCK para evitar ambiguedad.
+```
 
 `SESSION_TYPE` soporta:
 

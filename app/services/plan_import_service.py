@@ -83,7 +83,7 @@ def preview_plan_import(db: Session, athlete_id: int, payload: PlanImportPayload
 
 
 def verify_plan_import(db: Session, athlete_id: int, payload: PlanImportPayload) -> dict[str, Any]:
-    warnings: list[str] = []
+    warnings: list[str] = list(payload.warnings)
     expected_sessions = [item for item in payload.sessions]
     for session_in in expected_sessions:
         warnings.extend(_normalize_imported_session_type(session_in))
@@ -202,7 +202,7 @@ def commit_plan_import(db: Session, athlete_id: int, payload: PlanImportPayload)
 def _build_preview(db: Session, athlete_id: int, payload: PlanImportPayload) -> PlanImportPreview:
     operations: list[PlanImportPreviewItem] = []
     errors: list[str] = []
-    warnings: list[str] = []
+    warnings: list[str] = list(payload.warnings)
     seen_create_keys: set[tuple[date, str]] = set()
 
     for index, session_in in enumerate(payload.sessions, start=1):
